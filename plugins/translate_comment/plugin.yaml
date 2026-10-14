@@ -1,0 +1,12 @@
+id: translate_comment
+name: 代码注释翻译
+version: 1.0.0
+description: 调用 DeepSeek 翻译 Markdown 代码块中的注释。
+author: QQ Bot Manager
+permissions:
+  - message:read
+  - message:send
+  - network:deepseek
+config:
+  api_key: ''
+  target_lang: 中文

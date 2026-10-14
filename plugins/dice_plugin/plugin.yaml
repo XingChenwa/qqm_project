@@ -1,0 +1,8 @@
+id: dice_plugin
+name: 骰子插件
+version: 1.0.0
+description: 支持 /dice、/roll 和 2d6 这类骰子表达式。
+author: QQ Bot Manager
+permissions:
+  - message:read
+  - message:send

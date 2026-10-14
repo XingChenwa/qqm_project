@@ -1,0 +1,12 @@
+id: weather_plugin
+name: 天气与 IP 查询
+version: 1.1.0
+description: 使用高德 API 查询实况天气和 IP 归属地，支持天气 城市、查询天气 城市、/天气 城市、查ip地址 IPv4、/ip IPv4。
+author: QQ 机器人管理器
+config:
+  amap_key: ''
+  default_city: ''
+permissions:
+  - message:read
+  - message:send
+  - network:amap

@@ -1,0 +1,234 @@
+import 'dart:async';
+
+import 'package:qq_bot_manager/models/config.dart';
+import 'package:qq_bot_manager/models/message.dart';
+import 'package:qq_bot_manager/models/plugin.dart';
+import 'package:qq_bot_manager/models/outgoing_message.dart';
+import 'package:qq_bot_manager/services/api_service.dart';
+import 'package:qq_bot_manager/services/storage_service.dart';
+import 'package:qq_bot_manager/services/websocket_service.dart';
+
+class MemoryStorage extends StorageService {
+  BotConfig config;
+  final storedMessages = <String, MessageModel>{};
+  final storedSessions = <String, ChatSession>{};
+  final storedPlugins = <String, PluginInfo>{};
+
+  MemoryStorage({BotConfig? config}) : config = config ?? BotConfig();
+
+  @override
+  BotConfig getBotConfig() => BotConfig.fromMap(config.toMap());
+
+  @override
+  Future<void> saveBotConfig(BotConfig config) async =>
+      this.config = BotConfig.fromMap(config.toMap());
+
+  @override
+  List<MessageModel> getMessages(String sessionId) =>
+      storedMessages.values.where((m) => m.sessionId == sessionId).toList();
+
+  @override
+  MessageModel? getMessageById(String messageId) => storedMessages[messageId];
+
+  @override
+  Future<void> saveMessage(MessageModel message) async =>
+      storedMessages[message.id] = message;
+
+  @override
+  Future<void> updateMessage(MessageModel message) => saveMessage(message);
+
+  @override
+  List<ChatSession> getSessions() => storedSessions.values.toList();
+
+  @override
+  Future<void> saveSession(ChatSession session) async =>
+      storedSessions[session.id] = session;
+
+  @override
+  Future<void> updateSessionLastMessage(
+    String sessionId,
+    String lastMessage,
+    DateTime time, {
+    bool incrementUnread = true,
+  }) async {
+    final previous = storedSessions[sessionId];
+    if (previous == null) return;
+    storedSessions[sessionId] = ChatSession(
+      id: previous.id,
+      name: previous.name,
+      avatarUrl: previous.avatarUrl,
+      sessionType: previous.sessionType,
+      lastMessageTime: time,
+      lastMessage: lastMessage,
+      unreadCount: previous.unreadCount + (incrementUnread ? 1 : 0),
+      isPinned: previous.isPinned,
+    );
+  }
+
+  @override
+  Future<void> markSessionRead(String sessionId) async {}
+
+  @override
+  List<PluginInfo> getPluginConfigs() => storedPlugins.values.toList();
+
+  @override
+  Future<void> savePluginConfig(PluginInfo plugin) async =>
+      storedPlugins[plugin.id] = plugin;
+
+  @override
+  List<EmojiItem> getEmojis({String? category}) => [];
+
+  @override
+  bool getThemeMode() => false;
+}
+
+BotConfig validConfig() => BotConfig(
+  appId: 'test-app',
+  clientSecret: 'test-secret',
+  accessToken: 'valid-token',
+  tokenExpiresAt: DateTime.now().millisecondsSinceEpoch ~/ 1000 + 3600,
+);
+
+class RecordingApi extends ApiService {
+  final calls = <Map<String, dynamic>>[];
+  final interactionAcks = <String>[];
+  int tokenRequests = 0;
+  bool failSend = false;
+  int? markdownErrorCode;
+
+  @override
+  Future<ApiResult<AccessTokenResult>> getAccessToken({
+    required String appId,
+    required String clientSecret,
+  }) async {
+    tokenRequests++;
+    await Future<void>.delayed(Duration.zero);
+    return ApiResult.success(
+      AccessTokenResult(accessToken: 'refreshed-token', expiresIn: 7200),
+    );
+  }
+
+  ApiResult<String> record(Map<String, dynamic> data) {
+    calls.add(data);
+    if (data['type'] == 2 && markdownErrorCode != null) {
+      return ApiResult.failure('Markdown 被平台拒绝', errorCode: markdownErrorCode);
+    }
+    return failSend
+        ? ApiResult.failure('测试发送失败')
+        : ApiResult.success(
+            'sent-${calls.length}',
+            metadata: {
+              'ext_info': {'ref_idx': 'REFIDX_sent-${calls.length}'},
+            },
+          );
+  }
+
+  @override
+  Future<ApiResult<String>> sendConfiguredMessage({
+    required String baseUrl,
+    required String accessToken,
+    required String targetId,
+    required OutgoingMessage message,
+    bool isGroup = false,
+    String? msgId,
+    String? eventId,
+    int? msgSeq,
+    String? referenceId,
+  }) async => record({
+    'token': accessToken,
+    'target': targetId,
+    'content': message.content,
+    'type': message.type,
+    'isGroup': isGroup,
+    'msgId': msgId,
+    'eventId': eventId,
+    'msgSeq': msgSeq,
+    'referenceId': referenceId,
+    'body': message.toPayload(
+      messageId: msgId,
+      eventId: eventId,
+      sequence: msgSeq,
+      referenceId: referenceId,
+    ),
+  });
+
+  @override
+  Future<ApiResult<bool>> acknowledgeInteraction({
+    required String baseUrl,
+    required String accessToken,
+    required String interactionId,
+    int code = 0,
+  }) async {
+    interactionAcks.add(interactionId);
+    return ApiResult.success(true);
+  }
+
+  @override
+  Future<ApiResult<String>> sendQQMessage({
+    required String baseUrl,
+    required String accessToken,
+    required String targetId,
+    required String content,
+    bool isGroup = false,
+    String? msgId,
+    int? msgSeq,
+  }) async => record({
+    'token': accessToken,
+    'target': targetId,
+    'content': content,
+    'isGroup': isGroup,
+    'msgId': msgId,
+    'msgSeq': msgSeq,
+    'type': 0,
+  });
+
+  @override
+  Future<ApiResult<String>> sendQQMarkdown({
+    required String baseUrl,
+    required String accessToken,
+    required String targetId,
+    String? markdownContent,
+    String? templateId,
+    List<Map<String, String>>? templateParams,
+    bool isGroup = false,
+    String? msgId,
+    int? msgSeq,
+  }) async => record({
+    'token': accessToken,
+    'target': targetId,
+    'content': markdownContent,
+    'isGroup': isGroup,
+    'msgId': msgId,
+    'msgSeq': msgSeq,
+    'type': 2,
+  });
+}
+
+class TestGateway extends WebSocketService {
+  final events = StreamController<Map<String, dynamic>>.broadcast();
+
+  @override
+  Stream<Map<String, dynamic>> get messageStream => events.stream;
+
+  @override
+  void dispose() {
+    events.close();
+    super.dispose();
+  }
+}
+
+MessageModel incoming(
+  String id, {
+  String session = 'group-1',
+  String content = '你好',
+  DateTime? timestamp,
+}) => MessageModel(
+  id: id,
+  sessionId: session,
+  senderId: 'member-1',
+  senderName: '测试用户',
+  content: content,
+  messageType: 0,
+  timestamp: timestamp ?? DateTime.now(),
+  extra: {'isGroup': true},
+);

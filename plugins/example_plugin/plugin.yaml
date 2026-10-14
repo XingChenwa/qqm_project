@@ -1,0 +1,8 @@
+id: example_plugin
+name: 基础助手
+version: 1.0.0
+description: 提供问候、帮助和 ping 测试回复。
+author: QQ Bot Manager
+permissions:
+  - message:read
+  - message:send
