@@ -32,6 +32,13 @@ migrate_working_dir/
 .pub/
 /build/
 /coverage/
+/dist/
+*.ipa
+*.apk
+*.p12
+*.pfx
+*.mobileprovision
+*.p8
 
 # Symbolication related
 app.*.symbols

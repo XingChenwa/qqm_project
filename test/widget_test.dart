@@ -17,7 +17,10 @@ class CodeReplyPlugins extends PluginManager {
   CodeReplyPlugins(super.storage);
 
   @override
-  Future<List<PluginResponse>> processMessage(PluginMessage message) async => [
+  Future<List<PluginResponse>> processMessage(
+    PluginMessage message, {
+    String? onlyPluginId,
+  }) async => [
     const PluginResponse(
       pluginId: 'test',
       pluginName: '代码测试',

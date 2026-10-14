@@ -41,6 +41,7 @@ class _MainScreenState extends State<MainScreen> {
   MessageModel? _replyToMessage;
   int _toolIndex = 0;
   int _sideIndex = 0;
+  bool _mobileChatOpen = false;
   bool _startupConnectTried = false;
   String? _lastRenderedSessionId;
   int _lastRenderedMessageCount = 0;
@@ -109,6 +110,9 @@ class _MainScreenState extends State<MainScreen> {
 
   Future<void> _processWithPlugins(MessageModel message) async {
     if (!context.read<BotClient>().shouldAutoRespondTo(message)) return;
+    final weatherOnly =
+        message.isFullGroupMessage &&
+        !context.read<BotClient>().config.autoReplyToAllGroupMessages;
     final rawContent =
         message.extra?['rawContent']?.toString() ?? message.content;
     final content = message.extra?['eventType'] == 'GROUP_AT_MESSAGE_CREATE'
@@ -127,6 +131,7 @@ class _MainScreenState extends State<MainScreen> {
 
     final responses = await context.read<PluginManager>().processMessage(
       pluginMessage,
+      onlyPluginId: weatherOnly ? 'weather_plugin' : null,
     );
     if (!mounted) return;
 
@@ -137,7 +142,7 @@ class _MainScreenState extends State<MainScreen> {
         '[${_clockText(DateTime.now())}] 插件 ${response.pluginName} ${sent ? '回复已发送到 QQ' : '回复发送失败: ${bot.lastSendError}'}',
       );
     }
-    if (responses.isEmpty && mounted) {
+    if (responses.isEmpty && mounted && !weatherOnly) {
       final reply = MessageHandler(
         context.read<StorageService>(),
       ).processMessage(message.copyWith(content: content));
@@ -192,6 +197,8 @@ class _MainScreenState extends State<MainScreen> {
   Widget build(BuildContext context) {
     final bot = context.watch<BotClient>();
     final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    if (MediaQuery.sizeOf(context).width < 700) return _mobileScaffold(bot);
 
     return Scaffold(
       key: _scaffoldKey,
@@ -299,14 +306,7 @@ class _MainScreenState extends State<MainScreen> {
                     6,
                     Icons.settings_rounded,
                     '设置',
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => const SettingsScreen(),
-                        ),
-                      );
-                    },
+                    onTap: _openSettings,
                   ),
                 ],
               ),
@@ -425,6 +425,7 @@ class _MainScreenState extends State<MainScreen> {
   }
 
   void _navigateTo(int index) {
+    if (_scaffoldKey.currentState?.isDrawerOpen == true) Navigator.pop(context);
     setState(() {
       _sideIndex = index;
       if (index == 1) _toolIndex = 3;
@@ -432,9 +433,100 @@ class _MainScreenState extends State<MainScreen> {
       if (index == 4) _toolIndex = 2;
       if (index == 5) _toolIndex = 4;
     });
-    if (index != 0 && index != 2 && MediaQuery.sizeOf(context).width < 1188) {
+    if (index != 0 &&
+        index != 2 &&
+        MediaQuery.sizeOf(context).width >= 700 &&
+        MediaQuery.sizeOf(context).width < 1188) {
       _scaffoldKey.currentState?.openEndDrawer();
     }
+  }
+
+  void _openSettings() {
+    if (_scaffoldKey.currentState?.isDrawerOpen == true) Navigator.pop(context);
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const SettingsScreen()),
+    );
+  }
+
+  Widget _mobileScaffold(BotClient bot) {
+    final chatting =
+        (_sideIndex == 0 || _sideIndex == 2) &&
+        _mobileChatOpen &&
+        _selectedSession != null;
+    final title = chatting
+        ? _selectedSession!.name
+        : switch (_sideIndex) {
+            1 => '机器人',
+            3 => '插件',
+            4 => '日志',
+            5 => '任务',
+            _ => 'QQ 机器人管理器',
+          };
+    return PopScope(
+      canPop: !chatting,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop && chatting) setState(() => _mobileChatOpen = false);
+      },
+      child: Scaffold(
+        key: _scaffoldKey,
+        drawer: Drawer(child: SafeArea(child: _navigationRail(bot))),
+        appBar: AppBar(
+          automaticallyImplyLeading: false,
+          title: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
+          leading: chatting
+              ? IconButton(
+                  tooltip: '返回会话列表',
+                  onPressed: () => setState(() => _mobileChatOpen = false),
+                  icon: const Icon(Icons.arrow_back),
+                )
+              : null,
+          actions: [
+            IconButton(
+              tooltip: bot.isConnected ? '断开机器人' : '连接机器人',
+              onPressed: bot.isConnecting
+                  ? null
+                  : () {
+                      if (bot.isConnected) {
+                        bot.disconnect();
+                      } else {
+                        bot.connect();
+                      }
+                    },
+              icon: Icon(
+                bot.isConnected ? Icons.link_off : Icons.link,
+                color: bot.isConnected ? AppTheme.qqGreen : null,
+              ),
+            ),
+            IconButton(
+              tooltip: '打开功能菜单',
+              onPressed: () => _scaffoldKey.currentState?.openDrawer(),
+              icon: const Icon(Icons.menu),
+            ),
+          ],
+        ),
+        body: SafeArea(
+          child: Column(
+            children: [
+              if (bot.isConnecting) _progressBar(bot),
+              if (bot.connectionError.isNotEmpty) _errorBanner(bot),
+              Expanded(
+                child: switch (_sideIndex) {
+                  1 => _infoPanel(bot),
+                  3 => const PluginPanel(),
+                  4 => _logPanel(),
+                  5 => _tasksPanel(),
+                  _ =>
+                    chatting
+                        ? _conversation(bot)
+                        : _sessionPanel(bot, width: double.infinity),
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   Widget _systemStatusCard(BotClient bot) {
@@ -857,6 +949,7 @@ class _MainScreenState extends State<MainScreen> {
         _selectedSession = session;
         _replyToMessage = null;
         _sessionTypeFilter = null;
+        _mobileChatOpen = true;
       });
     }
   }
@@ -878,6 +971,7 @@ class _MainScreenState extends State<MainScreen> {
           onTap: () {
             setState(() {
               _selectedSession = session;
+              _mobileChatOpen = true;
               _replyToMessage = null;
               _lastRenderedSessionId = null;
               _lastRenderedMessageCount = 0;
@@ -967,6 +1061,7 @@ class _MainScreenState extends State<MainScreen> {
   }
 
   Widget _conversationHeader(ChatSession? session) {
+    final compact = MediaQuery.sizeOf(context).width < 700;
     return Container(
       height: 74,
       padding: const EdgeInsets.symmetric(horizontal: 18),
@@ -987,6 +1082,8 @@ class _MainScreenState extends State<MainScreen> {
               children: [
                 Text(
                   session?.name ?? '聊天会话',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.w900,
@@ -997,6 +1094,8 @@ class _MainScreenState extends State<MainScreen> {
                   session == null
                       ? '选择会话开始聊天'
                       : '${session.sessionType == 1 ? "群聊" : "单聊"} · ${session.id}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     fontSize: 12,
                     color: Theme.of(context).hintColor,
@@ -1005,21 +1104,23 @@ class _MainScreenState extends State<MainScreen> {
               ],
             ),
           ),
-          IconButton(
-            onPressed: null,
-            icon: const Icon(Icons.search_rounded),
-            tooltip: '消息搜索（暂未实现）',
-          ),
+          if (!compact)
+            IconButton(
+              onPressed: null,
+              icon: const Icon(Icons.search_rounded),
+              tooltip: '消息搜索（暂未实现）',
+            ),
           IconButton(
             onPressed: () => _navigateTo(1),
             icon: const Icon(Icons.people_outline_rounded),
             tooltip: '会话信息',
           ),
-          IconButton(
-            onPressed: null,
-            icon: const Icon(Icons.more_vert_rounded),
-            tooltip: '更多功能（暂未实现）',
-          ),
+          if (!compact)
+            IconButton(
+              onPressed: null,
+              icon: const Icon(Icons.more_vert_rounded),
+              tooltip: '更多功能（暂未实现）',
+            ),
         ],
       ),
     );

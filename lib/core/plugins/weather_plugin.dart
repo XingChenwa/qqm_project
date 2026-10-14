@@ -1,29 +1,12 @@
 import '../../models/plugin.dart';
 import '../../services/amap_service.dart';
+import '../../utils/weather_commands.dart';
 
 class WeatherPlugin extends BotPlugin {
   final AmapService _amap;
   WeatherPlugin(super.info, {AmapService? amapService})
     : _amap = amapService ?? AmapService();
 
-  static const _weatherCommands = {
-    'weather',
-    'tianqi',
-    '天气',
-    '查询天气',
-    '天气查询',
-    '查天气',
-  };
-  static const _ipCommands = {
-    'ip',
-    '查ip',
-    '查询ip',
-    '查ip地址',
-    '查询ip地址',
-    'ip地址',
-    'ip查询',
-    'ip地址查询',
-  };
   static const _weatherUsage =
       '用法：天气 北京 / 查询天气 上海 / /天气 深圳 / /weather 110105。\n只发送“查询天气”或“天气”时使用插件配置中的默认城市；未配置时请带上城市。';
   static const _ipUsage =
@@ -40,26 +23,19 @@ class WeatherPlugin extends BotPlugin {
 
   @override
   Future<String?> onMessage(PluginMessage message) async {
-    // 只匹配完整指令，不截取普通聊天正文中的“天气”或“IP”。
-    final match = RegExp(
-      r'^(查询天气|天气查询|查天气|天气|weather|tianqi|查询ip地址|查ip地址|ip地址查询|查询ip|查ip|ip查询|ip地址|ip)(?:[ \t:：]+([^\r\n]*))?$',
-      caseSensitive: false,
-    ).firstMatch(message.content.trim());
-    if (match == null) return null;
-    return onCommand(match.group(1)!, [
-      if ((match.group(2) ?? '').trim().isNotEmpty) match.group(2)!.trim(),
-    ]);
+    final query = WeatherQuery.parse(message.content);
+    return query == null ? null : _answer(query);
   }
 
   @override
   Future<String?> onCommand(String command, List<String> args) async {
-    final normalized = command.trim().toLowerCase();
-    if (!_weatherCommands.contains(normalized) &&
-        !_ipCommands.contains(normalized)) {
-      return null;
-    }
-    final argument = args.join(' ').trim();
-    final weather = _weatherCommands.contains(normalized);
+    final query = WeatherQuery.fromCommand(command, args.join(' '));
+    return query == null ? null : _answer(query);
+  }
+
+  Future<String?> _answer(WeatherQuery query) async {
+    final argument = query.argument;
+    final weather = query.isWeather;
     final city = argument.isNotEmpty
         ? argument
         : (info.config['default_city']?.toString().trim() ?? '');

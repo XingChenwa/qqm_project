@@ -1,4 +1,6 @@
 import 'dart:io';
+import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
@@ -11,6 +13,7 @@ import '../../utils/constants.dart';
 import '../../models/config.dart';
 import '../../services/storage_service.dart';
 import '../themes/app_theme.dart';
+import '../../utils/platforms.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -170,6 +173,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _exportConfig() async {
     final json = context.read<StorageService>().exportConfig();
+    if (isMobilePlatform) {
+      try {
+        final path = await FilePicker.saveFile(
+          dialogTitle: '导出机器人配置',
+          fileName:
+              'qqbot_config_${DateTime.now().millisecondsSinceEpoch}.json',
+          type: FileType.custom,
+          allowedExtensions: ['json'],
+          bytes: Uint8List.fromList(utf8.encode(json)),
+        );
+        if (!mounted || path == null) return;
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('配置已导出；文件包含密钥，请妥善保管')));
+      } catch (_) {
+        if (mounted) _showError('导出失败，请选择可写入的位置');
+      }
+      return;
+    }
     final dir = await FilePicker.getDirectoryPath(dialogTitle: '选择导出目录');
     if (dir == null) return;
 
@@ -214,24 +236,27 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   Widget build(BuildContext context) {
     final bot = context.watch<BotClient>();
+    final compact = MediaQuery.sizeOf(context).width < 700;
     return Scaffold(
-      body: Row(
-        children: [
-          _sideMenu(bot),
-          Expanded(
-            child: Column(
-              children: [
-                _topBar(bot),
-                Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: _settingsShell(bot),
+      body: SafeArea(
+        child: Row(
+          children: [
+            if (!compact) _sideMenu(bot),
+            Expanded(
+              child: Column(
+                children: [
+                  _topBar(bot),
+                  Expanded(
+                    child: Padding(
+                      padding: EdgeInsets.all(compact ? 8 : 16),
+                      child: _settingsShell(bot),
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -658,7 +683,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           contentPadding: EdgeInsets.zero,
           title: const Text('普通群消息也触发插件和自动回复'),
           subtitle: const Text(
-            '默认关闭：未 @ 机器人的全量事件只展示。开启后执行已启用的插件和回复规则，始终跳过机器人发送的消息。',
+            '默认关闭：全量消息仅处理明确的天气/IP 指令，其他普通聊天只展示。开启后额外执行所有已启用插件和回复规则。',
           ),
           value: _autoReplyToAllGroupMessages,
           onChanged: (value) =>
@@ -892,6 +917,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
     TextEditingController controller, {
     bool obscure = false,
   }) {
+    if (MediaQuery.sizeOf(context).width < 700) {
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 12),
+        child: TextField(
+          controller: controller,
+          obscureText: obscure,
+          decoration: InputDecoration(labelText: label),
+        ),
+      );
+    }
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: Row(

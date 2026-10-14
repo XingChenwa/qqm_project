@@ -1,0 +1,75 @@
+name: 移动端安装包
+
+on:
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: 选择构建平台
+        required: true
+        default: all
+        type: choice
+        options: [all, android, ios]
+
+permissions:
+  contents: read
+
+env:
+  FLUTTER_VERSION: '3.44.3'
+
+jobs:
+  android:
+    if: inputs.platform == 'all' || inputs.platform == 'android'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: 安装固定版本 Flutter
+        shell: bash
+        run: |
+          git clone --depth 1 --branch "$FLUTTER_VERSION" https://github.com/flutter/flutter.git "$RUNNER_TEMP/flutter"
+          printf '%s/bin\n' "$RUNNER_TEMP/flutter" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/flutter/bin/flutter" --version
+      - name: 使用 JDK 17
+        run: flutter config --jdk-dir "$JAVA_HOME_17_X64"
+      - run: flutter pub get
+      - run: flutter analyze --no-pub
+      - run: flutter test --no-pub
+      - name: 构建安卓测试 APK（debug 签名）
+        run: flutter build apk --debug --no-pub
+      - name: 保存 APK
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: android-debug-apk
+          path: build/app/outputs/flutter-apk/app-debug.apk
+          if-no-files-found: error
+          retention-days: 7
+
+  ios:
+    if: inputs.platform == 'all' || inputs.platform == 'ios'
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: 安装固定版本 Flutter
+        shell: bash
+        run: |
+          git clone --depth 1 --branch "$FLUTTER_VERSION" https://github.com/flutter/flutter.git "$RUNNER_TEMP/flutter"
+          printf '%s/bin\n' "$RUNNER_TEMP/flutter" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/flutter/bin/flutter" --version
+      - run: xcodebuild -version
+      - run: flutter pub get
+      - run: flutter analyze --no-pub
+      - run: flutter test --no-pub
+      - name: 编译 iPhone 真机应用并打包未签名 IPA
+        run: bash scripts/build_unsigned_ipa.sh
+      - name: 保存未签名 IPA（安装前必须重新签名）
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ios-unsigned-ipa
+          path: dist/qq_bot_manager-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 7

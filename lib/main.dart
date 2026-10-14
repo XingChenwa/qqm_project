@@ -9,6 +9,7 @@ import 'models/config.dart';
 import 'services/storage_service.dart';
 import 'core/bot_client.dart';
 import 'core/plugin_manager.dart';
+import 'utils/platforms.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -33,17 +34,19 @@ void main() async {
   final botClient = BotClient(storageService);
 
   // Configure window for desktop
-  await windowManager.ensureInitialized();
-  final windowOptions = WindowOptions(
-    size: const Size(1280, 800),
-    minimumSize: const Size(960, 600),
-    title: 'QQ 机器人管理器',
-    center: true,
-  );
-  await windowManager.waitUntilReadyToShow(windowOptions, () async {
-    await windowManager.show();
-    await windowManager.focus();
-  });
+  if (isDesktopPlatform) {
+    await windowManager.ensureInitialized();
+    final windowOptions = WindowOptions(
+      size: const Size(1280, 800),
+      minimumSize: const Size(960, 600),
+      title: 'QQ 机器人管理器',
+      center: true,
+    );
+    await windowManager.waitUntilReadyToShow(windowOptions, () async {
+      await windowManager.show();
+      await windowManager.focus();
+    });
+  }
 
   runApp(
     MultiProvider(

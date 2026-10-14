@@ -140,11 +140,18 @@ class PluginManager extends ChangeNotifier {
     return true;
   }
 
-  Future<List<PluginResponse>> processMessage(PluginMessage message) async {
+  Future<List<PluginResponse>> processMessage(
+    PluginMessage message, {
+    String? onlyPluginId,
+  }) async {
     final responses = <PluginResponse>[];
     final command = parseSlashCommand(message.content);
 
-    for (final plugin in _plugins.where((p) => p.info.isEnabled)) {
+    for (final plugin in _plugins.where(
+      (p) =>
+          p.info.isEnabled &&
+          (onlyPluginId == null || p.info.id == onlyPluginId),
+    )) {
       try {
         final result =
             await (command == null

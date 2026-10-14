@@ -201,8 +201,9 @@ class _MessageSettingsDialogState extends State<MessageSettingsDialog> {
                   ],
                 ),
               ),
-              const TabBar(
-                tabs: [
+              TabBar(
+                isScrollable: MediaQuery.sizeOf(context).width < 700,
+                tabs: const [
                   Tab(text: '消息类型'),
                   Tab(text: '按钮键盘'),
                   Tab(text: '回复与引用'),
@@ -291,6 +292,7 @@ class _MessageSettingsDialogState extends State<MessageSettingsDialog> {
     children: [
       DropdownButtonFormField<int>(
         key: ValueKey('message-type-$_type'),
+        isExpanded: true,
         initialValue: _type,
         decoration: const InputDecoration(labelText: '消息类型'),
         items: const [
@@ -318,6 +320,7 @@ class _MessageSettingsDialogState extends State<MessageSettingsDialog> {
       if (_type == 7) ...[
         DropdownButtonFormField<int>(
           initialValue: _mediaType,
+          isExpanded: true,
           decoration: const InputDecoration(labelText: '媒体类型'),
           items: const [
             DropdownMenuItem(value: 1, child: Text('图片')),
@@ -359,6 +362,7 @@ class _MessageSettingsDialogState extends State<MessageSettingsDialog> {
     children: [
       DropdownButtonFormField<int>(
         key: ValueKey('keyboard-mode-$_keyboardMode'),
+        isExpanded: true,
         initialValue: _keyboardMode,
         decoration: const InputDecoration(labelText: '按钮键盘'),
         items: const [
@@ -456,6 +460,7 @@ class _MessageSettingsDialogState extends State<MessageSettingsDialog> {
     children: [
       DropdownButtonFormField<ReplyMode>(
         initialValue: _replyMode,
+        isExpanded: true,
         decoration: const InputDecoration(labelText: '发送方式'),
         items: const [
           DropdownMenuItem(
@@ -737,6 +742,7 @@ class _ButtonEditorState extends State<_ButtonEditor> {
     padding: const EdgeInsets.only(bottom: 12),
     child: DropdownButtonFormField<int>(
       initialValue: value,
+      isExpanded: true,
       decoration: InputDecoration(labelText: label),
       items: [
         for (final e in values.entries)

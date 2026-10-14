@@ -8,6 +8,7 @@ import '../services/api_service.dart';
 import '../services/websocket_service.dart';
 import '../services/storage_service.dart';
 import '../utils/helpers.dart';
+import '../utils/weather_commands.dart';
 
 enum ConnectStep { idle, gettingToken, gettingGateway, connecting, done }
 
@@ -98,7 +99,12 @@ class BotClient extends ChangeNotifier {
   bool shouldAutoRespondTo(MessageModel message) =>
       !message.isBotAuthor &&
       !message.isRecalled &&
-      (!message.isFullGroupMessage || _config.autoReplyToAllGroupMessages);
+      (!message.isFullGroupMessage ||
+          _config.autoReplyToAllGroupMessages ||
+          WeatherQuery.parse(
+                message.extra?['rawContent']?.toString() ?? message.content,
+              ) !=
+              null);
   String get botDisplayName => _botName.isNotEmpty ? _botName : '未获取机器人资料';
 
   /// Get a valid access token, refreshing if expired.

@@ -149,9 +149,7 @@ class MessageBubble extends StatelessWidget {
     if (message.isRecalled) return _textBubble(context, isBot);
     if (message.hasReceivedPayload && message.markdownContent == null) {
       return Container(
-        constraints: BoxConstraints(
-          maxWidth: MediaQuery.sizeOf(context).width * 0.52,
-        ),
+        constraints: BoxConstraints(maxWidth: _maxWidth(context, 0.52)),
         padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 10),
         decoration: _bubbleDecoration(context, isBot),
         child: Material(
@@ -201,9 +199,7 @@ class MessageBubble extends StatelessWidget {
     final content = keyboard['content'];
     final rows = content is Map ? content['rows'] : null;
     return Container(
-      constraints: BoxConstraints(
-        maxWidth: MediaQuery.sizeOf(context).width * 0.52,
-      ),
+      constraints: BoxConstraints(maxWidth: _maxWidth(context, 0.52)),
       padding: const EdgeInsets.only(top: 6),
       child: Tooltip(
         message: '按钮在 QQ 消息中可操作，此处显示发送结果',
@@ -269,9 +265,7 @@ class MessageBubble extends StatelessWidget {
           );
 
     return Container(
-      constraints: BoxConstraints(
-        maxWidth: MediaQuery.of(context).size.width * 0.46,
-      ),
+      constraints: BoxConstraints(maxWidth: _maxWidth(context, 0.46)),
       padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 10),
       decoration: _bubbleDecoration(context, isBot),
       child: SelectableText(
@@ -289,9 +283,7 @@ class MessageBubble extends StatelessWidget {
   Widget _markdownBubble(BuildContext context, bool isBot) {
     final content = message.markdownContent ?? message.content;
     return Container(
-      constraints: BoxConstraints(
-        maxWidth: MediaQuery.of(context).size.width * 0.52,
-      ),
+      constraints: BoxConstraints(maxWidth: _maxWidth(context, 0.52)),
       padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 10),
       decoration: _bubbleDecoration(context, isBot),
       child: MarkdownBody(
@@ -325,7 +317,7 @@ class MessageBubble extends StatelessWidget {
     final url = message.imageUrl ?? message.content;
     return Container(
       constraints: BoxConstraints(
-        maxWidth: MediaQuery.of(context).size.width * 0.34,
+        maxWidth: _maxWidth(context, 0.34),
         maxHeight: 300,
       ),
       clipBehavior: Clip.antiAlias,
@@ -445,6 +437,11 @@ class MessageBubble extends StatelessWidget {
     final text = level.trim();
     if (text.toUpperCase().startsWith('LV')) return text;
     return 'LV$text';
+  }
+
+  double _maxWidth(BuildContext context, double fraction) {
+    final width = MediaQuery.sizeOf(context).width;
+    return width < 700 ? width - 96 : width * fraction;
   }
 
   String _roleLabel(String role) {
