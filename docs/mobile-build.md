@@ -8,7 +8,7 @@
 
 - Android：模板最低 Android 7.0（API 24），当前提供 debug 签名测试 APK。正式分发需配置自己的签名密钥。
 - 安卓构建固定使用 AGP 8.13.2、Gradle 8.13、Kotlin 2.3.20 和 JDK 17，以兼容现有 `file_picker 11.x`。不要单独升级 AGP 9：该插件会跳过传统 Kotlin 插件，而当前 Flutter 工程禁用内置 Kotlin，会导致 `FilePickerPlugin` 未编译。
-- Android、iOS 和 macOS 包名均为 `cn.uuze.botmanager`，使用 `assets/branding/logo.png` 生成的应用图标。当前源码版本为 1.3.3+14；现有下载产物不会因改源码自动更新。
+- Android、iOS 和 macOS 包名均为 `cn.uuze.botmanager`，使用 `assets/branding/logo.png` 生成的应用图标。当前源码版本为 1.3.4+15；现有下载产物不会因改源码自动更新。
 - iOS：最低 iOS 13；实际重签时 Bundle ID 须与证书/描述文件匹配。更换包名会视为新应用，不会自动迁移旧包名下的数据。
 - Windows 本机未配置 Android SDK 时不能编译 APK，也不能直接编译需要 Xcode 的 IPA。原生安装包应在下述云端或相应 SDK 环境构建，是否成功以具体运行记录和产物为准。
 
