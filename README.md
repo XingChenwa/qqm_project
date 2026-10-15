@@ -152,6 +152,14 @@ Windows 本机不能直接编译 iOS IPA。可用 Windows 操作 GitHub，运行
 
 详细流程和限制见 [手机端构建说明](docs/mobile-build.md)。
 
+## 下载首页和管理后台
+
+宝塔 PHP 和 MySQL 后台源码在 `management/`，网站域名为 `botmanager.uuze.cn`，提供下载首页、草稿/发布管理、签名更新和可关闭的设备/IP/版本统计。`1.3.1+12` 首次默认统计，保留以前的关闭选择；后台增加设备名称／型号、系统版本和架构。上传后台后运行 `install`、`db-check` 升级至数据表版本 2，不重建数据或更换密钥。后台仅使用杂鱼账号中心登录，管理员邮箱为 `2377130783@qq.com`。部署步骤与 OAuth 应用配置见 [后台部署](management/README.md)，EdgeOne 免费版真实 IP、缓存规则及隐私说明见 [更新和 EdgeOne 配置](docs/update-and-edgeone.md)。
+
+Windows 支持单个中文 Setup.exe 首次安装、签名校验后的应用内覆盖更新，并保留机器人数据。构建与发布步骤见 [Windows 安装包与自动更新](docs/windows-release.md)。
+
+更新服务始于 `1.3.0+11`，当前源码为 `1.3.1+12`，每次启动发现新版都会提醒。需部署服务器并把公开公钥内置到客户端，原有 `1.2.6` 安装包不会自动拥有更新功能。Windows 自动下载后由用户确认重启，Android 调用系统安装器，iOS 导出 IPA 后合法重签，不承诺静默安装。
+
 ## 开发
 
 ```bash

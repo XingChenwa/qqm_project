@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'services/app_update_service.dart';
+import 'services/update_preferences.dart';
 import 'services/desktop_window_controller.dart';
 import 'app.dart';
 import 'models/message.dart';
@@ -32,6 +35,9 @@ void main() async {
 
   // Initialize bot client
   final botClient = BotClient(storageService);
+  final updates = AppUpdateService(
+    UpdatePreferences(await SharedPreferences.getInstance()),
+  );
 
   DesktopWindowController? desktopWindow;
   if (isDesktopPlatform) {
@@ -39,6 +45,7 @@ void main() async {
       storageService,
       beforeExit: () async {
         await storageService.flush();
+        updates.dispose();
         botClient.dispose();
         pluginManager.dispose();
       },
@@ -52,6 +59,7 @@ void main() async {
         Provider<StorageService>.value(value: storageService),
         ChangeNotifierProvider<PluginManager>.value(value: pluginManager),
         ChangeNotifierProvider<BotClient>.value(value: botClient),
+        ChangeNotifierProvider<AppUpdateService>.value(value: updates),
         if (desktopWindow != null)
           ChangeNotifierProvider<DesktopWindowController>.value(
             value: desktopWindow,

@@ -8,7 +8,7 @@
 
 - Android：模板最低 Android 7.0（API 24），当前提供 debug 签名测试 APK。正式分发需配置自己的签名密钥。
 - 安卓构建固定使用 AGP 8.13.2、Gradle 8.13、Kotlin 2.3.20 和 JDK 17，以兼容现有 `file_picker 11.x`。不要单独升级 AGP 9：该插件会跳过传统 Kotlin 插件，而当前 Flutter 工程禁用内置 Kotlin，会导致 `FilePickerPlugin` 未编译。
-- Android 和 iOS 包名均为 `cn.uuze.botmanager`，使用 `assets/branding/logo.png` 生成的应用图标。当前版本为 1.2.6+10。
+- Android 和 iOS 包名均为 `cn.uuze.botmanager`，使用 `assets/branding/logo.png` 生成的应用图标。当前源码版本为 1.3.1+12；现有下载产物不会因改源码自动更新。
 - iOS：最低 iOS 13；实际重签时 Bundle ID 须与证书/描述文件匹配。更换包名会视为新应用，不会自动迁移旧包名下的数据。
 - Windows 本机未配置 Android SDK 时不能编译 APK，也不能直接编译需要 Xcode 的 IPA。原生安装包应在下述云端或相应 SDK 环境构建，是否成功以具体运行记录和产物为准。
 
@@ -29,6 +29,12 @@ GitHub 返回的外层 ZIP 是下载容器，不是安装包。一定要先解�
 聊天正文、Markdown、卡片和附件的网页链接保持在应用内浏览页，默认请求手机版，右上角可切换电脑版。桌面窗口里手机版网页居中显示为手机宽度；在手机端直接适应屏幕宽度。不会篡改链接的域名、签名参数或片段，也不会为了打不开的网页自动启动系统浏览器。网站没有手机版或要求特定客户端时，仍可能不提供移动布局。
 
 实现依据：[InAppWebView 设置](https://inappwebview.dev/docs/webview/in-app-weview-settings/)中的 `preferredContentMode` 和 `userAgent`；Windows WebView2 不实现移动内容模式，因此额外提供手机标识和窄视口。
+
+## 版本更新服务
+
+`1.3.0+11` 开始提供更新服务。`1.3.1+12` 每次启动发现更高构建号都会弹出提醒，“稍后”只影响本次运行；没有新版时不反复弹窗。移动工作流默认内置已核对的服务器公开更新公钥，可用仓库变量 `UPDATE_PUBLIC_KEY` 覆盖；客户端不会从网站下载新公钥自行信任。未内置公钥的其他构建仍安全关闭更新和统计。
+
+本版首次安装默认开启使用统计，启动时展示非阻塞说明；以前明确关闭的用户保持关闭。上报随机安装 ID、设备名称／型号、系统版本、架构、软件版本，服务器记录来源 IP 和心跳。Android 读取公开型号信息，不读取序列号、Android ID 或账号；iOS 使用系统允许的设备名称，可能只得到通用“iPhone/iPad”，不申请额外识别权限。可在“设置 → 更新”关闭并请求删除，关闭不影响聊天和更新。完整步骤、保留期限、Android 固定签名及 iOS 导出限制见 [更新和 EdgeOne 配置](update-and-edgeone.md)。管理员 OAuth Secret 和更新签名私钥不能打进安装包。
 
 ## 全能签安装
 

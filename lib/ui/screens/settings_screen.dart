@@ -16,6 +16,7 @@ import '../../services/desktop_window_controller.dart';
 import '../themes/app_theme.dart';
 import '../../utils/platforms.dart';
 import '../widgets/app_logo.dart';
+import '../widgets/update_panel.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -468,6 +469,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         _tabButton('数据', 3),
                         _tabButton('数据清理', 4),
                         _tabButton('关于', 5),
+                        _tabButton('更新', 6),
                       ],
                     ),
                   ),
@@ -532,6 +534,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       2 => _autoReplyPage(),
       3 => _dataPage(bot),
       4 => _dangerPage(),
+      6 => const UpdatePanel(),
       _ => _aboutPage(),
     };
   }

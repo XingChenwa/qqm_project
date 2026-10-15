@@ -12,7 +12,12 @@ command -v flutter >/dev/null
 xcodebuild -version
 
 # 实际编译真机 arm64 程序；失败即退出，不能仅压缩源代码伪装成 IPA。
-flutter build ios --release --no-codesign --no-pub
+update_args=()
+if [[ -n "${UPDATE_PUBLIC_KEY:-}" ]]; then
+  update_args+=("--dart-define=UPDATE_PUBLIC_KEY=$UPDATE_PUBLIC_KEY")
+  update_args+=("--dart-define=UPDATE_BASE_URL=${UPDATE_BASE_URL:-https://botmanager.uuze.cn}")
+fi
+flutter build ios --release --no-codesign --no-pub "${update_args[@]}"
 app_path="$project_dir/build/ios/iphoneos/Runner.app"
 test -f "$app_path/Runner"
 lipo -archs "$app_path/Runner" | grep -q arm64

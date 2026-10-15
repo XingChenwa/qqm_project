@@ -7,6 +7,8 @@ import 'services/storage_service.dart';
 import 'services/desktop_window_controller.dart';
 import 'ui/widgets/desktop_window_frame.dart';
 import 'ui/widgets/window_close_dialog.dart';
+import 'services/app_update_service.dart';
+import 'ui/widgets/update_panel.dart';
 
 class QQBotManagerApp extends StatefulWidget {
   const QQBotManagerApp({super.key});
@@ -18,11 +20,36 @@ class QQBotManagerApp extends StatefulWidget {
 class _QQBotManagerAppState extends State<QQBotManagerApp> {
   ThemeMode _themeMode = ThemeMode.light;
   final _navigatorKey = GlobalKey<NavigatorState>();
+  final _messengerKey = GlobalKey<ScaffoldMessengerState>();
   DesktopWindowController? _desktopWindow;
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) => _loadTheme());
+    WidgetsBinding.instance.addPostFrameCallback((_) => _startUpdates());
+  }
+
+  Future<void> _startUpdates() async {
+    if (!mounted) return;
+    final updates = context.read<AppUpdateService?>();
+    if (updates == null || !updates.configured) return;
+    if (updates.preferences.usageConsent &&
+        !updates.preferences.usageNoticeSeen) {
+      _messengerKey.currentState?.showSnackBar(
+        SnackBar(
+          content: const Text(
+            '使用统计默认开启：发送设备名称／型号、系统、软件版本和来源 IP。可在「设置 → 更新」关闭并删除。',
+          ),
+          duration: const Duration(seconds: 12),
+          action: SnackBarAction(
+            label: '关闭统计',
+            onPressed: () => updates.setUsageConsent(false),
+          ),
+        ),
+      );
+      await updates.preferences.markUsageNoticeSeen();
+    }
+    if (mounted) updates.start();
   }
 
   void _loadTheme() {
@@ -63,6 +90,7 @@ class _QQBotManagerAppState extends State<QQBotManagerApp> {
   Widget build(BuildContext context) {
     return MaterialApp(
       navigatorKey: _navigatorKey,
+      scaffoldMessengerKey: _messengerKey,
       locale: const Locale('zh', 'CN'),
       supportedLocales: const [Locale('zh', 'CN')],
       localizationsDelegates: GlobalMaterialLocalizations.delegates,
@@ -78,9 +106,13 @@ class _QQBotManagerAppState extends State<QQBotManagerApp> {
           _desktopWindow = desktop;
           desktop?.confirmClose = _confirmWindowClose;
         }
+        final content = UpdateNotice(
+          child: child!,
+          dialogContext: () => _navigatorKey.currentState!.overlay!.context,
+        );
         return desktop == null || !desktop.supported
-            ? child!
-            : DesktopWindowFrame(controller: desktop, child: child!);
+            ? content
+            : DesktopWindowFrame(controller: desktop, child: content);
       },
       home: MainScreen(toggleTheme: toggleTheme, themeMode: _themeMode),
     );

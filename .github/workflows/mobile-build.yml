@@ -15,6 +15,8 @@ permissions:
 
 env:
   FLUTTER_VERSION: '3.44.3'
+  UPDATE_PUBLIC_KEY: ${{ vars.UPDATE_PUBLIC_KEY || 'EmpeSLtZms6Uz7D61o6E3gQzBytIPqsNU+dSq47M9ko=' }}
+  UPDATE_BASE_URL: ${{ vars.UPDATE_BASE_URL || 'https://botmanager.uuze.cn' }}
 
 jobs:
   android:
@@ -37,7 +39,7 @@ jobs:
       - run: flutter analyze --no-pub
       - run: flutter test --no-pub
       - name: 构建安卓测试 APK（debug 签名）
-        run: flutter build apk --debug --no-pub
+        run: flutter build apk --debug --no-pub --dart-define="UPDATE_PUBLIC_KEY=$UPDATE_PUBLIC_KEY" --dart-define="UPDATE_BASE_URL=$UPDATE_BASE_URL"
       - name: 保存 APK
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:

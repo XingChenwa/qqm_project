@@ -39,6 +39,12 @@ migrate_working_dir/
 *.pfx
 *.mobileprovision
 *.p8
+*.jks
+*.keystore
+/android/key.properties
+/management/data/*
+!/management/data/.gitignore
+/management/config.php
 
 # Symbolication related
 app.*.symbols

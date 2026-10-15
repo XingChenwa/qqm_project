@@ -72,7 +72,11 @@ void main() {
     final androidSteps = workflow['jobs']['android']['steps'] as YamlList;
     final iosSteps = workflow['jobs']['ios']['steps'] as YamlList;
     expect(
-      androidSteps.any((s) => s['run'] == 'flutter build apk --debug --no-pub'),
+      androidSteps.any(
+        (s) => (s['run']?.toString() ?? '').startsWith(
+          'flutter build apk --debug --no-pub ',
+        ),
+      ),
       isTrue,
     );
     expect(
@@ -81,6 +85,17 @@ void main() {
     );
     expect(androidSteps.last['with']['path'], endsWith('app-debug.apk'));
     expect(iosSteps.last['with']['path'], 'dist/qq_bot_manager-unsigned.ipa');
+    expect(
+      workflow['env']['UPDATE_PUBLIC_KEY'],
+      contains('vars.UPDATE_PUBLIC_KEY'),
+    );
+    final apkBuild = androidSteps
+        .firstWhere(
+          (s) => (s['run']?.toString() ?? '').startsWith('flutter build apk '),
+        )['run']
+        .toString();
+    expect(apkBuild, contains('--dart-define="UPDATE_PUBLIC_KEY='));
+    expect(apkBuild, contains('--dart-define="UPDATE_BASE_URL='));
     expect(
       File('.github/workflows/mobile-build.yml').readAsStringSync(),
       isNot(contains('secrets.')),
