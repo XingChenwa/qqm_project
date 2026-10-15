@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:flutter_test/flutter_test.dart';
 
 import 'package:qq_bot_manager/models/config.dart';
 import 'package:qq_bot_manager/models/message.dart';
@@ -14,7 +15,9 @@ class MemoryStorage extends StorageService {
   final storedSessions = <String, ChatSession>{};
   final storedPlugins = <String, PluginInfo>{};
 
-  MemoryStorage({BotConfig? config}) : config = config ?? BotConfig();
+  MemoryStorage({BotConfig? config}) : config = config ?? BotConfig() {
+    TestWidgetsFlutterBinding.ensureInitialized();
+  }
 
   @override
   BotConfig getBotConfig() => BotConfig.fromMap(config.toMap());
@@ -53,15 +56,10 @@ class MemoryStorage extends StorageService {
   }) async {
     final previous = storedSessions[sessionId];
     if (previous == null) return;
-    storedSessions[sessionId] = ChatSession(
-      id: previous.id,
-      name: previous.name,
-      avatarUrl: previous.avatarUrl,
-      sessionType: previous.sessionType,
+    storedSessions[sessionId] = previous.copyWith(
       lastMessageTime: time,
       lastMessage: lastMessage,
       unreadCount: previous.unreadCount + (incrementUnread ? 1 : 0),
-      isPinned: previous.isPinned,
     );
   }
 
@@ -73,7 +71,10 @@ class MemoryStorage extends StorageService {
 
   @override
   Future<void> savePluginConfig(PluginInfo plugin) async =>
-      storedPlugins[plugin.id] = plugin;
+      storedPlugins[plugin.id] = PluginInfo.fromMap(plugin.toMap());
+
+  @override
+  Future<void> deletePluginConfig(String id) async => storedPlugins.remove(id);
 
   @override
   List<EmojiItem> getEmojis({String? category}) => [];
@@ -90,6 +91,26 @@ BotConfig validConfig() => BotConfig(
 );
 
 class RecordingApi extends ApiService {
+  @override
+  Future<ApiResult<Map<String, dynamic>>> getGroupInfo({
+    required String baseUrl,
+    required String accessToken,
+    required String groupId,
+  }) async => ApiResult.failure('测试：群资料接口未授权', errorCode: 11253);
+
+  @override
+  Future<ApiResult<Map<String, dynamic>>> getGroupMemberInfo({
+    required String baseUrl,
+    required String accessToken,
+    required String groupId,
+    required String memberId,
+  }) async => ApiResult.failure('测试：群成员接口未授权', errorCode: 11253);
+
+  @override
+  Future<ApiResult<Map<String, dynamic>>> getBotProfile({
+    required String baseUrl,
+    required String accessToken,
+  }) async => ApiResult.success({'username': '测试机器人', 'avatar': ''});
   final calls = <Map<String, dynamic>>[];
   final interactionAcks = <String>[];
   int tokenRequests = 0;

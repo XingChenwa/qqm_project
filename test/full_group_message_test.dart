@@ -410,7 +410,11 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('引用消息 · 1 个元素'), findsOneWidget);
     expect(
-      find.byWidgetPredicate((w) => w is SelectableText && w.data == records),
+      find.byWidgetPredicate(
+        (w) =>
+            w is SelectableText &&
+            (w.data ?? w.textSpan?.toPlainText()) == records,
+      ),
       findsOneWidget,
     );
     expect(find.text('管理员'), findsOneWidget);

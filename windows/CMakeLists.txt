@@ -56,6 +56,14 @@ add_subdirectory("runner")
 # Generated plugin build rules, which manage building the plugins and adding
 # them to the application.
 include(flutter/generated_plugins.cmake)
+include(patches/webview_shutdown.cmake)
+
+# InAppWebView 0.6 still uses MSVC's legacy /await coroutine implementation.
+# Acknowledge that dependency's deprecation for MSVC 14.51 compatibility.
+if(TARGET flutter_inappwebview_windows_plugin)
+  target_compile_definitions(flutter_inappwebview_windows_plugin PRIVATE
+    _SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS)
+endif()
 
 
 # === Installation ===

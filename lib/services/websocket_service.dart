@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:logging/logging.dart';
 import '../utils/helpers.dart';
+import '../utils/profile_helpers.dart';
 import '../models/received_message.dart';
 
 enum ConnectionState { disconnected, connecting, connected, reconnecting }
@@ -252,7 +253,7 @@ class WebSocketService {
             ?.toString() ??
         author['member_openid']?.toString() ??
         author['id']?.toString();
-    final senderName = _firstString([
+    final senderName = firstProfileName([
       author['username'],
       author['nick'],
       author['nickname'],
@@ -281,9 +282,24 @@ class WebSocketService {
       'sessionId': groupId ?? userOpenId ?? '',
       'senderId': userOpenId ?? '',
       'senderName': displayName,
-      'senderAvatarUrl': isGroup
-          ? ''
-          : _firstString([author['avatar'], author['avatar_url']]),
+      'senderNameIsFallback': senderName.isEmpty,
+      'senderAvatarUrl': firstProfileAvatar([
+        author['avatar'],
+        author['avatar_url'],
+      ]),
+      'groupName': firstProfileName([
+        data['group_name'],
+        data['group'] is Map
+            ? data['group']['group_name'] ?? data['group']['name']
+            : null,
+      ]),
+      'groupAvatarUrl': firstProfileAvatar([
+        data['group_avatar'],
+        data['group_avatar_url'],
+        data['group'] is Map
+            ? data['group']['avatar'] ?? data['group']['avatar_url']
+            : null,
+      ]),
       'senderLevel': '',
       'senderTitle': '',
       'senderRole': senderRole,
@@ -301,14 +317,6 @@ class WebSocketService {
       'markdownContent': data['markdown']?['content']?.toString(),
       'extra': data,
     };
-  }
-
-  String _firstString(List<dynamic> values) {
-    for (final value in values) {
-      final text = value?.toString() ?? '';
-      if (text.isNotEmpty && text != 'null') return text;
-    }
-    return '';
   }
 
   String _openIdLabel(String? id) {

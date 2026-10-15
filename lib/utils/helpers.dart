@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:intl/intl.dart';
+export 'package:qqm_plugins/sdk.dart' show parseSlashCommand;
 
 String formatTimestamp(DateTime dt) {
   dt = dt.toLocal();
@@ -46,21 +47,6 @@ String generateId() {
   return DateTime.now().microsecondsSinceEpoch.toRadixString(36);
 }
 
-/// 保留多行命令中的代码缩进；代码块作为完整参数传递给插件。
-({String command, List<String> args})? parseSlashCommand(String text) {
-  final match = RegExp(
-    r'^/([^\s/]+)(?:\s+([\s\S]*))?$',
-  ).firstMatch(text.trim());
-  if (match == null) return null;
-  final body = match.group(2) ?? '';
-  return (
-    command: match.group(1)!.toLowerCase(),
-    args: body.isEmpty
-        ? <String>[]
-        : (body.contains('```') ? [body] : body.split(RegExp(r'\s+'))),
-  );
-}
-
 String stripLeadingBotMention(String content) => content.replaceFirst(
   RegExp(r'^\s*(?:<@!?[^>]+>|<qqbot-at-user\s+id="[^"]+"\s*/>)\s*'),
   '',
@@ -70,7 +56,11 @@ bool containsMarkdown(String text) => RegExp(
   r'(^|\n)\s*(?:#{1,6}\s|>\s|[-*+]\s|\d+\.\s|```|~~~)|\*\*[^*]+\*\*|!?\[[^\]]*\]\([^\)]+\)',
 ).hasMatch(text);
 
-String formatQqMessageContent(String content, {List<dynamic>? mentions}) {
+String formatQqMessageContent(
+  String content, {
+  List<dynamic>? mentions,
+  bool trim = true,
+}) {
   var text = content;
   final mentionNames = <String, String>{};
 
@@ -118,7 +108,7 @@ String formatQqMessageContent(String content, {List<dynamic>? mentions}) {
     (match) => '[QQ表情#${match.group(1)}]',
   );
 
-  return text.trim();
+  return trim ? text.trim() : text;
 }
 
 String _decodeFaceExt(String ext) {

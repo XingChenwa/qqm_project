@@ -47,6 +47,7 @@ class _EmojiPickerState extends State<EmojiPicker> {
   }
 
   Future<void> _fetchAllEmojis() async {
+    if (_isLoading) return;
     setState(() {
       _isLoading = true;
       _error = null;
@@ -64,52 +65,39 @@ class _EmojiPickerState extends State<EmojiPicker> {
     ];
 
     try {
-      for (var i = 0; i < AppConstants.emojiApis.length; i++) {
-        final result = await _apiService.fetchEmojiUrls(i, limit: 48);
-        if (!mounted) return;
+      await Future.wait(
+        List.generate(AppConstants.emojiApis.length, (i) async {
+          final result = await _apiService.fetchEmojiUrls(i, limit: 48);
+          if (!mounted) return;
 
-        if (result.isSuccess && result.data != null) {
-          final category = names.length > i ? names[i] : 'api_$i';
-          var count = 0;
-          for (final url in result.data!) {
-            if (results.any((emoji) => emoji.url == url)) continue;
-            count++;
-            results.add(
-              EmojiItem(
-                id: 'api_${i}_$count',
-                name: '$category $count',
-                url: url,
-                category: category,
-                isCustom: false,
-              ),
-            );
+          if (result.isSuccess && result.data != null) {
+            final category = names.length > i ? names[i] : 'api_$i';
+            var count = 0;
+            for (final url in result.data!) {
+              if (results.any((emoji) => emoji.url == url)) continue;
+              count++;
+              results.add(
+                EmojiItem(
+                  id: 'api_${i}_$count',
+                  name: '$category $count',
+                  url: url,
+                  category: category,
+                  isCustom: false,
+                ),
+              );
+            }
+            if (count > 0) {
+              setState(() => _remoteEmojis = List.of(results));
+            }
           }
-          if (count > 0) {
-            setState(() => _remoteEmojis = List.of(results));
-          }
-        }
-      }
-
-      if (results.isEmpty) {
-        for (var i = 0; i < AppConstants.emojiApis.length; i++) {
-          final category = names.length > i ? names[i] : 'api_$i';
-          results.add(
-            EmojiItem(
-              id: 'fallback_$i',
-              name: category,
-              url: AppConstants.emojiApis[i],
-              category: category,
-              isCustom: false,
-            ),
-          );
-        }
-      }
+        }),
+      );
 
       if (!mounted) return;
       setState(() {
         _remoteEmojis = results;
         _isLoading = false;
-        _error = null;
+        _error = results.isEmpty ? '表情接口未返回有效图片，请刷新或添加自定义表情。' : null;
       });
     } catch (error) {
       if (!mounted) return;
@@ -276,13 +264,22 @@ class _EmojiPickerState extends State<EmojiPicker> {
           ),
         ),
         Divider(height: 1, color: Theme.of(context).dividerColor),
+        if (_isLoading && allEmojis.isNotEmpty)
+          const LinearProgressIndicator(minHeight: 2),
+        const Padding(
+          padding: EdgeInsets.fromLTRB(12, 6, 12, 4),
+          child: Text(
+            'GIF / WebP 等表情会转为静态 PNG 发送。',
+            style: TextStyle(fontSize: 11),
+          ),
+        ),
         Expanded(child: _body(allEmojis, filtered)),
       ],
     );
   }
 
   Widget _body(List<EmojiItem> allEmojis, List<EmojiItem> filtered) {
-    if (_isLoading) {
+    if (_isLoading && allEmojis.isEmpty) {
       return const Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,

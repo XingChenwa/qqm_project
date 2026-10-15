@@ -1,0 +1,9 @@
+name: qqm_plugins
+description: QQ 机器人管理器插件 SDK 与随应用编译的插件实现。
+version: 1.0.0
+publish_to: none
+environment:
+  sdk: ^3.12.2
+dependencies:
+  dio: ^5.9.2
+  hive: ^2.2.3

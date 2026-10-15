@@ -1,2 +1,2 @@
-// Built-in plugin metadata mirror.
-// Runtime implementation: lib/core/plugins/weather_plugin.dart
+// 源码入口兼容层；实际实现属于独立 Dart 包 qqm_plugins。
+export 'package:qqm_plugins/weather_plugin/plugin.dart';

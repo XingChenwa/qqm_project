@@ -1,0 +1,28 @@
+schema_version: 1
+id: custom_yaml_hello
+name: YAML 问候示例
+version: 1.0.0
+description: YAML 和 JSON 使用相同协议，导入后需手动启用。
+author: 插件开发者
+runtime: rules
+permissions: ["message:read", "message:send"]
+config:
+  salutation: 你好
+config_schema:
+  - key: salutation
+    label: 问候语
+    type: string
+    default: 你好
+    required: true
+rules:
+  - match:
+      type: command
+      value: yamlhello
+    reply: |
+      {{config.salutation}}，{{sender_name}}！
+      这是 YAML 插件的回复。
+  - match:
+      type: exact
+      value: YAML示例
+      scope: private
+    reply: 此规则只在单聊匹配。

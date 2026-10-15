@@ -10,6 +10,7 @@ import '../../models/outgoing_message.dart';
 import '../../utils/helpers.dart';
 import '../themes/app_theme.dart';
 import 'message_settings_dialog.dart';
+import 'markdown_workbench.dart';
 
 class ChatInput extends StatefulWidget {
   final Future<bool> Function(String text) onSendText;
@@ -58,6 +59,7 @@ class ChatInput extends StatefulWidget {
 
 class _ChatInputState extends State<ChatInput> {
   final TextEditingController _textController = TextEditingController();
+  final TextEditingController _markdownController = TextEditingController();
   final TextEditingController _templateIdController = TextEditingController();
   final FocusNode _focusNode = FocusNode();
   final ImagePicker _imagePicker = ImagePicker();
@@ -68,6 +70,9 @@ class _ChatInputState extends State<ChatInput> {
   bool _showTemplateEditor = false;
   bool _isSending = false;
   MessageComposerSettings _sendSettings = const MessageComposerSettings();
+
+  TextEditingController get _activeController =>
+      _isMarkdownMode ? _markdownController : _textController;
 
   bool get _useConfigured =>
       widget.onSendConfigured != null &&
@@ -109,7 +114,7 @@ class _ChatInputState extends State<ChatInput> {
           ? _sendSettings.type
           : (_sendSettings.type == 7
                 ? 7
-                : (_isMarkdownMode || containsMarkdown(_textController.text)
+                : (_isMarkdownMode || containsMarkdown(_activeController.text)
                       ? 2
                       : 0)),
     );
@@ -118,7 +123,7 @@ class _ChatInputState extends State<ChatInput> {
       builder: (_) => MessageSettingsDialog(
         initial: initial,
         isGroup: widget.isGroup,
-        body: _textController.text,
+        body: _activeController.text,
         replyTo: widget.replyTo,
         latestEventId: widget.latestEventId,
         preview: widget.previewConfigured,
@@ -138,6 +143,11 @@ class _ChatInputState extends State<ChatInput> {
     );
     if (result == null || !mounted) return;
     setState(() {
+      if (!_isMarkdownMode &&
+          result.type == 2 &&
+          _markdownController.text.isEmpty) {
+        _markdownController.text = _textController.text;
+      }
       _sendSettings = result;
       _isMarkdownMode = result.type == 2;
       if (!_isMarkdownMode) {
@@ -147,24 +157,27 @@ class _ChatInputState extends State<ChatInput> {
     });
   }
 
-  bool get _isSlashCommand => _textController.text.trimLeft().startsWith('/');
+  bool get _isSlashCommand => _activeController.text.trimLeft().startsWith('/');
 
   @override
   void initState() {
     super.initState();
     _textController.addListener(() => setState(() {}));
+    _markdownController.addListener(() => setState(() {}));
   }
 
   @override
   void dispose() {
     _textController.dispose();
+    _markdownController.dispose();
     _templateIdController.dispose();
     _focusNode.dispose();
     super.dispose();
   }
 
   Future<void> _sendMessage() async {
-    final text = _textController.text;
+    final controller = _activeController;
+    final text = controller.text;
     if ((text.trim().isEmpty && !_isTemplateMode && _sendSettings.type != 7) ||
         _isSending) {
       return;
@@ -201,7 +214,7 @@ class _ChatInputState extends State<ChatInput> {
 
       if (!mounted) return;
       if (sent) {
-        if (_textController.text == text) _textController.clear();
+        if (controller.text == text) controller.clear();
         widget.onCancelReply?.call();
         _focusNode.requestFocus();
       } else {
@@ -333,153 +346,168 @@ class _ChatInputState extends State<ChatInput> {
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
-    return Container(
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surface,
-        border: Border(top: BorderSide(color: Theme.of(context).dividerColor)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: isDark ? 0.22 : 0.05),
-            blurRadius: 16,
-            offset: const Offset(0, -4),
+    return SingleChildScrollView(
+      child: Container(
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.surface,
+          border: Border(
+            top: BorderSide(color: Theme.of(context).dividerColor),
           ),
-        ],
-      ),
-      padding: const EdgeInsets.fromLTRB(16, 10, 16, 14),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (widget.replyTo != null) _replyPreview(widget.replyTo!),
-          if (_sendSettings.isConfigured) _settingsSummary(),
-          if (_isTemplateMode && _showTemplateEditor) _templateEditor(),
-          Row(
-            children: [
-              Expanded(
-                child: SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: Row(
-                    children: [
-                      if (widget.onSendConfigured != null)
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: isDark ? 0.22 : 0.05),
+              blurRadius: 16,
+              offset: const Offset(0, -4),
+            ),
+          ],
+        ),
+        padding: const EdgeInsets.fromLTRB(16, 10, 16, 14),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (widget.replyTo != null) _replyPreview(widget.replyTo!),
+            if (_sendSettings.isConfigured) _settingsSummary(),
+            if (_isTemplateMode && _showTemplateEditor) _templateEditor(),
+            Row(
+              children: [
+                Expanded(
+                  child: SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Row(
+                      children: [
+                        if (widget.onSendConfigured != null)
+                          _toolButton(
+                            icon: Icons.tune_rounded,
+                            selected: _sendSettings.isConfigured,
+                            tooltip: '消息设置',
+                            onPressed: _openSettings,
+                          ),
                         _toolButton(
-                          icon: Icons.tune_rounded,
-                          selected: _sendSettings.isConfigured,
-                          tooltip: '消息设置',
-                          onPressed: _openSettings,
-                        ),
-                      _toolButton(
-                        icon: Icons.code_rounded,
-                        selected: _isMarkdownMode && !_isTemplateMode,
-                        tooltip: '自定义 Markdown',
-                        onPressed: () {
-                          if (_isMarkdownMode &&
-                              (_sendSettings.options.keyboard != null ||
-                                  _sendSettings.options.forceVerifyImage)) {
-                            _showSendError(
-                              '当前设置需要 Markdown，请先在“消息设置”停用按钮键盘或图片校验',
-                            );
-                            return;
-                          }
-                          setState(() {
-                            _isMarkdownMode = !_isMarkdownMode;
-                            _sendSettings = _sendSettings.withType(
-                              _isMarkdownMode ? 2 : 0,
-                            );
-                            if (!_isMarkdownMode) {
-                              _isTemplateMode = false;
-                              _showTemplateEditor = false;
+                          icon: Icons.code_rounded,
+                          selected: _isMarkdownMode && !_isTemplateMode,
+                          tooltip: '自定义 Markdown',
+                          onPressed: () {
+                            if (_isMarkdownMode &&
+                                (_sendSettings.options.keyboard != null ||
+                                    _sendSettings.options.forceVerifyImage)) {
+                              _showSendError(
+                                '当前设置需要 Markdown，请先在“消息设置”停用按钮键盘或图片校验',
+                              );
+                              return;
                             }
-                          });
-                        },
-                      ),
-                      if (_isMarkdownMode)
+                            setState(() {
+                              _isMarkdownMode = !_isMarkdownMode;
+                              _sendSettings = _sendSettings.withType(
+                                _isMarkdownMode ? 2 : 0,
+                              );
+                              if (!_isMarkdownMode) {
+                                _isTemplateMode = false;
+                                _showTemplateEditor = false;
+                              }
+                            });
+                          },
+                        ),
+                        if (_isMarkdownMode)
+                          _toolButton(
+                            icon: Icons.view_column_rounded,
+                            selected: _isTemplateMode,
+                            tooltip: 'Markdown 模板',
+                            onPressed: () => setState(() {
+                              _isTemplateMode = !_isTemplateMode;
+                              _showTemplateEditor = _isTemplateMode;
+                            }),
+                          ),
                         _toolButton(
-                          icon: Icons.view_column_rounded,
-                          selected: _isTemplateMode,
-                          tooltip: 'Markdown 模板',
-                          onPressed: () => setState(() {
-                            _isTemplateMode = !_isTemplateMode;
-                            _showTemplateEditor = _isTemplateMode;
-                          }),
+                          icon: Icons.image_outlined,
+                          selected: false,
+                          tooltip: '发送图片',
+                          onPressed: _pickImage,
                         ),
-                      _toolButton(
-                        icon: Icons.image_outlined,
-                        selected: false,
-                        tooltip: '发送图片',
-                        onPressed: _pickImage,
-                      ),
-                      _toolButton(
-                        icon: Icons.emoji_emotions_outlined,
-                        selected: false,
-                        tooltip: '选择表情',
-                        onPressed: widget.onEmojiTap ?? () {},
-                      ),
-                      const SizedBox(width: 8),
-                      if (_isSlashCommand &&
-                          !_isMarkdownMode &&
-                          !_useConfigured)
-                        _modeChip('命令模式', AppTheme.amber),
-                      if (_isMarkdownMode)
-                        _modeChip(
-                          _isTemplateMode ? '模板消息' : 'Markdown',
-                          AppTheme.qqBlue,
+                        _toolButton(
+                          icon: Icons.emoji_emotions_outlined,
+                          selected: false,
+                          tooltip: '选择表情',
+                          onPressed: widget.onEmojiTap ?? () {},
                         ),
-                    ],
+                        const SizedBox(width: 8),
+                        if (_isSlashCommand &&
+                            !_isMarkdownMode &&
+                            !_useConfigured)
+                          _modeChip('命令模式', AppTheme.amber),
+                        if (_isMarkdownMode)
+                          _modeChip(
+                            _isTemplateMode ? '模板消息' : 'Markdown',
+                            AppTheme.qqBlue,
+                          ),
+                      ],
+                    ),
                   ),
                 ),
-              ),
-              const SizedBox(width: 6),
-              const Tooltip(
-                message: '回车换行 · Ctrl+回车发送',
-                child: Icon(Icons.keyboard_return_rounded, size: 18),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Expanded(
-                child: CallbackShortcuts(
-                  bindings: {
-                    const SingleActivator(
-                      LogicalKeyboardKey.enter,
-                      control: true,
-                    ): _sendMessage,
-                    const SingleActivator(LogicalKeyboardKey.enter, meta: true):
-                        _sendMessage,
-                  },
-                  child: TextField(
-                    controller: _textController,
-                    focusNode: _focusNode,
-                    maxLines: 5,
-                    minLines: 1,
-                    keyboardType: TextInputType.multiline,
-                    textInputAction: TextInputAction.newline,
-                    decoration: InputDecoration(
-                      hintText: _hintText,
-                      suffixIcon: Padding(
-                        padding: const EdgeInsets.only(right: 5),
-                        child: IconButton.filled(
-                          tooltip: '发送',
-                          onPressed: _isSending ? null : _sendMessage,
-                          icon: _isSending
-                              ? const SizedBox(
-                                  width: 16,
-                                  height: 16,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                  ),
-                                )
-                              : const Icon(Icons.send_rounded, size: 18),
+                const SizedBox(width: 6),
+                const Tooltip(
+                  message: '回车换行 · Ctrl+回车发送',
+                  child: Icon(Icons.keyboard_return_rounded, size: 18),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            if (_isMarkdownMode)
+              MarkdownWorkbench(
+                controller: _markdownController,
+                focusNode: _focusNode,
+                sending: _isSending,
+                onSend: _sendMessage,
+                templateMode: _isTemplateMode,
+              )
+            else
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Expanded(
+                    child: CallbackShortcuts(
+                      bindings: {
+                        const SingleActivator(
+                          LogicalKeyboardKey.enter,
+                          control: true,
+                        ): _sendMessage,
+                        const SingleActivator(
+                          LogicalKeyboardKey.enter,
+                          meta: true,
+                        ): _sendMessage,
+                      },
+                      child: TextField(
+                        controller: _textController,
+                        focusNode: _focusNode,
+                        maxLines: 5,
+                        minLines: 1,
+                        keyboardType: TextInputType.multiline,
+                        textInputAction: TextInputAction.newline,
+                        decoration: InputDecoration(
+                          hintText: _hintText,
+                          suffixIcon: Padding(
+                            padding: const EdgeInsets.only(right: 5),
+                            child: IconButton.filled(
+                              tooltip: '发送',
+                              onPressed: _isSending ? null : _sendMessage,
+                              icon: _isSending
+                                  ? const SizedBox(
+                                      width: 16,
+                                      height: 16,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                      ),
+                                    )
+                                  : const Icon(Icons.send_rounded, size: 18),
+                            ),
+                          ),
                         ),
                       ),
                     ),
                   ),
-                ),
+                ],
               ),
-            ],
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:dio/dio.dart';
 import '../utils/constants.dart';
 import '../models/outgoing_message.dart';
+import 'image_upload_service.dart';
 
 class ApiResult<T> {
   final T? data;
@@ -29,9 +30,11 @@ class ApiResult<T> {
 
 class ApiService {
   final Dio _dio;
+  final ImageUploadService _images;
 
-  ApiService({Dio? dio})
-    : _dio =
+  ApiService({Dio? dio, ImageUploadService? images})
+    : _images = images ?? const ImageUploadService(),
+      _dio =
           dio ??
           Dio(
             BaseOptions(
@@ -137,7 +140,57 @@ class ApiService {
     }
   }
 
-  /// Get WebSocket gateway URL.
+  /// Official group profile API (requires platform whitelist permission).
+  Future<ApiResult<Map<String, dynamic>>> getGroupInfo({
+    required String baseUrl,
+    required String accessToken,
+    required String groupId,
+  }) => _getProfile(
+    baseUrl,
+    accessToken,
+    '/v2/groups/${Uri.encodeComponent(groupId)}/info',
+  );
+
+  Future<ApiResult<Map<String, dynamic>>> getGroupMemberInfo({
+    required String baseUrl,
+    required String accessToken,
+    required String groupId,
+    required String memberId,
+  }) => _getProfile(
+    baseUrl,
+    accessToken,
+    '/v2/groups/${Uri.encodeComponent(groupId)}/members/${Uri.encodeComponent(memberId)}',
+  );
+
+  Future<ApiResult<Map<String, dynamic>>> getBotProfile({
+    required String baseUrl,
+    required String accessToken,
+  }) => _getProfile(baseUrl, accessToken, '/users/@me');
+
+  Future<ApiResult<Map<String, dynamic>>> _getProfile(
+    String baseUrl,
+    String token,
+    String endpoint,
+  ) async {
+    try {
+      final response = await _dio.get(
+        '$baseUrl$endpoint',
+        options: Options(
+          headers: {'Authorization': 'QQBot $token'},
+          followRedirects: false,
+        ),
+      );
+      if (_isSuccessfulResponse(response) && response.data is Map) {
+        return ApiResult.success(Map<String, dynamic>.from(response.data));
+      }
+      return _failure(response);
+    } on DioException catch (e) {
+      return ApiResult.failure(_dioErrorMsg(e));
+    } catch (_) {
+      return ApiResult.failure('资料返回格式异常');
+    }
+  }
+
   Future<ApiResult<String>> getGatewayUrl({
     required String baseUrl,
     required String accessToken,
@@ -366,7 +419,12 @@ class ApiService {
       );
       final fileInfo = mediaResult.data;
       if (!mediaResult.isSuccess || fileInfo == null || fileInfo.isEmpty) {
-        return ApiResult.failure(mediaResult.error ?? '富媒体上传失败');
+        return ApiResult.failure(
+          mediaResult.error ?? '富媒体上传失败',
+          statusCode: mediaResult.statusCode,
+          errorCode: mediaResult.errorCode,
+          traceId: mediaResult.traceId,
+        );
       }
 
       final endpoint = isGroup
@@ -409,9 +467,47 @@ class ApiService {
           : '/v2/users/$targetId/files';
 
       final isRemoteUrl = imageUrl != null && _isHttpUrl(imageUrl);
+      Future<ApiResult<String>> postUpload(Object body) async {
+        final response = await _dio.post(
+          '$baseUrl$endpoint',
+          options: Options(headers: {'Authorization': 'QQBot $accessToken'}),
+          data: body,
+        );
+        if (_isSuccessfulResponse(response) && response.data is Map) {
+          final fileInfo = response.data['file_info']?.toString();
+          if (fileInfo != null && fileInfo.isNotEmpty) {
+            return ApiResult.success(fileInfo);
+          }
+          return ApiResult.failure(
+            '上传成功但 file_info 为空',
+            statusCode: response.statusCode,
+          );
+        }
+        return _failure(response);
+      }
+
+      Map<String, Object> imageBody(PreparedImage image) => {
+        'file_type': 1,
+        'file_name': image.filename,
+        'file_data': base64Encode(image.bytes),
+        'srv_send_msg': false,
+      };
+
+      final needsConversion =
+          isRemoteUrl &&
+          fileType == 1 &&
+          RegExp(
+            r'\.(gif|webp|bmp|ico|tiff?|heic|avif)$',
+            caseSensitive: false,
+          ).hasMatch(Uri.parse(imageUrl).path);
+      if (needsConversion) {
+        return await postUpload(imageBody(await _images.fromUrl(imageUrl)));
+      }
       final Object data;
       if (isRemoteUrl) {
         data = {'file_type': fileType, 'url': imageUrl, 'srv_send_msg': false};
+      } else if (file != null && fileType == 1) {
+        data = imageBody(await _images.fromFile(file));
       } else if (file != null) {
         if (!await file.exists()) {
           return ApiResult.failure('本地文件不存在: ${file.path}');
@@ -429,23 +525,31 @@ class ApiService {
         return ApiResult.failure('请提供网络图片 URL 或本地文件');
       }
 
-      final response = await _dio.post(
-        '$baseUrl$endpoint',
-        options: Options(headers: {'Authorization': 'QQBot $accessToken'}),
-        data: data,
-      );
-      if (_isSuccessfulResponse(response) && response.data is Map) {
-        final fileInfo = response.data['file_info']?.toString();
-        if (fileInfo != null && fileInfo.isNotEmpty) {
-          return ApiResult.success(fileInfo);
+      final result = await postUpload(data);
+      if (!result.isSuccess &&
+          isRemoteUrl &&
+          fileType == 1 &&
+          {
+            850026,
+            850019,
+            304082,
+            304083,
+            40034004,
+          }.contains(result.errorCode)) {
+        try {
+          return await postUpload(imageBody(await _images.fromUrl(imageUrl)));
+        } catch (error) {
+          return ApiResult.failure(
+            '${result.error}\n本地直传重试失败：${error is FormatException ? error.message : '图片下载或转换失败'}',
+            statusCode: result.statusCode,
+            errorCode: result.errorCode,
+            traceId: result.traceId,
+          );
         }
-        return ApiResult.failure(
-          '上传成功但 file_info 为空',
-          statusCode: response.statusCode,
-          data: response.data,
-        );
       }
-      return _failure(response);
+      return result;
+    } on FormatException catch (e) {
+      return ApiResult.failure(e.message.toString());
     } on DioException catch (e) {
       return ApiResult.failure(_dioErrorMsg(e));
     } catch (e) {
@@ -493,6 +597,7 @@ class ApiService {
         response.headers.value('x-tps-trace-id') ??
         response.headers.value('x-trace-id');
     final hint = switch (code) {
+      11253 => '应用无资料查询权限，该接口需要 QQ 平台白名单授权',
       100007 || 10004 => 'AppID 无效或机器人不存在，请检查开放平台配置',
       100016 => 'AppID 或机器人密钥错误',
       22006 => '消息类型与内容不匹配',
@@ -519,6 +624,11 @@ class ApiService {
       40054004 => '尚未建立好友关系，请先添加机器人',
       40054016 => '机器人已下线，请重新连接',
       304082 || 304083 || 40034004 => '图片资源拉取或转存失败，请换用可公开访问的图片',
+      850018 => '群或机器人被禁言，无法发送表情图片',
+      850019 => 'QQ 不支持该图片格式，图片请使用 PNG / JPG',
+      850026 => 'QQ 服务端下载表情图片失败',
+      850031 => '上传文件超过 QQ 大小限制',
+      850027 => 'QQ 富媒体上传超时，请稍后重试',
       _ => null,
     };
     final detail = _extractMsg(response.data);
@@ -603,7 +713,7 @@ class ApiService {
 
   List<String> _extractEmojiUrls(String body) {
     final urls = <String>{};
-    if (_isHttpUrl(body)) urls.add(body);
+    if (_isHttpUrl(body)) return [body];
     try {
       final decoded = jsonDecode(body);
       urls.addAll(_collectEmojiUrls(decoded));
@@ -616,7 +726,7 @@ class ApiService {
       final raw = match.group(0);
       if (raw == null) continue;
       final url = raw.replaceAll(RegExp(r'[,\]\}\)]+$'), '');
-      if (_isHttpUrl(url)) urls.add(url);
+      if (_isHttpUrl(url) && _isImageUrl(url)) urls.add(url);
     }
 
     final list = urls.toList();
@@ -664,7 +774,11 @@ class ApiService {
 
   bool _isHttpUrl(String value) {
     final uri = Uri.tryParse(value);
-    return uri != null && (uri.scheme == 'http' || uri.scheme == 'https');
+    return uri != null &&
+        (uri.scheme == 'http' || uri.scheme == 'https') &&
+        uri.host.isNotEmpty &&
+        uri.userInfo.isEmpty &&
+        !RegExp(r'\s').hasMatch(value);
   }
 }
 

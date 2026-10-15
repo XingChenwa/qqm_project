@@ -1,17 +1,17 @@
 import 'package:flutter/material.dart';
 
 class AppTheme {
-  static const Color qqBlue = Color(0xFF1677FF);
+  static const Color qqBlue = Color(0xFF3268F4);
   static const Color qqGreen = Color(0xFF14B86A);
   static const Color qqRed = Color(0xFFE5484D);
   static const Color amber = Color(0xFFD97706);
   static const Color ink = Color(0xFF172033);
   static const Color muted = Color(0xFF667085);
 
-  static const Color lightBg = Color(0xFFF4F7FB);
+  static const Color lightBg = Color(0xFFF3F6FC);
   static const Color lightPanel = Color(0xFFFFFFFF);
-  static const Color lightSidebar = Color(0xFFF8FAFD);
-  static const Color lightDivider = Color(0xFFE3E8F0);
+  static const Color lightSidebar = Color(0xFFEBF1FC);
+  static const Color lightDivider = Color(0xFFE7ECF5);
 
   static const Color darkBg = Color(0xFF0F141B);
   static const Color darkPanel = Color(0xFF171D26);
@@ -69,6 +69,24 @@ class AppTheme {
       ),
       fontFamily: 'Microsoft YaHei',
       visualDensity: VisualDensity.standard,
+      navigationBarTheme: NavigationBarThemeData(
+        height: 68,
+        backgroundColor: panel,
+        indicatorColor: qqBlue.withValues(alpha: .1),
+        labelTextStyle: WidgetStateProperty.resolveWith(
+          (states) => TextStyle(
+            fontSize: 11,
+            fontWeight: states.contains(WidgetState.selected)
+                ? FontWeight.w700
+                : FontWeight.w500,
+          ),
+        ),
+      ),
+      dialogTheme: DialogThemeData(
+        backgroundColor: panel,
+        surfaceTintColor: Colors.transparent,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
+      ),
       appBarTheme: AppBarTheme(
         elevation: 0,
         centerTitle: false,
@@ -76,6 +94,7 @@ class AppTheme {
         foregroundColor: onSurface,
         surfaceTintColor: Colors.transparent,
         titleTextStyle: TextStyle(
+          fontFamily: 'Microsoft YaHei',
           fontSize: 17,
           fontWeight: FontWeight.w700,
           color: onSurface,
@@ -87,7 +106,7 @@ class AppTheme {
         surfaceTintColor: Colors.transparent,
         margin: EdgeInsets.zero,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(18),
           side: BorderSide(color: divider),
         ),
       ),

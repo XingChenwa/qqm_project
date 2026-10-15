@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "id": "translate_comment",
+  "name": "代码注释翻译",
+  "version": "1.0.0",
+  "description": "通过 DeepSeek 翻译代码注释，保留原代码与 Markdown 代码块。",
+  "config": {
+    "api_key": "",
+    "target_lang": "中文"
+  },
+  "permissions": [
+    "message:read",
+    "message:send",
+    "network:deepseek"
+  ],
+  "config_schema": [
+    {
+      "key": "api_key",
+      "label": "DeepSeek API Key",
+      "type": "secret",
+      "default": ""
+    },
+    {
+      "key": "target_lang",
+      "label": "目标语言",
+      "type": "string",
+      "default": "中文"
+    }
+  ],
+  "author": "QQ 机器人管理器",
+  "runtime": "builtin",
+  "entrypoint": "lib/translate_comment/plugin.dart"
+}

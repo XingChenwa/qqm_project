@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:provider/provider.dart';
-import 'package:window_manager/window_manager.dart';
+import 'services/desktop_window_controller.dart';
 import 'app.dart';
 import 'models/message.dart';
 import 'models/plugin.dart';
@@ -26,26 +26,24 @@ void main() async {
   final storageService = StorageService();
   await storageService.init();
 
-  // Initialize plugin manager (built-in plugins registered in code)
+  // 从 plugins/ 清单加载内置实现，并恢复已安装的 JSON/YAML/HTTP 插件。
   final pluginManager = PluginManager(storageService);
   await pluginManager.init();
 
   // Initialize bot client
   final botClient = BotClient(storageService);
 
-  // Configure window for desktop
+  DesktopWindowController? desktopWindow;
   if (isDesktopPlatform) {
-    await windowManager.ensureInitialized();
-    final windowOptions = WindowOptions(
-      size: const Size(1280, 800),
-      minimumSize: const Size(960, 600),
-      title: 'QQ 机器人管理器',
-      center: true,
+    desktopWindow = DesktopWindowController(
+      storageService,
+      beforeExit: () async {
+        await storageService.flush();
+        botClient.dispose();
+        pluginManager.dispose();
+      },
     );
-    await windowManager.waitUntilReadyToShow(windowOptions, () async {
-      await windowManager.show();
-      await windowManager.focus();
-    });
+    await desktopWindow.initialize();
   }
 
   runApp(
@@ -54,6 +52,10 @@ void main() async {
         Provider<StorageService>.value(value: storageService),
         ChangeNotifierProvider<PluginManager>.value(value: pluginManager),
         ChangeNotifierProvider<BotClient>.value(value: botClient),
+        if (desktopWindow != null)
+          ChangeNotifierProvider<DesktopWindowController>.value(
+            value: desktopWindow,
+          ),
       ],
       child: const QQBotManagerApp(),
     ),

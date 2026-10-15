@@ -2,8 +2,47 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:yaml/yaml.dart';
+import 'package:image/image.dart' as img;
 
 void main() {
+  test('Android 与 iOS 包名统一为 cn.uuze.botmanager，三端使用自定义图标', () {
+    final app = File('android/app/build.gradle.kts').readAsStringSync();
+    expect(app, contains('namespace = "cn.uuze.botmanager"'));
+    expect(app, contains('applicationId = "cn.uuze.botmanager"'));
+    expect(
+      File(
+        'android/app/src/main/kotlin/cn/uuze/botmanager/MainActivity.kt',
+      ).readAsStringSync(),
+      startsWith('package cn.uuze.botmanager'),
+    );
+    final ios = File('ios/Runner.xcodeproj/project.pbxproj').readAsStringSync();
+    expect(
+      RegExp(
+        r'PRODUCT_BUNDLE_IDENTIFIER = cn\.uuze\.botmanager;',
+      ).allMatches(ios).length,
+      3,
+    );
+    expect(ios, isNot(contains('com.qqbot.qqBotManager')));
+    final icon = img.decodePng(
+      File(
+        'ios/Runner/Assets.xcassets/AppIcon.appiconset/Icon-App-1024x1024@1x.png',
+      ).readAsBytesSync(),
+    )!;
+    expect(icon.width, 1024);
+    expect(icon.height, 1024);
+    expect(icon.numChannels, 3);
+    final android = img.decodePng(
+      File(
+        'android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png',
+      ).readAsBytesSync(),
+    )!;
+    expect(android.width, 192);
+    expect(
+      File('windows/runner/resources/app_icon.ico').lengthSync(),
+      greaterThan(1024),
+    );
+    expect(File('assets/branding/logo.png').existsSync(), isTrue);
+  });
   test('安卓工具链固定兼容的 AGP/Gradle，并显式编译应用和文件选择插件的 Kotlin', () {
     final settings = File('android/settings.gradle.kts').readAsStringSync();
     final app = File('android/app/build.gradle.kts').readAsStringSync();

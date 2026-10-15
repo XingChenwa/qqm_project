@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:image/image.dart' as img;
 import 'package:qq_bot_manager/models/config.dart';
 import 'package:qq_bot_manager/services/api_service.dart';
 
@@ -43,6 +44,47 @@ void main() {
       dio: Dio(BaseOptions(validateStatus: (_) => true))
         ..httpClientAdapter = adapter,
     );
+  });
+
+  test('群资料、成员和机器人资料使用官方 GET 地址和鉴权，白名单错误保留业务码', () async {
+    adapter.response = {'group_openid': 'g', 'group_name': '读书分享会'};
+    final group = await api.getGroupInfo(
+      baseUrl: 'https://api.bot.qq.com',
+      accessToken: 'token',
+      groupId: 'g',
+    );
+    expect(group.data?['group_name'], '读书分享会');
+    await api.getGroupMemberInfo(
+      baseUrl: 'https://api.bot.qq.com',
+      accessToken: 'token',
+      groupId: 'g',
+      memberId: 'm',
+    );
+    await api.getBotProfile(
+      baseUrl: 'https://api.bot.qq.com',
+      accessToken: 'token',
+    );
+    expect(adapter.requests.map((request) => request.uri.path), [
+      '/v2/groups/g/info',
+      '/v2/groups/g/members/m',
+      '/users/@me',
+    ]);
+    expect(
+      adapter.requests.every(
+        (request) =>
+            request.method == 'GET' &&
+            request.headers['Authorization'] == 'QQBot token',
+      ),
+      isTrue,
+    );
+    adapter.response = {'code': 11253, 'message': 'permission denied'};
+    final failure = await api.getGroupInfo(
+      baseUrl: 'https://api.bot.qq.com',
+      accessToken: 'token',
+      groupId: 'g',
+    );
+    expect(failure.errorCode, 11253);
+    expect(failure.error, contains('白名单'));
   });
 
   test('多行代码以原生 Markdown 发送，正文和模板字段不会混入请求', () async {
@@ -139,7 +181,8 @@ void main() {
     );
     addTearDown(() => directory.delete(recursive: true));
     final file = File('${directory.path}/测试.png');
-    await file.writeAsBytes([1, 2, 3]);
+    final imageBytes = img.encodePng(img.Image(width: 2, height: 2));
+    await file.writeAsBytes(imageBytes);
     adapter.response = {'file_info': 'file-info', 'id': 'image-id'};
     final result = await api.sendQQImage(
       baseUrl: 'https://api.bot.qq.com',
@@ -149,7 +192,7 @@ void main() {
     );
     expect(result.isSuccess, isTrue);
     expect(adapter.requests.first.data['file_name'], '测试.png');
-    expect(adapter.requests.first.data['file_data'], base64Encode([1, 2, 3]));
+    expect(adapter.requests.first.data['file_data'], base64Encode(imageBytes));
     expect(adapter.requests.last.data['media'], {'file_info': 'file-info'});
     expect(adapter.requests.last.data['content'], ' ');
   });

@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "id": "dice_plugin",
+  "name": "骰子插件",
+  "version": "1.0.0",
+  "description": "支持 /dice、/roll 2d6 和骰子表达式。",
+  "config": {},
+  "permissions": [
+    "message:read",
+    "message:send"
+  ],
+  "config_schema": [],
+  "author": "QQ 机器人管理器",
+  "runtime": "builtin",
+  "entrypoint": "lib/dice_plugin/plugin.dart"
+}

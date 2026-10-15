@@ -161,6 +161,29 @@ void main() {
     });
   });
 
+  test('群成员头像和群资料字段不会在规范化事件时被置空或互相混用', () async {
+    gateway = await LocalGateway.start();
+    await service.connect(wsUrl: gateway.url, accessToken: 'token');
+    final received = service.messageStream.first;
+    gateway.event('GROUP_MESSAGE_CREATE', {
+      'id': 'metadata',
+      'group_openid': 'g',
+      'group_name': '官方群',
+      'group_avatar': 'https://example.com/group.png',
+      'author': {
+        'member_openid': 'm',
+        'username': '小明',
+        'avatar': 'https://example.com/member.png',
+      },
+      'content': '你好',
+    });
+    final message = await received;
+    expect(message['senderName'], '小明');
+    expect(message['senderAvatarUrl'], 'https://example.com/member.png');
+    expect(message['groupName'], '官方群');
+    expect(message['groupAvatarUrl'], 'https://example.com/group.png');
+  });
+
   test('主动断开后不会被旧连接的关闭回调重新连上', () async {
     gateway = await LocalGateway.start();
     await service.connect(

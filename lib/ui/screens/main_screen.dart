@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -8,11 +10,17 @@ import '../../services/storage_service.dart';
 import '../../models/message.dart';
 import '../../models/plugin.dart';
 import '../../utils/helpers.dart';
+import '../../utils/constants.dart';
 import '../themes/app_theme.dart';
 import '../widgets/chat_input.dart';
 import '../widgets/emoji_picker.dart';
 import '../widgets/message_bubble.dart';
+import '../widgets/chat_timeline.dart';
 import '../widgets/plugin_panel.dart';
+import '../widgets/dashboard_panel.dart';
+import '../widgets/log_panel.dart';
+import '../widgets/app_logo.dart';
+import '../widgets/profile_avatar.dart';
 import 'settings_screen.dart';
 
 class MainScreen extends StatefulWidget {
@@ -30,7 +38,9 @@ class MainScreen extends StatefulWidget {
 }
 
 class _MainScreenState extends State<MainScreen> {
-  final ScrollController _messageScrollController = ScrollController();
+  final ScrollController _messageScrollController = ScrollController(
+    keepScrollOffset: false,
+  );
   final List<String> _logs = [];
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   String _sessionSearch = '';
@@ -40,11 +50,10 @@ class _MainScreenState extends State<MainScreen> {
   BotClient? _botClient;
   MessageModel? _replyToMessage;
   int _toolIndex = 0;
-  int _sideIndex = 0;
+  int _sideIndex = 2;
   bool _mobileChatOpen = false;
   bool _startupConnectTried = false;
-  String? _lastRenderedSessionId;
-  int _lastRenderedMessageCount = 0;
+  int _chatOpenRevision = 0;
 
   @override
   void initState() {
@@ -57,6 +66,9 @@ class _MainScreenState extends State<MainScreen> {
       client.addListener(_onBotUpdate);
       client.onLog = _addLog;
       client.onMessageReceived = _processWithPlugins;
+      if (_selectedSession != null) {
+        client.refreshSessionProfile(_selectedSession!.id);
+      }
       _tryStartupConnect(client);
     });
   }
@@ -85,10 +97,10 @@ class _MainScreenState extends State<MainScreen> {
   }
 
   void _addLog(String log) {
-    if (!mounted) return;
+    if (!mounted || _botClient?.config.enableLogging == false) return;
     setState(() {
       _logs.add(log);
-      if (_logs.length > 500) _logs.removeAt(0);
+      if (_logs.length > 10000) _logs.removeAt(0);
     });
   }
 
@@ -96,16 +108,22 @@ class _MainScreenState extends State<MainScreen> {
     if (!mounted) return;
     _selectFirstSessionIfNeeded(_botClient);
     setState(() {});
-    _scheduleScrollToBottomIfNeeded();
   }
 
   void _selectFirstSessionIfNeeded(BotClient? client) {
-    if (_selectedSession != null || client == null || client.sessions.isEmpty) {
-      return;
+    if (client == null) return;
+    if (_selectedSession != null) {
+      final matches = client.sessions.where(
+        (session) => session.id == _selectedSession!.id,
+      );
+      if (matches.isNotEmpty) {
+        _selectedSession = matches.first;
+        return;
+      }
+      _selectedSession = null;
     }
+    if (client.sessions.isEmpty) return;
     _selectedSession = client.sessions.first;
-    _lastRenderedSessionId = null;
-    _lastRenderedMessageCount = 0;
   }
 
   Future<void> _processWithPlugins(MessageModel message) async {
@@ -171,28 +189,6 @@ class _MainScreenState extends State<MainScreen> {
           );
   }
 
-  void _scheduleScrollToBottomIfNeeded({bool force = false}) {
-    final session = _selectedSession;
-    final bot = _botClient;
-    if (session == null || bot == null) return;
-
-    final count = bot.getMessagesForSession(session.id).length;
-    final changedSession = _lastRenderedSessionId != session.id;
-    final addedMessage = count > _lastRenderedMessageCount;
-    _lastRenderedSessionId = session.id;
-    _lastRenderedMessageCount = count;
-
-    if (!force && !changedSession && !addedMessage) return;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!_messageScrollController.hasClients) return;
-      _messageScrollController.animateTo(
-        _messageScrollController.position.maxScrollExtent,
-        duration: const Duration(milliseconds: 220),
-        curve: Curves.easeOutCubic,
-      );
-    });
-  }
-
   @override
   Widget build(BuildContext context) {
     final bot = context.watch<BotClient>();
@@ -206,7 +202,7 @@ class _MainScreenState extends State<MainScreen> {
         width: 340,
         child: SafeArea(child: _rightPanel(bot, width: 340)),
       ),
-      backgroundColor: isDark ? AppTheme.darkBg : const Color(0xFFF6F8FC),
+      backgroundColor: isDark ? AppTheme.darkBg : AppTheme.lightBg,
       body: Row(
         children: [
           _navigationRail(bot),
@@ -219,25 +215,31 @@ class _MainScreenState extends State<MainScreen> {
                 Expanded(
                   child: LayoutBuilder(
                     builder: (context, constraints) {
-                      final layout = _layoutFor(constraints.maxWidth);
                       return Padding(
-                        padding: EdgeInsets.fromLTRB(
-                          layout.gutter,
-                          12,
-                          layout.gutter,
-                          14,
-                        ),
-                        child: Row(
-                          children: [
-                            _sessionPanel(bot, width: layout.sessionWidth),
-                            SizedBox(width: layout.gap),
-                            Expanded(child: _conversation(bot)),
-                            if (constraints.maxWidth >= 1000) ...[
-                              SizedBox(width: layout.gap),
-                              _rightPanel(bot, width: layout.rightWidth),
+                        padding: const EdgeInsets.all(16),
+                        child: switch (_sideIndex) {
+                          0 => DashboardPanel(
+                            bot: bot,
+                            onOpenChat: () => _navigateTo(2),
+                            onOpenPlugins: () => _navigateTo(3),
+                            onOpenSettings: _openSettings,
+                          ),
+                          1 => _panel(child: _infoPanel(bot)),
+                          3 => _panel(child: const PluginPanel()),
+                          4 => _panel(child: LogPanel(logs: _logs)),
+                          _ => Row(
+                            children: [
+                              _sessionPanel(
+                                bot,
+                                width: _layoutFor(
+                                  constraints.maxWidth,
+                                ).sessionWidth,
+                              ),
+                              const SizedBox(width: 16),
+                              Expanded(child: _conversation(bot)),
                             ],
-                          ],
-                        ),
+                          ),
+                        },
                       );
                     },
                   ),
@@ -255,7 +257,7 @@ class _MainScreenState extends State<MainScreen> {
     return Container(
       width: 188,
       decoration: BoxDecoration(
-        color: isDark ? AppTheme.darkSidebar : Colors.white,
+        color: isDark ? AppTheme.darkSidebar : AppTheme.lightSidebar,
         border: Border(
           right: BorderSide(color: Theme.of(context).dividerColor),
         ),
@@ -263,29 +265,21 @@ class _MainScreenState extends State<MainScreen> {
       child: Column(
         children: [
           SizedBox(
-            height: 62,
+            height: 82,
             child: Row(
               children: [
                 const SizedBox(width: 18),
-                Container(
-                  width: 34,
-                  height: 34,
-                  decoration: BoxDecoration(
-                    color: AppTheme.qqBlue,
-                    borderRadius: BorderRadius.circular(9),
-                  ),
-                  child: const Icon(
-                    Icons.smart_toy_rounded,
-                    color: Colors.white,
-                    size: 20,
-                  ),
-                ),
+                const AppLogo(),
                 const SizedBox(width: 10),
                 const Expanded(
                   child: Text(
-                    'QQ 机器人管理器',
+                    'QQ 机器人\n工作台',
                     overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontSize: 15, fontWeight: FontWeight.w900),
+                    style: TextStyle(
+                      fontSize: 15,
+                      height: 1.5,
+                      fontWeight: FontWeight.w800,
+                    ),
                   ),
                 ),
               ],
@@ -301,7 +295,6 @@ class _MainScreenState extends State<MainScreen> {
                   _navItem(2, Icons.chat_bubble_outline_rounded, '聊天会话'),
                   _navItem(3, Icons.extension_rounded, '插件'),
                   _navItem(4, Icons.receipt_long_rounded, '日志'),
-                  _navItem(5, Icons.task_alt_rounded, '任务'),
                   _navItem(
                     6,
                     Icons.settings_rounded,
@@ -328,7 +321,7 @@ class _MainScreenState extends State<MainScreen> {
                 ),
                 const Spacer(),
                 Text(
-                  'v1.0.0',
+                  'v${AppConstants.appVersion}',
                   style: TextStyle(
                     fontSize: 12,
                     color: Theme.of(context).hintColor,
@@ -385,9 +378,7 @@ class _MainScreenState extends State<MainScreen> {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
       child: Material(
-        color: selected
-            ? AppTheme.qqBlue.withValues(alpha: 0.1)
-            : Colors.transparent,
+        color: selected ? AppTheme.qqBlue : Colors.transparent,
         borderRadius: BorderRadius.circular(8),
         child: InkWell(
           borderRadius: BorderRadius.circular(8),
@@ -400,7 +391,7 @@ class _MainScreenState extends State<MainScreen> {
                 Icon(
                   icon,
                   size: 20,
-                  color: selected ? AppTheme.qqBlue : const Color(0xFF536176),
+                  color: selected ? Colors.white : Theme.of(context).hintColor,
                 ),
                 const SizedBox(width: 12),
                 Expanded(
@@ -411,7 +402,7 @@ class _MainScreenState extends State<MainScreen> {
                       fontSize: 13,
                       fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
                       color: selected
-                          ? AppTheme.qqBlue
+                          ? Colors.white
                           : Theme.of(context).colorScheme.onSurface,
                     ),
                   ),
@@ -428,40 +419,36 @@ class _MainScreenState extends State<MainScreen> {
     if (_scaffoldKey.currentState?.isDrawerOpen == true) Navigator.pop(context);
     setState(() {
       _sideIndex = index;
+      if (index == 2) _chatOpenRevision++;
       if (index == 1) _toolIndex = 3;
       if (index == 3) _toolIndex = 0;
       if (index == 4) _toolIndex = 2;
-      if (index == 5) _toolIndex = 4;
     });
-    if (index != 0 &&
-        index != 2 &&
-        MediaQuery.sizeOf(context).width >= 700 &&
-        MediaQuery.sizeOf(context).width < 1188) {
-      _scaffoldKey.currentState?.openEndDrawer();
-    }
   }
 
-  void _openSettings() {
+  Future<void> _openSettings() async {
     if (_scaffoldKey.currentState?.isDrawerOpen == true) Navigator.pop(context);
-    Navigator.push(
+    await Navigator.push(
       context,
       MaterialPageRoute(builder: (_) => const SettingsScreen()),
     );
+    if (mounted && _selectedSession != null) {
+      setState(() => _chatOpenRevision++);
+      _botClient?.refreshSessionProfile(_selectedSession!.id);
+    }
   }
 
   Widget _mobileScaffold(BotClient bot) {
     final chatting =
-        (_sideIndex == 0 || _sideIndex == 2) &&
-        _mobileChatOpen &&
-        _selectedSession != null;
+        _sideIndex == 2 && _mobileChatOpen && _selectedSession != null;
     final title = chatting
         ? _selectedSession!.name
         : switch (_sideIndex) {
+            0 => '运行总览',
             1 => '机器人',
             3 => '插件',
             4 => '日志',
-            5 => '任务',
-            _ => 'QQ 机器人管理器',
+            _ => '会话',
           };
     return PopScope(
       canPop: !chatting,
@@ -505,6 +492,37 @@ class _MainScreenState extends State<MainScreen> {
             ),
           ],
         ),
+        bottomNavigationBar: chatting
+            ? null
+            : NavigationBar(
+                selectedIndex: const [0, 2, 3, 4].contains(_sideIndex)
+                    ? const [0, 2, 3, 4].indexOf(_sideIndex)
+                    : 0,
+                onDestinationSelected: (index) =>
+                    _navigateTo(const [0, 2, 3, 4][index]),
+                destinations: const [
+                  NavigationDestination(
+                    icon: Icon(Icons.space_dashboard_outlined),
+                    selectedIcon: Icon(Icons.space_dashboard_rounded),
+                    label: '总览',
+                  ),
+                  NavigationDestination(
+                    icon: Icon(Icons.forum_outlined),
+                    selectedIcon: Icon(Icons.forum_rounded),
+                    label: '会话',
+                  ),
+                  NavigationDestination(
+                    icon: Icon(Icons.extension_outlined),
+                    selectedIcon: Icon(Icons.extension_rounded),
+                    label: '插件',
+                  ),
+                  NavigationDestination(
+                    icon: Icon(Icons.receipt_long_outlined),
+                    selectedIcon: Icon(Icons.receipt_long_rounded),
+                    label: '日志',
+                  ),
+                ],
+              ),
         body: SafeArea(
           child: Column(
             children: [
@@ -512,10 +530,15 @@ class _MainScreenState extends State<MainScreen> {
               if (bot.connectionError.isNotEmpty) _errorBanner(bot),
               Expanded(
                 child: switch (_sideIndex) {
+                  0 => DashboardPanel(
+                    bot: bot,
+                    onOpenChat: () => _navigateTo(2),
+                    onOpenPlugins: () => _navigateTo(3),
+                    onOpenSettings: _openSettings,
+                  ),
                   1 => _infoPanel(bot),
                   3 => const PluginPanel(),
-                  4 => _logPanel(),
-                  5 => _tasksPanel(),
+                  4 => LogPanel(logs: _logs),
                   _ =>
                     chatting
                         ? _conversation(bot)
@@ -597,7 +620,7 @@ class _MainScreenState extends State<MainScreen> {
   Widget _titleBar(BotClient bot) {
     final connected = bot.isConnected;
     return Container(
-      height: 62,
+      height: 82,
       padding: const EdgeInsets.symmetric(horizontal: 24),
       decoration: BoxDecoration(
         color: Theme.of(context).colorScheme.surface,
@@ -608,48 +631,42 @@ class _MainScreenState extends State<MainScreen> {
       child: Row(
         children: [
           Expanded(
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: Row(
-                children: [
-                  _statusDot(connected ? AppTheme.qqGreen : AppTheme.qqRed),
-                  const SizedBox(width: 9),
-                  Text(
-                    connected ? '已连接 QQ' : '未连接',
-                    style: const TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700,
-                    ),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  switch (_sideIndex) {
+                    0 => '运行总览',
+                    1 => '机器人详情',
+                    3 => '插件工作空间',
+                    4 => '运行日志',
+                    _ => '聊天工作台',
+                  },
+                  style: const TextStyle(
+                    fontSize: 21,
+                    fontWeight: FontWeight.w800,
                   ),
-                  _verticalDivider(),
-                  Text(
-                    '机器人：${bot.botName.isNotEmpty ? bot.botName : "未获取"}',
-                    style: const TextStyle(fontSize: 13),
+                ),
+                const SizedBox(height: 5),
+                Text(
+                  _sideIndex == 3
+                      ? '安装、配置与开发扩展，让每项能力各归其位。'
+                      : 'QQ 官方机器人 API v2 · 管理连接、对话与扩展',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Theme.of(context).hintColor,
                   ),
-                  const SizedBox(width: 8),
-                  _pill(
-                    connected ? '在线' : '离线',
-                    connected ? AppTheme.qqGreen : AppTheme.qqRed,
-                  ),
-                  _verticalDivider(),
-                  const Icon(
-                    Icons.wifi_rounded,
-                    size: 18,
-                    color: AppTheme.qqGreen,
-                  ),
-                  const SizedBox(width: 8),
-                  const Text(
-                    '协议：QQ 官方机器人 API v2',
-                    style: TextStyle(fontSize: 13),
-                  ),
-                  _verticalDivider(),
-                  Text(
-                    '机器人 ID：${bot.botId.isEmpty ? "未获取" : bot.botId}',
-                    style: const TextStyle(fontSize: 13),
-                  ),
-                ],
-              ),
+                ),
+              ],
             ),
+          ),
+          const SizedBox(width: 12),
+          _pill(
+            connected ? '已连接' : '未连接',
+            connected ? AppTheme.qqGreen : AppTheme.muted,
           ),
           const SizedBox(width: 12),
           OutlinedButton.icon(
@@ -678,23 +695,6 @@ class _MainScreenState extends State<MainScreen> {
     );
   }
 
-  Widget _verticalDivider() {
-    return Container(
-      width: 1,
-      height: 20,
-      margin: const EdgeInsets.symmetric(horizontal: 14),
-      color: Theme.of(context).dividerColor,
-    );
-  }
-
-  Widget _statusDot(Color color) {
-    return Container(
-      width: 9,
-      height: 9,
-      decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-    );
-  }
-
   Widget _pill(String label, Color color) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -712,6 +712,12 @@ class _MainScreenState extends State<MainScreen> {
       ),
     );
   }
+
+  Widget _statusDot(Color color) => Container(
+    width: 9,
+    height: 9,
+    decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+  );
 
   Widget _progressBar(BotClient bot) {
     return Container(
@@ -950,6 +956,7 @@ class _MainScreenState extends State<MainScreen> {
         _replyToMessage = null;
         _sessionTypeFilter = null;
         _mobileChatOpen = true;
+        _chatOpenRevision++;
       });
     }
   }
@@ -973,17 +980,21 @@ class _MainScreenState extends State<MainScreen> {
               _selectedSession = session;
               _mobileChatOpen = true;
               _replyToMessage = null;
-              _lastRenderedSessionId = null;
-              _lastRenderedMessageCount = 0;
+              _chatOpenRevision++;
             });
             bot.markSessionRead(session.id);
-            _scheduleScrollToBottomIfNeeded(force: true);
+            bot.refreshSessionProfile(session.id);
           },
           child: Padding(
             padding: const EdgeInsets.all(10),
             child: Row(
               children: [
-                _avatar(session.name, session.sessionType == 1, 23),
+                ProfileAvatar(
+                  name: session.name,
+                  url: session.avatarUrl,
+                  isGroup: session.sessionType == 1,
+                  radius: 23,
+                ),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Column(
@@ -1042,20 +1053,38 @@ class _MainScreenState extends State<MainScreen> {
   Widget _conversation(BotClient bot) {
     final session = _selectedSession;
     return _panel(
-      child: Column(
-        children: [
-          _conversationHeader(session),
-          Expanded(
-            child: session == null
-                ? _emptyState(
-                    Icons.chat_bubble_outline_rounded,
-                    '选择一个会话',
-                    bot.isConnected ? '机器人已在线，等待消息进入。' : '先连接机器人，然后打开会话回复消息。',
-                  )
-                : _messageList(bot, session),
-          ),
-          if (session != null) _composer(session),
-        ],
+      child: LayoutBuilder(
+        builder: (context, constraints) => Column(
+          children: [
+            _conversationHeader(session),
+            Expanded(
+              child: session == null
+                  ? _emptyState(
+                      Icons.chat_bubble_outline_rounded,
+                      '选择一个会话',
+                      bot.isConnected ? '机器人已在线，等待消息进入。' : '先连接机器人，然后打开会话回复消息。',
+                    )
+                  : ColoredBox(
+                      color: Theme.of(context).brightness == Brightness.dark
+                          ? AppTheme.darkBg
+                          : const Color(0xFFF7F9FE),
+                      child: _messageList(bot, session),
+                    ),
+            ),
+            if (session != null)
+              ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxHeight: math.max(
+                    0,
+                    constraints.maxHeight -
+                        74 -
+                        math.min(80, constraints.maxHeight * .15),
+                  ),
+                ),
+                child: _composer(session),
+              ),
+          ],
+        ),
       ),
     );
   }
@@ -1073,7 +1102,12 @@ class _MainScreenState extends State<MainScreen> {
       child: Row(
         children: [
           if (session != null)
-            _avatar(session.name, session.sessionType == 1, 22),
+            ProfileAvatar(
+              name: session.name,
+              url: session.avatarUrl,
+              isGroup: session.sessionType == 1,
+              radius: 22,
+            ),
           if (session != null) const SizedBox(width: 10),
           Expanded(
             child: Column(
@@ -1106,21 +1140,15 @@ class _MainScreenState extends State<MainScreen> {
           ),
           if (!compact)
             IconButton(
-              onPressed: null,
-              icon: const Icon(Icons.search_rounded),
-              tooltip: '消息搜索（暂未实现）',
+              onPressed: () => _scaffoldKey.currentState?.openEndDrawer(),
+              icon: const Icon(Icons.widgets_outlined),
+              tooltip: '插件与工具',
             ),
           IconButton(
             onPressed: () => _navigateTo(1),
             icon: const Icon(Icons.people_outline_rounded),
             tooltip: '会话信息',
           ),
-          if (!compact)
-            IconButton(
-              onPressed: null,
-              icon: const Icon(Icons.more_vert_rounded),
-              tooltip: '更多功能（暂未实现）',
-            ),
         ],
       ),
     );
@@ -1135,14 +1163,17 @@ class _MainScreenState extends State<MainScreen> {
         '收到第一条消息后，就可以在这里查看和回复。',
       );
     }
-    return ListView.builder(
+    return ChatTimeline(
+      key: ValueKey('timeline-${session.id}'),
+      sessionId: session.id,
+      messages: messages,
       controller: _messageScrollController,
-      padding: const EdgeInsets.fromLTRB(4, 16, 4, 16),
-      itemCount: messages.length,
-      itemBuilder: (_, index) {
-        final message = messages[index];
+      openRevision: _chatOpenRevision,
+      itemBuilder: (_, chronologicalIndex) {
+        final message = messages[chronologicalIndex];
         final showSender =
-            index == 0 || messages[index - 1].senderId != message.senderId;
+            chronologicalIndex == 0 ||
+            messages[chronologicalIndex - 1].senderId != message.senderId;
         return MessageBubble(
           key: ValueKey('${session.id}:${message.id}'),
           message: message,
@@ -1187,17 +1218,7 @@ class _MainScreenState extends State<MainScreen> {
             flex: 2,
             child: _panel(
               child: Column(
-                children: [
-                  _panelTabs(
-                    labels: const ['日志', '任务'],
-                    active: _toolIndex == 4 ? 1 : 0,
-                    onTap: (index) =>
-                        setState(() => _toolIndex = index == 0 ? 2 : 4),
-                  ),
-                  Expanded(
-                    child: _toolIndex == 4 ? _tasksPanel() : _logPanel(),
-                  ),
-                ],
+                children: [Expanded(child: LogPanel(logs: _logs))],
               ),
             ),
           ),
@@ -1277,14 +1298,20 @@ class _MainScreenState extends State<MainScreen> {
         Expanded(
           child: _toolIndex == 1
               ? EmojiPicker(
-                  onEmojiSelected: (emoji) {
+                  onEmojiSelected: (emoji) async {
                     final session = _selectedSession;
                     if (session == null) return;
-                    bot.sendImageMessage(
+                    final sent = await bot.sendImageMessage(
                       session.id,
-                      emoji.url,
+                      emoji.localPath ?? emoji.url,
                       isGroup: session.sessionType == 1,
+                      replyTo: _replyToMessage,
                     );
+                    if (!sent && mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text(bot.lastSendError)),
+                      );
+                    }
                   },
                 )
               : const PluginPanel(),
@@ -1304,6 +1331,12 @@ class _MainScreenState extends State<MainScreen> {
           rows: [
             ('会话 ID', session?.id ?? '-'),
             (
+              '资料',
+              session?.profileStatus.isNotEmpty == true
+                  ? session!.profileStatus
+                  : '尚未同步资料',
+            ),
+            (
               '类型',
               session == null ? '-' : (session.sessionType == 1 ? '群聊' : '单聊'),
             ),
@@ -1315,6 +1348,17 @@ class _MainScreenState extends State<MainScreen> {
             ),
           ],
         ),
+        if (session != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 10),
+            child: OutlinedButton.icon(
+              onPressed: session.profileStatus == '正在查询群资料…'
+                  ? null
+                  : () => bot.refreshSessionProfile(session.id, force: true),
+              icon: const Icon(Icons.refresh),
+              label: const Text('刷新会话资料'),
+            ),
+          ),
         const SizedBox(height: 10),
         _infoCard(
           icon: Icons.smart_toy_outlined,
@@ -1362,81 +1406,33 @@ class _MainScreenState extends State<MainScreen> {
     );
   }
 
-  Widget _logPanel() {
-    if (_logs.isEmpty) {
-      return _emptyState(Icons.article_outlined, '暂无日志', '连接、收发消息和错误会显示在这里。');
-    }
-    return ListView.builder(
-      padding: const EdgeInsets.all(12),
-      itemCount: _logs.length,
-      itemBuilder: (_, index) {
-        final log = _logs[_logs.length - 1 - index];
-        final color = log.contains('失败') || log.contains('错误')
-            ? AppTheme.qqRed
-            : log.contains('成功') || log.contains('在线')
-            ? AppTheme.qqGreen
-            : Theme.of(context).colorScheme.onSurface;
-        return Padding(
-          padding: const EdgeInsets.only(bottom: 8),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                _logTime(log),
-                style: TextStyle(
-                  fontSize: 11,
-                  color: Theme.of(context).hintColor,
-                  fontFamily: 'Consolas',
-                ),
-              ),
-              const SizedBox(width: 8),
-              _logLevel(log),
-              const SizedBox(width: 8),
-              Expanded(
-                child: SelectableText(
-                  log,
-                  style: TextStyle(fontSize: 11, height: 1.35, color: color),
-                ),
-              ),
-            ],
+  Future<void> _showEmojiPicker(ChatSession session) =>
+      showModalBottomSheet<void>(
+        context: context,
+        useSafeArea: true,
+        isScrollControlled: true,
+        constraints: const BoxConstraints(maxWidth: 600),
+        builder: (sheetContext) => SizedBox(
+          height: MediaQuery.sizeOf(context).height * .6,
+          child: EmojiPicker(
+            onEmojiSelected: (emoji) async {
+              Navigator.pop(sheetContext);
+              final bot = context.read<BotClient>();
+              final sent = await bot.sendImageMessage(
+                session.id,
+                emoji.localPath ?? emoji.url,
+                isGroup: session.sessionType == 1,
+                replyTo: _replyToMessage,
+              );
+              if (!sent && mounted) {
+                ScaffoldMessenger.of(
+                  context,
+                ).showSnackBar(SnackBar(content: Text(bot.lastSendError)));
+              }
+            },
           ),
-        );
-      },
-    );
-  }
-
-  Widget _logLevel(String log) {
-    final isError = log.contains('失败') || log.contains('错误');
-    final isWarn = log.contains('跳过') || log.contains('警告');
-    final color = isError
-        ? AppTheme.qqRed
-        : (isWarn ? AppTheme.amber : AppTheme.qqGreen);
-    final label = isError ? '错误' : (isWarn ? '警告' : '信息');
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(5),
-      ),
-      child: Text(
-        label,
-        style: TextStyle(
-          fontSize: 10,
-          color: color,
-          fontWeight: FontWeight.w900,
         ),
-      ),
-    );
-  }
-
-  String _logTime(String log) {
-    final match = RegExp(r'\[(.*?)\]').firstMatch(log);
-    return match?.group(1)?.split(' ').last ?? '--:--:--';
-  }
-
-  Widget _tasksPanel() {
-    return _emptyState(Icons.task_alt_rounded, '暂无任务', '定时任务和自动化执行记录会显示在这里。');
-  }
+      );
 
   Widget _composer(ChatSession session) {
     return ChatInput(
@@ -1468,7 +1464,7 @@ class _MainScreenState extends State<MainScreen> {
       sendError: () => context.read<BotClient>().lastSendError,
       replyTo: _replyToMessage,
       onCancelReply: () => setState(() => _replyToMessage = null),
-      onEmojiTap: () => setState(() => _toolIndex = 1),
+      onEmojiTap: () => _showEmojiPicker(session),
       onSendText: (text) => context.read<BotClient>().sendTextMessage(
         session.id,
         text,
@@ -1495,7 +1491,16 @@ class _MainScreenState extends State<MainScreen> {
         final result = await context.read<PluginManager>().processCommand(
           command,
           args,
-          null,
+          PluginMessage(
+            messageId: '',
+            sessionId: session.id,
+            senderId: '',
+            senderName: '操作员',
+            content: '',
+            messageType: 0,
+            isGroup: session.sessionType == 1,
+            timestamp: DateTime.now(),
+          ),
         );
         if (!mounted) return false;
         if (result == null) {
@@ -1536,53 +1541,52 @@ class _MainScreenState extends State<MainScreen> {
   }
 
   Widget _emptyState(IconData icon, String title, String body) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              icon,
-              size: 42,
-              color: Theme.of(context).hintColor.withValues(alpha: 0.42),
-            ),
-            const SizedBox(height: 12),
-            Text(
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxHeight < 180) {
+          return Center(
+            child: Text(
               title,
-              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w900),
+              style: TextStyle(color: Theme.of(context).hintColor),
             ),
-            const SizedBox(height: 6),
-            Text(
-              body,
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 12,
-                height: 1.4,
-                color: Theme.of(context).hintColor,
+          );
+        }
+        return Center(
+          child: SingleChildScrollView(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    icon,
+                    size: 42,
+                    color: Theme.of(context).hintColor.withValues(alpha: 0.42),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    body,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 12,
+                      height: 1.4,
+                      color: Theme.of(context).hintColor,
+                    ),
+                  ),
+                ],
               ),
             ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _avatar(String name, bool isGroup, double radius) {
-    final label = name.trim().isEmpty
-        ? '?'
-        : name.trim().characters.first.toUpperCase();
-    return CircleAvatar(
-      radius: radius,
-      backgroundColor: isGroup ? AppTheme.qqGreen : AppTheme.qqBlue,
-      child: Text(
-        label,
-        style: const TextStyle(
-          color: Colors.white,
-          fontWeight: FontWeight.w900,
-          fontSize: 12,
-        ),
-      ),
+          ),
+        );
+      },
     );
   }
 

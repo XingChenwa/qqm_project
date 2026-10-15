@@ -1,24 +1,40 @@
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
-import 'package:url_launcher/url_launcher.dart';
+import '../screens/browser_screen.dart';
+import 'linkified_text.dart';
+import 'message_image.dart';
 
 import '../../models/received_message.dart';
+import '../../services/qface_service.dart';
 import '../../utils/helpers.dart';
 
 /// 接收消息中的正文、附件、卡片和递归消息元素；不把群文件当成图片。
-class ReceivedMessageView extends StatelessWidget {
+class ReceivedMessageView extends StatefulWidget {
   final ReceivedMessageBody body;
   final int depth;
   final String storageKey;
+  final QFaceService? faceService;
   const ReceivedMessageView({
     super.key,
     required this.body,
     this.depth = 0,
     this.storageKey = '',
+    this.faceService,
   });
 
   @override
+  State<ReceivedMessageView> createState() => _ReceivedMessageViewState();
+}
+
+class _ReceivedMessageViewState extends State<ReceivedMessageView> {
+  // ExpansionTile stores a bool; SelectableText's internal scrollable stores
+  // a double. Keep descendant scroll positions out of the expansion bucket.
+  final _elementsBucket = PageStorageBucket();
+
+  @override
   Widget build(BuildContext context) {
+    final body = widget.body;
+    final depth = widget.depth;
+    final storageKey = widget.storageKey;
     final role = switch (body.authorRole) {
       'owner' => '群主',
       'admin' => '管理员',
@@ -42,8 +58,11 @@ class ReceivedMessageView extends StatelessWidget {
             ),
           ),
         if (body.displayText.isNotEmpty)
-          SelectableText(
-            body.displayText,
+          LinkifiedText(
+            body.text,
+            qqFaces: true,
+            mentions: body.mentions,
+            faceService: widget.faceService,
             style: const TextStyle(fontSize: 14, height: 1.45),
           ),
         if (body.card != null) _card(context, body.card!),
@@ -55,6 +74,7 @@ class ReceivedMessageView extends StatelessWidget {
                 ? null
                 : PageStorageKey('elements-$storageKey'),
             initiallyExpanded: depth == 0,
+            maintainState: true,
             tilePadding: EdgeInsets.zero,
             childrenPadding: const EdgeInsets.only(left: 8),
             title: Text(
@@ -62,24 +82,34 @@ class ReceivedMessageView extends StatelessWidget {
               style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
             ),
             children: [
-              for (var i = 0; i < body.elements.length; i++)
-                Container(
-                  margin: const EdgeInsets.only(bottom: 8),
-                  padding: const EdgeInsets.only(left: 8, bottom: 4),
-                  decoration: BoxDecoration(
-                    border: Border(
-                      left: BorderSide(
-                        color: Theme.of(context).dividerColor,
-                        width: 2,
+              PageStorage(
+                bucket: _elementsBucket,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    for (var i = 0; i < body.elements.length; i++)
+                      Container(
+                        margin: const EdgeInsets.only(bottom: 8),
+                        padding: const EdgeInsets.only(left: 8, bottom: 4),
+                        decoration: BoxDecoration(
+                          border: Border(
+                            left: BorderSide(
+                              color: Theme.of(context).dividerColor,
+                              width: 2,
+                            ),
+                          ),
+                        ),
+                        child: ReceivedMessageView(
+                          body: body.elements[i],
+                          depth: depth + 1,
+                          storageKey: '$storageKey/$i',
+                          faceService: widget.faceService,
+                        ),
                       ),
-                    ),
-                  ),
-                  child: ReceivedMessageView(
-                    body: body.elements[i],
-                    depth: depth + 1,
-                    storageKey: '$storageKey/$i',
-                  ),
+                  ],
                 ),
+              ),
             ],
           ),
         if (body.hasMoreElements)
@@ -144,7 +174,7 @@ class ReceivedMessageView extends StatelessWidget {
                 ),
               ),
               IconButton(
-                tooltip: '打开${attachment.kindLabel}（系统默认应用）',
+                tooltip: '打开${attachment.kindLabel}（内置浏览器）',
                 onPressed: _webUri(attachment.openUrl) == null
                     ? null
                     : () => _open(context, attachment.openUrl),
@@ -208,26 +238,7 @@ class ReceivedMessageView extends StatelessWidget {
 
   Widget _image(BuildContext context, String url) => Padding(
     padding: const EdgeInsets.only(bottom: 6),
-    child: ClipRRect(
-      borderRadius: BorderRadius.circular(6),
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 320, maxHeight: 220),
-        child: CachedNetworkImage(
-          imageUrl: url,
-          fit: BoxFit.contain,
-          placeholder: (_, _) => const SizedBox(
-            width: 220,
-            height: 100,
-            child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
-          ),
-          errorWidget: (_, _, _) => const SizedBox(
-            width: 220,
-            height: 100,
-            child: Center(child: Text('图片暂时无法加载，可点击打开')),
-          ),
-        ),
-      ),
-    ),
+    child: MessageImage(source: url),
   );
 }
 
@@ -241,16 +252,5 @@ Uri? _webUri(String value) {
 }
 
 Future<void> _open(BuildContext context, String url) async {
-  final uri = _webUri(url);
-  if (uri == null) return;
-  try {
-    if (await launchUrl(uri, mode: LaunchMode.externalApplication)) return;
-  } catch (_) {
-    /* 下载地址可能已过期或本机没有关联应用。 */
-  }
-  if (context.mounted) {
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(const SnackBar(content: Text('无法打开链接，附件地址可能已过期。')));
-  }
+  await openInAppBrowser(context, url);
 }

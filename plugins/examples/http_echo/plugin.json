@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "id": "custom_http_echo",
+  "name": "HTTP 复读示例",
+  "version": "1.0.0",
+  "description": "仅在 /echo 或 /复读 命中时调用开发者自己的服务。本机 HTTP 仅用于桌面调试，手机请改用 HTTPS。",
+  "author": "插件开发者",
+  "runtime": "http",
+  "permissions": [
+    "message:read",
+    "message:send",
+    "network:http"
+  ],
+  "config": {
+    "service_token": "",
+    "language": "中文"
+  },
+  "config_schema": [
+    {
+      "key": "service_token",
+      "label": "插件服务令牌",
+      "type": "secret",
+      "default": "",
+      "required": true
+    },
+    {
+      "key": "language",
+      "label": "回复语言",
+      "type": "string",
+      "default": "中文"
+    }
+  ],
+  "rules": [
+    {
+      "match": {
+        "type": "command",
+        "value": "echo"
+      }
+    },
+    {
+      "match": {
+        "type": "command",
+        "value": "复读"
+      }
+    }
+  ],
+  "http": {
+    "url": "http://127.0.0.1:8787/qqbot",
+    "timeout_ms": 8000,
+    "token_config": "service_token",
+    "send_config_keys": [
+      "language"
+    ]
+  }
+}

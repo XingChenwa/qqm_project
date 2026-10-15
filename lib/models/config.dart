@@ -2,6 +2,13 @@ import 'package:hive/hive.dart';
 import '../utils/constants.dart';
 
 class BotConfig {
+  static const int oiapiNicknameDefaultVersion = 1;
+
+  /// 旧版默认关闭；首次升级改为开启，之后保留用户主动保存的选择。
+  static bool needsOiapiNicknameDefaultMigration(Map<String, dynamic> map) =>
+      (map['oiapiNicknameDefaultVersion'] as int? ?? 0) <
+      oiapiNicknameDefaultVersion;
+
   String appId;
   String clientSecret;
   String accessToken;
@@ -19,6 +26,9 @@ class BotConfig {
   Map<String, String> keywordReplies;
   bool enableScheduledTasks;
   bool enableLogging;
+  bool enableOiapiNickname;
+  bool closeToTray;
+  bool skipCloseConfirmation;
 
   // Markdown template
   String markdownTemplateId;
@@ -42,6 +52,9 @@ class BotConfig {
     Map<String, String>? keywordReplies,
     this.enableScheduledTasks = false,
     this.enableLogging = true,
+    this.enableOiapiNickname = true,
+    this.closeToTray = false,
+    this.skipCloseConfirmation = false,
     this.markdownTemplateId = '',
     List<Map<String, String>>? markdownTemplateParams,
   }) : monitoredGroups = monitoredGroups ?? [],
@@ -76,6 +89,10 @@ class BotConfig {
     'keywordReplies': keywordReplies,
     'enableScheduledTasks': enableScheduledTasks,
     'enableLogging': enableLogging,
+    'enableOiapiNickname': enableOiapiNickname,
+    'oiapiNicknameDefaultVersion': oiapiNicknameDefaultVersion,
+    'closeToTray': closeToTray,
+    'skipCloseConfirmation': skipCloseConfirmation,
     'markdownTemplateId': markdownTemplateId,
     'markdownTemplateParams': markdownTemplateParams,
   };
@@ -103,6 +120,11 @@ class BotConfig {
     ),
     enableScheduledTasks: map['enableScheduledTasks'] as bool? ?? false,
     enableLogging: map['enableLogging'] as bool? ?? true,
+    enableOiapiNickname: needsOiapiNicknameDefaultMigration(map)
+        ? true
+        : map['enableOiapiNickname'] as bool? ?? true,
+    closeToTray: map['closeToTray'] as bool? ?? false,
+    skipCloseConfirmation: map['skipCloseConfirmation'] as bool? ?? false,
     markdownTemplateId: map['markdownTemplateId'] as String? ?? '',
     markdownTemplateParams:
         (map['markdownTemplateParams'] as List<dynamic>?)

@@ -99,7 +99,7 @@ void main() {
     final plugins = PluginManager(storage);
     addTearDown(bot.dispose);
     addTearDown(plugins.dispose);
-    await plugins.init();
+    await tester.runAsync(() => plugins.init());
     await tester.pumpWidget(appShell(storage, bot, plugins));
     await tester.pumpAndSettle();
     expect(bot.config.autoReplyToAllGroupMessages, isFalse);
@@ -145,7 +145,7 @@ void main() {
       final plugins = PluginManager(storage);
       addTearDown(bot.dispose);
       addTearDown(plugins.dispose);
-      await plugins.init();
+      await tester.runAsync(() => plugins.init());
       await bot.addSession('group-1', name: '手机测试群聊', isGroup: true);
       await storage.saveMessage(
         MessageModel(
@@ -179,7 +179,9 @@ void main() {
       expect(find.byType(ChatInput), findsNothing);
       await tester.tap(find.byTooltip('打开功能菜单'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('插件'));
+      await tester.tap(
+        find.descendant(of: find.byType(Drawer), matching: find.text('插件')),
+      );
       await tester.pumpAndSettle();
       expect(find.byTooltip('配置高德天气与 IP 查询'), findsOneWidget);
       await tester.pumpWidget(const SizedBox.shrink());

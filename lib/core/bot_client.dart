@@ -7,6 +7,9 @@ import '../models/outgoing_message.dart';
 import '../services/api_service.dart';
 import '../services/websocket_service.dart';
 import '../services/storage_service.dart';
+import '../services/profile_request_queue.dart';
+import '../services/oiapi_service.dart';
+import '../utils/profile_helpers.dart';
 import '../utils/helpers.dart';
 import '../utils/weather_commands.dart';
 
@@ -17,6 +20,16 @@ class BotClient extends ChangeNotifier {
   final StorageService _storage;
   final ApiService _apiService;
   final WebSocketService _wsService;
+  ProfileRequestQueue _profileRequests;
+  ProfileRequestQueue _nicknameRequests;
+  final OiapiService _oiapiService;
+  int _nicknameGeneration = 0;
+  final _profileSyncs = <String, Future<void>>{};
+  final _memberProfiles = <String, Map<String, String>>{};
+  final _memberCheckedAt = <String, DateTime>{};
+  int _profileGeneration = 0;
+  String _botAvatarUrl = '';
+  Future<void>? _botProfileSync;
 
   BotConfig _config = BotConfig();
   final List<MessageModel> _messages = [];
@@ -51,7 +64,13 @@ class BotClient extends ChangeNotifier {
     this._storage, {
     ApiService? apiService,
     WebSocketService? webSocketService,
+    ProfileRequestQueue? profileRequests,
+    ProfileRequestQueue? nicknameRequests,
+    OiapiService? oiapiService,
   }) : _apiService = apiService ?? ApiService(),
+       _profileRequests = profileRequests ?? ProfileRequestQueue(),
+       _nicknameRequests = nicknameRequests ?? ProfileRequestQueue(),
+       _oiapiService = oiapiService ?? OiapiService(),
        _wsService = webSocketService ?? WebSocketService() {
     _loadConfig();
     _wsService.refreshAccessToken = _getAccessToken;
@@ -86,10 +105,12 @@ class BotClient extends ChangeNotifier {
   ConnectStep get connectStep => _connectStep;
   bool get isConnected => _wsService.isConnected;
   bool get isConnecting => _isConnecting;
-  List<MessageModel> get messages => List.unmodifiable(_messages);
+  List<MessageModel> get messages =>
+      List.unmodifiable(_messages.map(_withUserAvatar));
   List<ChatSession> get sessions => _sessions;
   String get botId => _botId;
   String get botName => _botName;
+  String get botAvatarUrl => _botAvatarUrl;
   String get gatewaySessionId => _gatewaySessionId;
   String get lastEventType => _lastEventType;
   DateTime? get lastEventAt => _lastEventAt;
@@ -286,11 +307,13 @@ class BotClient extends ChangeNotifier {
     final user = data['user'] as Map<String, dynamic>? ?? {};
     _botId = user['id']?.toString() ?? '';
     _botName = user['username']?.toString() ?? '';
+    _botAvatarUrl = firstProfileAvatar([user['avatar'], user['avatar_url']]);
     _gatewaySessionId = data['session_id']?.toString() ?? '';
     _connectionStatus = '在线';
     _scheduleTokenRefresh();
     _addLog('READY: $botDisplayName${_botId.isNotEmpty ? " ($_botId)" : ""}');
     notifyListeners();
+    unawaited(_syncBotProfile());
   }
 
   void _handleDispatchEvent(String eventType, Map<String, dynamic> data) {
@@ -381,6 +404,491 @@ class BotClient extends ChangeNotifier {
     );
   }
 
+  void _putSession(ChatSession session) {
+    final index = _sessions.indexWhere((value) => value.id == session.id);
+    if (index < 0) {
+      _sessions.add(session);
+    } else {
+      _sessions[index] = session;
+    }
+    _sessions.sort((a, b) => b.lastMessageTime.compareTo(a.lastMessageTime));
+    unawaited(
+      _storage.saveSession(session).catchError((Object _) {
+        if (!_disposed) _addLog('会话资料保存失败，请检查本地存储');
+      }),
+    );
+    if (!_disposed) notifyListeners();
+  }
+
+  Map<String, String> _knownMember(
+    String key,
+    String sessionId,
+    String senderId,
+  ) {
+    if (_memberProfiles.containsKey(key)) return _memberProfiles[key]!;
+    final history = getMessagesForSession(sessionId).reversed.where(
+      (message) => message.senderId == senderId && !message.isFromBot,
+    );
+    final found = <String, String>{};
+    for (final message in history) {
+      if (message.extra?['senderNameIsFallback'] == false ||
+          !isFallbackProfileName(message.senderName, senderId)) {
+        found.putIfAbsent('name', () => message.senderName);
+      }
+      if (profileAvatar(message.senderAvatarUrl).isNotEmpty) {
+        if (!found.containsKey('avatar') ||
+            (isQqOpenIdAvatar(found['avatar']!) &&
+                !isQqOpenIdAvatar(message.senderAvatarUrl))) {
+          found['avatar'] = message.senderAvatarUrl;
+        }
+      }
+      if (message.senderRole.isNotEmpty) {
+        found.putIfAbsent('role', () => message.senderRole);
+      }
+      if (found.length == 3 && !isQqOpenIdAvatar(found['avatar']!)) break;
+    }
+    _rememberMember(key, found);
+    return found;
+  }
+
+  void _rememberMember(String key, Map<String, String> fields) {
+    final existing = _memberProfiles[key];
+    if (existing != null &&
+        fields.entries.every((entry) => existing[entry.key] == entry.value)) {
+      return;
+    }
+    _memberProfiles[key] = {...?_memberProfiles[key], ...fields};
+    if (_memberProfiles.length > 2000) {
+      _memberProfiles.remove(_memberProfiles.keys.first);
+    }
+  }
+
+  Future<void> refreshSessionProfile(String id, {bool force = false}) {
+    final pending = _profileSyncs[id];
+    if (pending != null) return pending;
+    late final Future<void> future;
+    future = _syncSessionProfile(id, force: force).whenComplete(() {
+      if (identical(_profileSyncs[id], future)) _profileSyncs.remove(id);
+    });
+    _profileSyncs[id] = future;
+    return future;
+  }
+
+  Future<void> _syncSessionProfile(String id, {required bool force}) async {
+    final session = _sessions.where((value) => value.id == id).firstOrNull;
+    if (_disposed || session == null) return;
+    if (session.sessionType == 0) {
+      await _syncPrivateProfile(session, force: force);
+      return;
+    }
+    if (!force &&
+        session.profileUpdatedAt != null &&
+        DateTime.now().difference(session.profileUpdatedAt!) <
+            const Duration(hours: 6)) {
+      return;
+    }
+    if (_config.appId.isEmpty || _config.clientSecret.isEmpty) {
+      if (session.profileStatus != '配置机器人凭据后自动同步群资料') {
+        _putSession(session.copyWith(profileStatus: '配置机器人凭据后自动同步群资料'));
+      }
+      return;
+    }
+    final generation = _profileGeneration;
+    _putSession(session.copyWith(profileStatus: '正在查询群资料…'));
+    final result = await _profileRequests.request(
+      kind: 'group',
+      key: id,
+      force: force,
+      load: () async {
+        if (_disposed || generation != _profileGeneration) {
+          return ApiResult.failure('资料请求已取消');
+        }
+        final token = await _getAccessToken();
+        if (token == null || _disposed || generation != _profileGeneration) {
+          return ApiResult.failure('暂时无法获取访问凭证');
+        }
+        return _apiService.getGroupInfo(
+          baseUrl: _config.resolvedApiBaseUrl,
+          accessToken: token,
+          groupId: id,
+        );
+      },
+    );
+    if (_disposed || generation != _profileGeneration) return;
+    final current = _sessions.where((value) => value.id == id).firstOrNull;
+    if (current == null) return;
+    final data = result.data ?? const <String, dynamic>{};
+    final responseId = profileName(data['group_openid']);
+    if (result.isSuccess && responseId.isNotEmpty && responseId != id) {
+      _putSession(
+        current.copyWith(
+          profileStatus: '群资料返回的 OpenID 不匹配，已忽略',
+          profileUpdatedAt: DateTime.now(),
+        ),
+      );
+      return;
+    }
+    final name = profileName(data['group_name']);
+    // Some event/gateway versions provide avatars, but the documented group
+    // info response does not promise this field. Never use a member's avatar.
+    final avatar = firstProfileAvatar([
+      data['group_avatar'],
+      data['avatar'],
+      data['avatar_url'],
+      current.avatarUrl,
+    ]);
+    final status = !result.isSuccess
+        ? (result.errorCode == 11253
+              ? '群资料查询未获白名单授权（11253），可申请权限后手动刷新'
+              : (result.statusCode == 403
+                    ? '群资料访问被拒绝（HTTP 403），请检查权限及代理配置'
+                    : '群资料暂未获取，稍后可手动刷新'))
+        : [
+            name.isNotEmpty ? '群名已同步' : '平台未返回群名',
+            avatar.isNotEmpty ? '已有群头像' : '平台未提供群头像',
+          ].join('；');
+    final keepNewerName =
+        current.name != session.name &&
+        !isFallbackProfileName(current.name, id, isGroup: true);
+    _putSession(
+      current.copyWith(
+        name: name.isNotEmpty && !keepNewerName ? name : null,
+        avatarUrl: avatar.isNotEmpty ? avatar : null,
+        profileStatus: status,
+        profileUpdatedAt: DateTime.now(),
+      ),
+    );
+    if (!result.isSuccess) _addLog('群资料同步：${result.error ?? status}');
+    if (force) {
+      final latest = getMessagesForSession(id).reversed
+          .where(
+            (message) => !message.isBotAuthor && message.senderId.isNotEmpty,
+          )
+          .firstOrNull;
+      if (latest != null) {
+        await _syncGroupMember(id, latest.senderId, force: true);
+      }
+    }
+  }
+
+  String _userAvatarStatus(String avatar) => avatar.isEmpty
+      ? '暂无用户头像，请检查 AppID 和用户 OpenID'
+      : (isQqOpenIdAvatar(avatar) ? '已配置 QQ CDN 用户头像' : '已接收用户头像');
+
+  Future<void> _syncPrivateProfile(
+    ChatSession session, {
+    required bool force,
+  }) async {
+    final id = session.id;
+    final key = 'user:$id:$id';
+    final known = _knownMember(key, id, id);
+    final name = firstProfileName([known['name'], session.name]);
+    final avatar = userProfileAvatar(_config.appId, id, [
+      known['avatar'],
+      session.avatarUrl,
+    ]);
+    final knownName =
+        known['name']?.isNotEmpty == true || !isFallbackProfileName(name, id);
+    final enabled = _config.enableOiapiNickname;
+    final now = DateTime.now();
+    final freshNickname =
+        session.nicknameSource == 'oiapi' &&
+        session.nicknameAppId == _config.appId &&
+        session.nicknameUpdatedAt != null &&
+        now.difference(session.nicknameUpdatedAt!) < const Duration(hours: 1);
+    final recentFailure =
+        session.profileStatus.startsWith('OIAPI 昵称查询未完成') &&
+        session.nicknameAppId == _config.appId &&
+        session.profileUpdatedAt != null &&
+        now.difference(session.profileUpdatedAt!) < const Duration(minutes: 5);
+    final shouldQuery =
+        enabled &&
+        session.nicknameSource != 'qq' &&
+        (force || !knownName || session.nicknameSource == 'oiapi') &&
+        (force || (!freshNickname && !recentFailure));
+    final nicknameStatus = shouldQuery
+        ? '正在通过 OIAPI 查询昵称…'
+        : (enabled && recentFailure
+              ? session.profileStatus.split('；').first
+              : (session.nicknameSource == 'oiapi'
+                    ? '昵称来自 OIAPI${enabled ? '（缓存）' : '（后续查询已关闭）'}'
+                    : (knownName ? '已接收用户昵称' : '平台未返回用户昵称（OIAPI 未启用或暂未查询）')));
+    final status = '$nicknameStatus；${_userAvatarStatus(avatar)}';
+    if (session.profileStatus != status ||
+        name != session.name ||
+        avatar != session.avatarUrl) {
+      _putSession(
+        session.copyWith(name: name, avatarUrl: avatar, profileStatus: status),
+      );
+    }
+    if (!shouldQuery) return;
+
+    // OIAPI documents d.author.id, which may differ from a normalized alias.
+    final latest = getMessagesForSession(
+      id,
+    ).reversed.where((message) => !message.isBotAuthor).firstOrNull;
+    final author = latest?.rawEvent['author'];
+    final openId = firstProfileName([author is Map ? author['id'] : null, id]);
+    final appId = _config.appId;
+    final generation = _nicknameGeneration;
+    final result = await _nicknameRequests.request(
+      kind: 'oiapi',
+      key: '$appId:$openId',
+      force: force,
+      load: () {
+        if (_disposed ||
+            generation != _nicknameGeneration ||
+            !_config.enableOiapiNickname) {
+          return Future.value(ApiResult.failure('OIAPI 昵称查询已关闭'));
+        }
+        return _oiapiService.getNickname(appId: appId, openId: openId);
+      },
+    );
+    if (_disposed ||
+        generation != _nicknameGeneration ||
+        !_config.enableOiapiNickname) {
+      return;
+    }
+    final current = _sessions.where((value) => value.id == id).firstOrNull;
+    if (current == null) return;
+    if (current.nicknameSource == 'qq') {
+      _putSession(
+        current.copyWith(
+          profileStatus: '已接收用户昵称；${_userAvatarStatus(current.avatarUrl)}',
+        ),
+      );
+      return;
+    }
+    final nickname = profileName(result.data?['nickname']);
+    if (!result.isSuccess ||
+        result.data?['openid'] != openId ||
+        nickname.isEmpty) {
+      _putSession(
+        current.copyWith(
+          profileStatus:
+              'OIAPI 昵称查询未完成：${result.error ?? '返回资料无效'}；${_userAvatarStatus(current.avatarUrl)}',
+          profileUpdatedAt: DateTime.now(),
+          nicknameAppId: appId,
+        ),
+      );
+      return;
+    }
+    _rememberMember(key, {'name': nickname});
+    _putSession(
+      current.copyWith(
+        name: nickname,
+        nicknameSource: 'oiapi',
+        nicknameAppId: appId,
+        nicknameUpdatedAt: DateTime.now(),
+        profileUpdatedAt: DateTime.now(),
+        profileStatus: '昵称来自 OIAPI；${_userAvatarStatus(current.avatarUrl)}',
+      ),
+    );
+    for (final message in getMessagesForSession(
+      id,
+    ).where((message) => !message.isBotAuthor)) {
+      if (_disposed ||
+          generation != _nicknameGeneration ||
+          !_config.enableOiapiNickname) {
+        return;
+      }
+      if (_sessions
+              .where((value) => value.id == id)
+              .firstOrNull
+              ?.nicknameSource ==
+          'qq') {
+        break;
+      }
+      final replaceName =
+          isFallbackProfileName(message.senderName, message.senderId) ||
+          (current.nicknameSource == 'oiapi' &&
+              message.senderName == current.name &&
+              message.extra?['senderNameIsFallback'] != false);
+      if (!replaceName) continue;
+      final updated = message.copyWith(senderName: nickname);
+      final index = _messages.indexWhere((value) => value.id == message.id);
+      if (index >= 0) _messages[index] = updated;
+      await _storage.updateMessage(updated);
+    }
+    if (!_disposed) notifyListeners();
+  }
+
+  Future<void> _syncGroupMember(
+    String groupId,
+    String memberId, {
+    bool force = false,
+  }) async {
+    if (_disposed ||
+        _config.appId.isEmpty ||
+        _config.clientSecret.isEmpty ||
+        (!force && _profileRequests.isDenied('member'))) {
+      return;
+    }
+    final key = 'group:$groupId:$memberId';
+    final checked = _memberCheckedAt[key];
+    if (!force &&
+        checked != null &&
+        DateTime.now().difference(checked) < const Duration(hours: 1)) {
+      return;
+    }
+    _memberCheckedAt[key] = DateTime.now();
+    if (_memberCheckedAt.length > 2000) {
+      _memberCheckedAt.remove(_memberCheckedAt.keys.first);
+    }
+    final generation = _profileGeneration;
+    final knownAtStart = _memberProfiles[key];
+    final result = await _profileRequests.request(
+      kind: 'member',
+      key: '$groupId:$memberId',
+      force: force,
+      load: () async {
+        if (_disposed || generation != _profileGeneration) {
+          return ApiResult.failure('资料请求已取消');
+        }
+        final token = await _getAccessToken();
+        if (token == null || _disposed || generation != _profileGeneration) {
+          return ApiResult.failure('暂时无法获取访问凭证');
+        }
+        return _apiService.getGroupMemberInfo(
+          baseUrl: _config.resolvedApiBaseUrl,
+          accessToken: token,
+          groupId: groupId,
+          memberId: memberId,
+        );
+      },
+    );
+    if (_disposed || generation != _profileGeneration) return;
+    if (!result.isSuccess) {
+      if (result.errorCode == 11253 || result.statusCode == 403) {
+        _addLog('群成员资料查询被拒绝，已停止自动重复查询；请检查 QQ 平台白名单/API 访问权限');
+      }
+      return;
+    }
+    final data = result.data ?? const <String, dynamic>{};
+    if (profileName(data['member_openid']).isNotEmpty &&
+        data['member_openid'] != memberId) {
+      return;
+    }
+    final current = _memberProfiles[key] ?? const <String, String>{};
+    final newerName = current['name'] != knownAtStart?['name'];
+    final newerAvatar = current['avatar'] != knownAtStart?['avatar'];
+    final newerRole = current['role'] != knownAtStart?['role'];
+    final name = firstProfileName([
+      if (newerName) current['name'],
+      data['username'],
+      current['name'],
+    ]);
+    final avatar = firstProfileAvatar([
+      if (newerAvatar && !isQqOpenIdAvatar(current['avatar'] ?? ''))
+        current['avatar'],
+      data['avatar'],
+      data['avatar_url'],
+      userProfileAvatar(_config.appId, memberId, [current['avatar']]),
+    ]);
+    final role = firstProfileName([
+      if (newerRole) current['role'],
+      data['member_role'],
+      current['role'],
+    ]);
+    _rememberMember(key, {
+      if (name.isNotEmpty) 'name': name,
+      if (avatar.isNotEmpty) 'avatar': avatar,
+      if (role.isNotEmpty) 'role': role,
+    });
+    for (final message in getMessagesForSession(groupId).where(
+      (message) => !message.isBotAuthor && message.senderId == memberId,
+    )) {
+      final updated = message.copyWith(
+        senderName:
+            isFallbackProfileName(message.senderName, memberId) &&
+                name.isNotEmpty
+            ? name
+            : null,
+        senderAvatarUrl:
+            (message.senderAvatarUrl.isEmpty ||
+                    isQqOpenIdAvatar(message.senderAvatarUrl)) &&
+                avatar.isNotEmpty
+            ? avatar
+            : null,
+        senderRole: message.senderRole.isEmpty && role.isNotEmpty ? role : null,
+      );
+      final index = _messages.indexWhere((value) => value.id == message.id);
+      if (index >= 0) _messages[index] = updated;
+      await _storage.updateMessage(updated);
+      if (_disposed || generation != _profileGeneration) return;
+    }
+    notifyListeners();
+  }
+
+  Future<void> _syncBotProfile() {
+    if (_botProfileSync != null) return _botProfileSync!;
+    final generation = _profileGeneration;
+    late final Future<void> future;
+    future =
+        (() async {
+          final token = await _getAccessToken();
+          if (token == null || _disposed || generation != _profileGeneration) {
+            return;
+          }
+          final result = await _apiService.getBotProfile(
+            baseUrl: _config.resolvedApiBaseUrl,
+            accessToken: token,
+          );
+          if (_disposed ||
+              generation != _profileGeneration ||
+              !result.isSuccess) {
+            return;
+          }
+          final data = result.data ?? const <String, dynamic>{};
+          _botName = firstProfileName([data['username'], _botName]);
+          _botAvatarUrl = firstProfileAvatar([data['avatar'], _botAvatarUrl]);
+          for (var i = 0; i < _messages.length; i++) {
+            if (_messages[i].isFromBot) {
+              final updated = _messages[i].copyWith(
+                senderName: _botName.isNotEmpty ? _botName : null,
+                senderAvatarUrl: _botAvatarUrl.isNotEmpty
+                    ? _botAvatarUrl
+                    : null,
+              );
+              _messages[i] = updated;
+              await _storage.updateMessage(updated);
+              if (_disposed || generation != _profileGeneration) return;
+            }
+          }
+          notifyListeners();
+        })().whenComplete(() {
+          if (identical(_botProfileSync, future)) _botProfileSync = null;
+        });
+    _botProfileSync = future;
+    return future;
+  }
+
+  void _resetProfileLookups() {
+    _resetNicknameLookups();
+    _profileGeneration++;
+    _profileRequests.dispose();
+    _profileRequests = ProfileRequestQueue();
+    _profileSyncs.clear();
+    _memberProfiles.clear();
+    _memberCheckedAt.clear();
+    _botProfileSync = null;
+    _botAvatarUrl = '';
+    _botName = '';
+    _botId = '';
+  }
+
+  void _resetNicknameLookups() {
+    _nicknameGeneration++;
+    _nicknameRequests.dispose();
+    _nicknameRequests = ProfileRequestQueue();
+    _oiapiService.cancelPending();
+    _profileSyncs.removeWhere(
+      (id, _) => _sessions.any(
+        (session) => session.id == id && session.sessionType == 0,
+      ),
+    );
+  }
+
   void _handleIncomingMessage(Map<String, dynamic> data) {
     if (_disposed) return;
     if (data['isRecallEvent'] == true) {
@@ -390,11 +898,10 @@ class BotClient extends ChangeNotifier {
 
     final sessionId = data['sessionId'] as String? ?? '';
     final senderId = data['senderId'] as String? ?? '';
-    final senderName = data['senderName'] as String? ?? '';
-    final senderAvatarUrl = data['senderAvatarUrl'] as String? ?? '';
+    final rawSenderName = profileName(data['senderName']);
     final senderLevel = data['senderLevel'] as String? ?? '';
     final senderTitle = data['senderTitle'] as String? ?? '';
-    final senderRole = data['senderRole'] as String? ?? '';
+    final rawSenderRole = data['senderRole'] as String? ?? '';
     final content = data['content'] as String? ?? '';
     final messageType = data['messageType'] as int? ?? 0;
     final timestamp = data['timestamp'] as DateTime? ?? DateTime.now();
@@ -412,6 +919,35 @@ class BotClient extends ChangeNotifier {
       _addLog('跳过缺少会话 OpenID 或消息 ID 的事件');
       return;
     }
+    final profileKey = '${isGroup ? 'group' : 'user'}:$sessionId:$senderId';
+    final previous =
+        _sessions.where((s) => s.id == sessionId).firstOrNull ??
+        _storage.getSessions().where((s) => s.id == sessionId).firstOrNull;
+    final known = _knownMember(profileKey, sessionId, senderId);
+    final hasName = data['senderNameIsFallback'] == false
+        ? rawSenderName.isNotEmpty
+        : (data['senderNameIsFallback'] != true &&
+              !isFallbackProfileName(rawSenderName, senderId));
+    final senderName = hasName ? rawSenderName : known['name'] ?? rawSenderName;
+    final senderAvatarUrl = firstProfileAvatar([
+      data['senderAvatarUrl'],
+      if (data['senderIsBot'] != true &&
+          !(data['extra'] is Map &&
+              data['extra']['author'] is Map &&
+              data['extra']['author']['bot'] == true))
+        userProfileAvatar(_config.appId, senderId, [
+          known['avatar'],
+          if (!isGroup) previous?.avatarUrl,
+        ])
+      else
+        known['avatar'],
+    ]);
+    final senderRole = firstProfileName([rawSenderRole, known['role']]);
+    _rememberMember(profileKey, {
+      if (hasName) 'name': rawSenderName,
+      if (senderAvatarUrl.isNotEmpty) 'avatar': senderAvatarUrl,
+      if (senderRole.isNotEmpty) 'role': senderRole,
+    });
     final message = MessageModel(
       id: messageId,
       sessionId: sessionId,
@@ -431,7 +967,38 @@ class BotClient extends ChangeNotifier {
     );
 
     final existing = _messages.where((m) => m.id == messageId).firstOrNull;
-    if (existing != null || _storage.getMessageById(messageId) != null) {
+    final original = existing ?? _storage.getMessageById(messageId);
+    if (original != null) {
+      if (original.sessionId == sessionId && original.senderId == senderId) {
+        final enriched = original.copyWith(
+          senderName: hasName ? senderName : null,
+          senderAvatarUrl: senderAvatarUrl.isNotEmpty ? senderAvatarUrl : null,
+          senderRole: senderRole.isNotEmpty ? senderRole : null,
+        );
+        final index = _messages.indexWhere((value) => value.id == messageId);
+        if (index >= 0) _messages[index] = enriched;
+        unawaited(_storage.updateMessage(enriched));
+        final session = _sessions
+            .where((value) => value.id == sessionId)
+            .firstOrNull;
+        if (session != null) {
+          final groupName = profileName(data['groupName']);
+          final groupAvatar = profileAvatar(data['groupAvatarUrl']);
+          _putSession(
+            session.copyWith(
+              name: isGroup
+                  ? (groupName.isNotEmpty ? groupName : null)
+                  : (hasName ? senderName : null),
+              avatarUrl: isGroup
+                  ? (groupAvatar.isNotEmpty ? groupAvatar : null)
+                  : (senderAvatarUrl.isNotEmpty ? senderAvatarUrl : null),
+              nicknameSource: !isGroup && hasName ? 'qq' : null,
+              nicknameUpdatedAt: !isGroup && hasName ? timestamp : null,
+            ),
+          );
+          unawaited(refreshSessionProfile(sessionId));
+        }
+      }
       // 全量和 @ 事件可能携带相同消息 ID：只保存一次，但不漏掉后到的 @。
       if (existing?.isFullGroupMessage == true &&
           eventType == 'GROUP_AT_MESSAGE_CREATE') {
@@ -447,25 +1014,43 @@ class BotClient extends ChangeNotifier {
     _messages.add(message);
     _storage.saveMessage(message);
 
-    final existingSession = _sessions.where((s) => s.id == sessionId);
-    if (existingSession.isNotEmpty) {
-      _storage.updateSessionLastMessage(
-        sessionId,
-        message.sessionPreview,
-        timestamp,
-      );
-      _loadSessions();
-    } else {
-      final session = ChatSession(
+    final groupName = profileName(data['groupName']);
+    final groupAvatar = profileAvatar(data['groupAvatarUrl']);
+    final name = isGroup
+        ? firstProfileName([groupName, previous?.name, '群聊-$sessionId'])
+        : firstProfileName([
+            hasName || known['name']?.isNotEmpty == true ? senderName : null,
+            previous?.name,
+            senderName,
+            '用户-$sessionId',
+          ]);
+    final avatar = isGroup
+        ? firstProfileAvatar([groupAvatar, previous?.avatarUrl])
+        : firstProfileAvatar([senderAvatarUrl, previous?.avatarUrl]);
+    _putSession(
+      ChatSession(
         id: sessionId,
-        name: isGroup ? '群聊-$sessionId' : senderName,
+        name: name,
+        avatarUrl: avatar,
         sessionType: isGroup ? 1 : 0,
         lastMessageTime: timestamp,
         lastMessage: message.sessionPreview,
-        unreadCount: 1,
-      );
-      _storage.saveSession(session);
-      _sessions.insert(0, session);
+        unreadCount: (previous?.unreadCount ?? 0) + 1,
+        isPinned: previous?.isPinned ?? false,
+        profileStatus: previous?.profileStatus ?? '',
+        profileUpdatedAt: previous?.profileUpdatedAt,
+        nicknameSource: !isGroup && hasName
+            ? 'qq'
+            : previous?.nicknameSource ?? '',
+        nicknameAppId: previous?.nicknameAppId ?? '',
+        nicknameUpdatedAt: !isGroup && hasName
+            ? timestamp
+            : previous?.nicknameUpdatedAt,
+      ),
+    );
+    unawaited(refreshSessionProfile(sessionId));
+    if (isGroup && !hasName && !message.isBotAuthor && senderId.isNotEmpty) {
+      unawaited(_syncGroupMember(sessionId, senderId));
     }
 
     _dispatchForAutoResponse(message);
@@ -901,7 +1486,7 @@ class BotClient extends ChangeNotifier {
       sessionId: targetId,
       senderId: 'bot',
       senderName: _botName.isNotEmpty ? _botName : '机器人',
-      senderAvatarUrl: '',
+      senderAvatarUrl: _botAvatarUrl,
       content: content,
       messageType: type,
       timestamp: DateTime.now(),
@@ -1069,19 +1654,24 @@ class BotClient extends ChangeNotifier {
   }
 
   Future<void> updateConfig(BotConfig newConfig) async {
+    final nicknameSettingChanged =
+        _config.enableOiapiNickname != newConfig.enableOiapiNickname;
     final credentialsChanged =
         _config.appId != newConfig.appId ||
         _config.clientSecret != newConfig.clientSecret;
     if (credentialsChanged) {
+      _resetProfileLookups();
       disconnect();
       newConfig.accessToken = '';
       newConfig.tokenExpiresAt = 0;
     } else {
+      if (nicknameSettingChanged) _resetNicknameLookups();
       newConfig.accessToken = _config.accessToken;
       newConfig.tokenExpiresAt = _config.tokenExpiresAt;
     }
     _config = newConfig;
     await _storage.saveBotConfig(_config);
+    if (credentialsChanged) _loadSessions();
     _addLog('配置已更新');
     notifyListeners();
   }
@@ -1090,8 +1680,28 @@ class BotClient extends ChangeNotifier {
     final stored = _storage.getSessions();
     _sessions
       ..clear()
-      ..addAll(stored);
+      ..addAll(
+        stored.map((session) {
+          if (session.sessionType != 0) return session;
+          final avatar = userProfileAvatar(_config.appId, session.id, [
+            session.avatarUrl,
+          ]);
+          return avatar == session.avatarUrl
+              ? session
+              : session.copyWith(avatarUrl: avatar);
+        }),
+      );
     notifyListeners();
+  }
+
+  MessageModel _withUserAvatar(MessageModel message) {
+    if (message.isBotAuthor) return message;
+    final avatar = userProfileAvatar(_config.appId, message.senderId, [
+      message.senderAvatarUrl,
+    ]);
+    return avatar == message.senderAvatarUrl
+        ? message
+        : message.copyWith(senderAvatarUrl: avatar);
   }
 
   List<MessageModel> getMessagesForSession(String sessionId) {
@@ -1102,12 +1712,16 @@ class BotClient extends ChangeNotifier {
     for (final message in _messages.where((m) => m.sessionId == sessionId)) {
       byId[message.id] = message;
     }
-    final messages = byId.values.toList()
+    final messages = byId.values.map(_withUserAvatar).toList()
       ..sort((a, b) => a.timestamp.compareTo(b.timestamp));
     return messages;
   }
 
   Future<void> markSessionRead(String sessionId) async {
+    final session = _sessions
+        .where((value) => value.id == sessionId)
+        .firstOrNull;
+    if (session != null) _putSession(session.copyWith(unreadCount: 0));
     await _storage.markSessionRead(sessionId);
     _loadSessions();
   }
@@ -1131,6 +1745,7 @@ class BotClient extends ChangeNotifier {
     );
     if (_disposed) return;
     _loadSessions();
+    unawaited(refreshSessionProfile(id));
   }
 
   void clearError() {
@@ -1145,6 +1760,7 @@ class BotClient extends ChangeNotifier {
   }
 
   void resetLocalState() {
+    _resetProfileLookups();
     _messages.clear();
     _lastInboundMessageIds.clear();
     _replySequences.clear();
@@ -1159,6 +1775,9 @@ class BotClient extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    _profileRequests.dispose();
+    _nicknameRequests.dispose();
+    _oiapiService.dispose();
     _tokenRefreshTimer?.cancel();
     _wsService.dispose();
     super.dispose();

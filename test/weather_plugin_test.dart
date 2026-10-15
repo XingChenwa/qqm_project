@@ -383,7 +383,7 @@ void main() {
     final storage = MemoryStorage();
     final manager = PluginManager(storage);
     addTearDown(manager.dispose);
-    await manager.init();
+    await tester.runAsync(() => manager.init());
     await tester.pumpWidget(
       ChangeNotifierProvider.value(
         value: manager,
@@ -395,7 +395,16 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('天气与 IP 查询配置'), findsOneWidget);
     expect(
-      tester.widget<TextField>(find.byType(TextField).first).obscureText,
+      tester
+          .widget<TextField>(
+            find
+                .descendant(
+                  of: find.byType(AlertDialog),
+                  matching: find.byType(TextField),
+                )
+                .first,
+          )
+          .obscureText,
       isTrue,
     );
     await tester.enterText(find.byType(TextFormField).first, 'test-saved-key');
@@ -410,7 +419,7 @@ void main() {
       storage.storedPlugins['weather_plugin']?.config['default_city'],
       '深圳',
     );
-    await manager.init();
+    await tester.runAsync(() => manager.init());
     await tester.pumpAndSettle();
     await tester.ensureVisible(find.byTooltip('配置高德天气与 IP 查询'));
     await tester.tap(find.byTooltip('配置高德天气与 IP 查询'));

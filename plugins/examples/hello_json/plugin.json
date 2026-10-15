@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "id": "custom_hello",
+  "name": "开发者问候示例",
+  "version": "1.0.0",
+  "description": "演示 JSON 规则、命令和动态配置；导入后先停用。",
+  "author": "插件开发者",
+  "runtime": "rules",
+  "permissions": [
+    "message:read",
+    "message:send"
+  ],
+  "config": {
+    "salutation": "你好"
+  },
+  "config_schema": [
+    {
+      "key": "salutation",
+      "label": "问候语",
+      "type": "string",
+      "default": "你好",
+      "required": true
+    }
+  ],
+  "rules": [
+    {
+      "match": {
+        "type": "command",
+        "value": "hello"
+      },
+      "reply": "{{config.salutation}}，{{sender_name}}！\n你输入的参数：{{args}}"
+    },
+    {
+      "match": {
+        "type": "exact",
+        "value": "开发者示例"
+      },
+      "reply": "## 自定义插件已运行\n插件由 JSON 清单定义，支持 **Markdown** 回复。"
+    }
+  ]
+}

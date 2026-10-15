@@ -1,0 +1,354 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:qqm:plugin:v1",
+  "title": "QQ 机器人管理器可导入插件协议 v1",
+  "description": "规则与 HTTP 插件；Dart builtin 清单不用于运行时导入。完整类型、URL 与配置键交叉校验仍由宿主执行。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "id",
+    "name",
+    "version",
+    "description",
+    "runtime",
+    "permissions",
+    "rules"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "maxLength": 512
+    },
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{2,63}$"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80,
+      "pattern": "\\S"
+    },
+    "version": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80,
+      "pattern": "\\S"
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1000,
+      "pattern": "\\S"
+    },
+    "author": {
+      "type": "string",
+      "maxLength": 120
+    },
+    "runtime": {
+      "enum": [
+        "rules",
+        "http"
+      ]
+    },
+    "permissions": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "message:read",
+          "message:send",
+          "network:http"
+        ]
+      },
+      "allOf": [
+        {
+          "contains": {
+            "const": "message:read"
+          }
+        },
+        {
+          "contains": {
+            "const": "message:send"
+          }
+        }
+      ]
+    },
+    "config_schema": {
+      "type": "array",
+      "maxItems": 32,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "key",
+          "label",
+          "type"
+        ],
+        "properties": {
+          "key": {
+            "type": "string",
+            "pattern": "^[a-zA-Z][a-zA-Z0-9_]{0,63}$"
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          },
+          "type": {
+            "enum": [
+              "string",
+              "secret",
+              "boolean",
+              "integer"
+            ]
+          },
+          "default": {
+            "type": [
+              "string",
+              "integer",
+              "boolean"
+            ]
+          },
+          "required": {
+            "type": "boolean",
+            "default": false
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "type": {
+                  "enum": [
+                    "string",
+                    "secret"
+                  ]
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "default": {
+                  "type": "string",
+                  "maxLength": 8192
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "type": {
+                  "const": "boolean"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "default": {
+                  "type": "boolean"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "type": {
+                  "const": "integer"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "default": {
+                  "type": "integer"
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    "config": {
+      "type": "object",
+      "additionalProperties": {
+        "type": [
+          "string",
+          "integer",
+          "boolean"
+        ]
+      }
+    },
+    "rules": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 64,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "match"
+        ],
+        "properties": {
+          "match": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "type",
+              "value"
+            ],
+            "properties": {
+              "type": {
+                "enum": [
+                  "command",
+                  "exact",
+                  "prefix",
+                  "contains"
+                ]
+              },
+              "value": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "pattern": "\\S"
+              },
+              "scope": {
+                "enum": [
+                  "all",
+                  "group",
+                  "private"
+                ],
+                "default": "all"
+              },
+              "case_sensitive": {
+                "type": "boolean",
+                "default": false
+              }
+            },
+            "allOf": [
+              {
+                "if": {
+                  "properties": {
+                    "type": {
+                      "const": "command"
+                    }
+                  }
+                },
+                "then": {
+                  "properties": {
+                    "value": {
+                      "pattern": "^[^\\s/]+$"
+                    }
+                  }
+                }
+              }
+            ]
+          },
+          "reply": {
+            "type": "string",
+            "maxLength": 16000
+          }
+        }
+      }
+    },
+    "http": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "url"
+      ],
+      "properties": {
+        "url": {
+          "type": "string",
+          "format": "uri",
+          "pattern": "^(https://|http://(localhost|127\\.0\\.0\\.1|\\[::1\\])(:[0-9]+)?/)"
+        },
+        "timeout_ms": {
+          "type": "integer",
+          "minimum": 1000,
+          "maximum": 20000,
+          "default": 8000
+        },
+        "token_config": {
+          "type": "string",
+          "pattern": "^[a-zA-Z][a-zA-Z0-9_]{0,63}$"
+        },
+        "send_config_keys": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "runtime": {
+            "const": "rules"
+          }
+        }
+      },
+      "then": {
+        "not": {
+          "required": [
+            "http"
+          ]
+        },
+        "properties": {
+          "permissions": {
+            "not": {
+              "contains": {
+                "const": "network:http"
+              }
+            }
+          },
+          "rules": {
+            "items": {
+              "required": [
+                "reply"
+              ],
+              "properties": {
+                "reply": {
+                  "minLength": 1,
+                  "pattern": "\\S"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "runtime": {
+            "const": "http"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "http"
+        ],
+        "properties": {
+          "permissions": {
+            "contains": {
+              "const": "network:http"
+            }
+          }
+        }
+      }
+    }
+  ]
+}

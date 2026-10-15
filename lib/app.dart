@@ -4,6 +4,9 @@ import 'package:provider/provider.dart';
 import 'ui/screens/main_screen.dart';
 import 'ui/themes/app_theme.dart';
 import 'services/storage_service.dart';
+import 'services/desktop_window_controller.dart';
+import 'ui/widgets/desktop_window_frame.dart';
+import 'ui/widgets/window_close_dialog.dart';
 
 class QQBotManagerApp extends StatefulWidget {
   const QQBotManagerApp({super.key});
@@ -14,6 +17,8 @@ class QQBotManagerApp extends StatefulWidget {
 
 class _QQBotManagerAppState extends State<QQBotManagerApp> {
   ThemeMode _themeMode = ThemeMode.light;
+  final _navigatorKey = GlobalKey<NavigatorState>();
+  DesktopWindowController? _desktopWindow;
   @override
   void initState() {
     super.initState();
@@ -39,9 +44,25 @@ class _QQBotManagerAppState extends State<QQBotManagerApp> {
     context.read<StorageService>().setThemeMode(_themeMode == ThemeMode.dark);
   }
 
+  Future<DesktopCloseDecision?> _confirmWindowClose() async {
+    final dialogContext = _navigatorKey.currentContext;
+    if (!mounted || dialogContext == null) return null;
+    return showDialog<DesktopCloseDecision>(
+      context: dialogContext,
+      builder: (_) => const WindowCloseDialog(),
+    );
+  }
+
+  @override
+  void dispose() {
+    _desktopWindow?.confirmClose = null;
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      navigatorKey: _navigatorKey,
       locale: const Locale('zh', 'CN'),
       supportedLocales: const [Locale('zh', 'CN')],
       localizationsDelegates: GlobalMaterialLocalizations.delegates,
@@ -50,6 +71,17 @@ class _QQBotManagerAppState extends State<QQBotManagerApp> {
       themeMode: _themeMode,
       theme: AppTheme.lightTheme,
       darkTheme: AppTheme.darkTheme,
+      builder: (context, child) {
+        final desktop = context.watch<DesktopWindowController?>();
+        if (!identical(desktop, _desktopWindow)) {
+          _desktopWindow?.confirmClose = null;
+          _desktopWindow = desktop;
+          desktop?.confirmClose = _confirmWindowClose;
+        }
+        return desktop == null || !desktop.supported
+            ? child!
+            : DesktopWindowFrame(controller: desktop, child: child!);
+      },
       home: MainScreen(toggleTheme: toggleTheme, themeMode: _themeMode),
     );
   }

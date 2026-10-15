@@ -1,4 +1,3 @@
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 
@@ -7,6 +6,10 @@ import '../../utils/helpers.dart';
 import '../themes/app_theme.dart';
 import 'message_details_dialog.dart';
 import 'received_message_view.dart';
+import 'linkified_text.dart';
+import '../screens/browser_screen.dart';
+import 'profile_avatar.dart';
+import 'message_image.dart';
 
 class MessageBubble extends StatelessWidget {
   final MessageModel message;
@@ -60,33 +63,12 @@ class MessageBubble extends StatelessWidget {
   }
 
   Widget _avatar(BuildContext context) {
-    final avatarUrl = message.senderAvatarUrl;
-    if (avatarUrl.isNotEmpty && isValidUrl(avatarUrl)) {
-      return CircleAvatar(
-        radius: 17,
-        backgroundColor: Colors.transparent,
-        backgroundImage: CachedNetworkImageProvider(avatarUrl),
-      );
-    }
-
-    return CircleAvatar(
+    return ProfileAvatar(
+      name: message.senderName,
+      url: message.senderAvatarUrl,
       radius: 17,
-      backgroundColor: message.isFromBot ? AppTheme.qqBlue : AppTheme.qqGreen,
-      child: Text(
-        _avatarText,
-        style: const TextStyle(
-          color: Colors.white,
-          fontWeight: FontWeight.w700,
-          fontSize: 13,
-        ),
-      ),
+      isGroup: !message.isFromBot,
     );
-  }
-
-  String get _avatarText {
-    final name = message.senderName.trim();
-    if (name.isEmpty) return message.isFromBot ? 'B' : '?';
-    return name.characters.first.toUpperCase();
   }
 
   Widget _senderLine(BuildContext context) {
@@ -259,17 +241,20 @@ class MessageBubble extends StatelessWidget {
   Widget _textBubble(BuildContext context, bool isBot) {
     final content = message.isRecalled
         ? '这条消息已撤回'
-        : formatQqMessageContent(
-            message.content,
-            mentions: message.extra?['mentions'] as List?,
-          );
+        : (message.rawEvent['content'] is String
+              ? message.rawEvent['content'] as String
+              : (message.extra?['rawContent'] as String? ?? message.content));
 
     return Container(
       constraints: BoxConstraints(maxWidth: _maxWidth(context, 0.46)),
       padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 10),
       decoration: _bubbleDecoration(context, isBot),
-      child: SelectableText(
+      child: LinkifiedText(
         content,
+        qqFaces: !message.isRecalled,
+        mentions:
+            message.extra?['mentions'] as List? ??
+            message.receivedBody.mentions,
         style: TextStyle(
           fontSize: 14,
           height: 1.45,
@@ -288,6 +273,9 @@ class MessageBubble extends StatelessWidget {
       decoration: _bubbleDecoration(context, isBot),
       child: MarkdownBody(
         data: content,
+        onTapLink: (_, href, _) {
+          if (href != null) openInAppBrowser(context, href);
+        },
         selectable: true,
         styleSheet: MarkdownStyleSheet(
           p: TextStyle(
@@ -325,27 +313,11 @@ class MessageBubble extends StatelessWidget {
         borderRadius: BorderRadius.circular(8),
         border: Border.all(color: Theme.of(context).dividerColor),
       ),
-      child: isValidUrl(url)
-          ? CachedNetworkImage(
-              imageUrl: url,
-              fit: BoxFit.cover,
-              placeholder: (_, _) => const SizedBox(
-                height: 130,
-                child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
-              ),
-              errorWidget: (_, _, _) => const SizedBox(
-                height: 130,
-                child: Center(
-                  child: Icon(Icons.broken_image_rounded, size: 34),
-                ),
-              ),
-            )
-          : const SizedBox(
-              height: 130,
-              child: Center(
-                child: Icon(Icons.image_not_supported_rounded, size: 34),
-              ),
-            ),
+      child: MessageImage(
+        source: url,
+        allowLocalFile: message.isFromBot,
+        maxHeight: 280,
+      ),
     );
   }
 

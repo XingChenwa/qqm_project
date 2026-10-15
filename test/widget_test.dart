@@ -93,6 +93,7 @@ void main() {
       ),
     );
     await tester.tap(find.byTooltip('自定义 Markdown'));
+    await tester.pumpAndSettle();
     await tester.enterText(
       find.byType(TextField),
       '/path/to/file\n```dart\n  main() {}\n```',
@@ -227,7 +228,7 @@ void main() {
         expect(api.calls.single['content'], contains('\n    print'));
         expect(bot.messages.where((m) => m.isFromBot), hasLength(1));
         expect(bot.messages.last.id, 'sent-1');
-        expect(find.text('QQ 机器人管理器'), findsOneWidget);
+        expect(find.text('聊天工作台'), findsOneWidget);
         expect(
           Localizations.localeOf(
             tester.element(find.byType(ChatInput)),

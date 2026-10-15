@@ -91,16 +91,23 @@ class MessageModel {
     this.extra,
   });
 
-  MessageModel copyWith({bool? isRead, String? content, bool? isRecalled}) {
+  MessageModel copyWith({
+    bool? isRead,
+    String? content,
+    bool? isRecalled,
+    String? senderName,
+    String? senderAvatarUrl,
+    String? senderRole,
+  }) {
     return MessageModel(
       id: id,
       sessionId: sessionId,
       senderId: senderId,
-      senderName: senderName,
-      senderAvatarUrl: senderAvatarUrl,
+      senderName: senderName ?? this.senderName,
+      senderAvatarUrl: senderAvatarUrl ?? this.senderAvatarUrl,
       senderLevel: senderLevel,
       senderTitle: senderTitle,
-      senderRole: senderRole,
+      senderRole: senderRole ?? this.senderRole,
       content: content ?? this.content,
       messageType: messageType,
       timestamp: timestamp,
@@ -177,6 +184,11 @@ class ChatSession {
   final String lastMessage;
   int unreadCount;
   final bool isPinned;
+  final String profileStatus;
+  final DateTime? profileUpdatedAt;
+  final String nicknameSource;
+  final String nicknameAppId;
+  final DateTime? nicknameUpdatedAt;
 
   ChatSession({
     required this.id,
@@ -187,7 +199,39 @@ class ChatSession {
     this.lastMessage = '',
     this.unreadCount = 0,
     this.isPinned = false,
+    this.profileStatus = '',
+    this.profileUpdatedAt,
+    this.nicknameSource = '',
+    this.nicknameAppId = '',
+    this.nicknameUpdatedAt,
   });
+
+  ChatSession copyWith({
+    String? name,
+    String? avatarUrl,
+    String? lastMessage,
+    DateTime? lastMessageTime,
+    int? unreadCount,
+    String? profileStatus,
+    DateTime? profileUpdatedAt,
+    String? nicknameSource,
+    String? nicknameAppId,
+    DateTime? nicknameUpdatedAt,
+  }) => ChatSession(
+    id: id,
+    name: name ?? this.name,
+    avatarUrl: avatarUrl ?? this.avatarUrl,
+    sessionType: sessionType,
+    lastMessageTime: lastMessageTime ?? this.lastMessageTime,
+    lastMessage: lastMessage ?? this.lastMessage,
+    unreadCount: unreadCount ?? this.unreadCount,
+    isPinned: isPinned,
+    profileStatus: profileStatus ?? this.profileStatus,
+    profileUpdatedAt: profileUpdatedAt ?? this.profileUpdatedAt,
+    nicknameSource: nicknameSource ?? this.nicknameSource,
+    nicknameAppId: nicknameAppId ?? this.nicknameAppId,
+    nicknameUpdatedAt: nicknameUpdatedAt ?? this.nicknameUpdatedAt,
+  );
 
   Map<String, dynamic> toMap() => {
     'id': id,
@@ -198,6 +242,11 @@ class ChatSession {
     'lastMessage': lastMessage,
     'unreadCount': unreadCount,
     'isPinned': isPinned,
+    'profileStatus': profileStatus,
+    'profileUpdatedAt': profileUpdatedAt?.toIso8601String(),
+    'nicknameSource': nicknameSource,
+    'nicknameAppId': nicknameAppId,
+    'nicknameUpdatedAt': nicknameUpdatedAt?.toIso8601String(),
   };
 
   factory ChatSession.fromMap(Map<String, dynamic> map) => ChatSession(
@@ -211,6 +260,15 @@ class ChatSession {
     lastMessage: map['lastMessage'] as String? ?? '',
     unreadCount: map['unreadCount'] as int? ?? 0,
     isPinned: map['isPinned'] as bool? ?? false,
+    profileStatus: map['profileStatus'] as String? ?? '',
+    profileUpdatedAt: DateTime.tryParse(
+      map['profileUpdatedAt']?.toString() ?? '',
+    ),
+    nicknameSource: map['nicknameSource'] as String? ?? '',
+    nicknameAppId: map['nicknameAppId'] as String? ?? '',
+    nicknameUpdatedAt: DateTime.tryParse(
+      map['nicknameUpdatedAt']?.toString() ?? '',
+    ),
   );
 }
 

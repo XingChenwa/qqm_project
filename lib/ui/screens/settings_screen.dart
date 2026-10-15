@@ -12,8 +12,10 @@ import '../../services/api_service.dart';
 import '../../utils/constants.dart';
 import '../../models/config.dart';
 import '../../services/storage_service.dart';
+import '../../services/desktop_window_controller.dart';
 import '../themes/app_theme.dart';
 import '../../utils/platforms.dart';
+import '../widgets/app_logo.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -29,8 +31,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final TextEditingController _autoReplyController = TextEditingController();
   final TextEditingController _keywordController = TextEditingController();
   final TextEditingController _replyController = TextEditingController();
-  final TextEditingController _groupController = TextEditingController();
-  final TextEditingController _friendController = TextEditingController();
   final TextEditingController _markdownTemplateController =
       TextEditingController();
 
@@ -39,8 +39,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _receiveAllGroupMessages = true;
   bool _autoReplyToAllGroupMessages = false;
   bool _enableAutoReply = false;
-  bool _enableScheduled = false;
   bool _enableLogging = true;
+  bool _closeToTray = false;
+  bool _skipCloseConfirmation = false;
+  bool _windowPreferencesDirty = false;
   bool _isSaving = false;
   bool _isTestingCredentials = false;
   String _credentialTestStatus = '';
@@ -48,8 +50,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   int _tabIndex = 0;
 
   Map<String, String> _keywordReplies = {};
-  List<String> _monitoredGroups = [];
-  List<String> _monitoredFriends = [];
 
   @override
   void initState() {
@@ -65,8 +65,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _autoReplyController.dispose();
     _keywordController.dispose();
     _replyController.dispose();
-    _groupController.dispose();
-    _friendController.dispose();
     _markdownTemplateController.dispose();
     super.dispose();
   }
@@ -83,12 +81,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _receiveAllGroupMessages = config.receiveAllGroupMessages;
     _autoReplyToAllGroupMessages = config.autoReplyToAllGroupMessages;
     _enableAutoReply = config.enableAutoReply;
-    _enableScheduled = config.enableScheduledTasks;
     _enableLogging = config.enableLogging;
+    _closeToTray = config.closeToTray;
+    _skipCloseConfirmation = config.skipCloseConfirmation;
+    _windowPreferencesDirty = false;
     _reconnectInterval = config.reconnectInterval;
     _keywordReplies = Map.from(config.keywordReplies);
-    _monitoredGroups = List.from(config.monitoredGroups);
-    _monitoredFriends = List.from(config.monitoredFriends);
   }
 
   Future<void> _saveConfig() async {
@@ -115,20 +113,31 @@ class _SettingsScreenState extends State<SettingsScreen> {
       receiveAllGroupMessages: _receiveAllGroupMessages,
       autoReplyToAllGroupMessages: _autoReplyToAllGroupMessages,
       reconnectInterval: _reconnectInterval,
-      monitoredGroups: _monitoredGroups,
-      monitoredFriends: _monitoredFriends,
+      monitoredGroups: previous.monitoredGroups,
+      monitoredFriends: previous.monitoredFriends,
       enableAutoReply: _enableAutoReply,
       defaultAutoReply: _autoReplyController.text.trim(),
       keywordReplies: _keywordReplies,
-      enableScheduledTasks: _enableScheduled,
+      enableScheduledTasks: previous.enableScheduledTasks,
       enableLogging: _enableLogging,
+      enableOiapiNickname: previous.enableOiapiNickname,
+      closeToTray: _windowPreferencesDirty
+          ? _closeToTray
+          : previous.closeToTray,
+      skipCloseConfirmation: _windowPreferencesDirty
+          ? _skipCloseConfirmation
+          : previous.skipCloseConfirmation,
       markdownTemplateId: _markdownTemplateController.text.trim(),
       markdownTemplateParams: previous.markdownTemplateParams,
     );
 
     try {
       await context.read<BotClient>().updateConfig(config);
+      if (mounted) {
+        await context.read<DesktopWindowController?>()?.refreshPreferences();
+      }
       if (!mounted) return;
+      _windowPreferencesDirty = false;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('配置已保存'),
@@ -272,11 +281,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             child: Row(
               children: [
                 const SizedBox(width: 18),
-                const Icon(
-                  Icons.smart_toy_rounded,
-                  color: AppTheme.qqBlue,
-                  size: 28,
-                ),
+                const AppLogo(size: 28),
                 const SizedBox(width: 10),
                 const Expanded(
                   child: Text(
@@ -284,7 +289,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16),
                   ),
                 ),
-                _versionChip('v1.0.0'),
+                _versionChip('v${AppConstants.appVersion}'),
                 const SizedBox(width: 10),
               ],
             ),
@@ -302,17 +307,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                   _navItem(
                     Icons.chat_bubble_outline_rounded,
-                    '消息',
+                    '返回工作台',
                     false,
-                    () {},
+                    () => Navigator.pop(context),
                   ),
-                  _navItem(Icons.star_border_rounded, '事件', false, () {}),
-                  _navItem(Icons.groups_rounded, '群聊', false, () {}),
-                  _navItem(Icons.person_outline_rounded, '好友', false, () {}),
-                  _navItem(Icons.receipt_long_rounded, '日志', false, () {}),
-                  _navItem(Icons.extension_rounded, '插件中心', false, () {}),
-                  _navItem(Icons.bar_chart_rounded, '数据统计', false, () {}),
-                  _navItem(Icons.settings_rounded, '设置', true, () {}),
                 ],
               ),
             ),
@@ -552,7 +550,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             children: [
               _credentialsCard(),
               _connectionCard(),
-              _targetsCard(),
+              if (isDesktopPlatform) _windowCard(),
               _autoReplyCard(),
               _keywordRulesCard(),
               _dataManagementCard(),
@@ -629,40 +627,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  Widget _targetsCard() {
-    return _card(
-      title: '关注的会话',
-      icon: Icons.groups_rounded,
-      children: [
-        _addRow(
-          _groupController,
-          '输入群聊 OpenID...',
-          () => _addTarget(_groupController, _monitoredGroups),
-        ),
-        const SizedBox(height: 8),
-        _targetTable(
-          '群聊',
-          _monitoredGroups,
-          AppTheme.qqGreen,
-          (id) => setState(() => _monitoredGroups.remove(id)),
-        ),
-        const SizedBox(height: 8),
-        _addRow(
-          _friendController,
-          '输入用户 OpenID...',
-          () => _addTarget(_friendController, _monitoredFriends),
-        ),
-        const SizedBox(height: 8),
-        _targetTable(
-          '好友',
-          _monitoredFriends,
-          AppTheme.qqBlue,
-          (id) => setState(() => _monitoredFriends.remove(id)),
-        ),
-      ],
-    );
-  }
-
   Widget _autoReplyCard() {
     return _card(
       title: '自动回复',
@@ -688,12 +652,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
           value: _autoReplyToAllGroupMessages,
           onChanged: (value) =>
               setState(() => _autoReplyToAllGroupMessages = value),
-        ),
-        SwitchListTile(
-          contentPadding: EdgeInsets.zero,
-          title: const Text('定时任务（暂未实现）'),
-          value: false,
-          onChanged: null,
         ),
         SwitchListTile(
           contentPadding: EdgeInsets.zero,
@@ -739,6 +697,53 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
+  Widget _windowCard() {
+    context.watch<DesktopWindowController?>();
+    final saved = context.read<StorageService>().getBotConfig();
+    final closeToTray = _windowPreferencesDirty
+        ? _closeToTray
+        : saved.closeToTray;
+    final skipConfirmation = _windowPreferencesDirty
+        ? _skipCloseConfirmation
+        : saved.skipCloseConfirmation;
+    return _card(
+      title: '桌面窗口',
+      icon: Icons.desktop_windows_outlined,
+      children: [
+        const Text('标题栏空白处可拖动；双击最大化或还原。最小化按钮仍最小化到任务栏。'),
+        SwitchListTile(
+          key: const ValueKey('close-to-tray-switch'),
+          contentPadding: EdgeInsets.zero,
+          title: const Text('关闭窗口时隐藏到系统托盘'),
+          subtitle: const Text(
+            '开启并保存后，关闭或 Alt+F4 直接隐藏到托盘，不再询问。'
+            '未开启时可在关闭弹窗中选择退出或隐藏，并勾选记住选择。托盘不可用时保持窗口可见。',
+          ),
+          value: closeToTray,
+          onChanged: (value) => setState(() {
+            _closeToTray = value;
+            _skipCloseConfirmation = skipConfirmation;
+            _windowPreferencesDirty = true;
+          }),
+        ),
+        if (!closeToTray) ...[
+          Text(skipConfirmation ? '已记住：关闭时直接退出。' : '关闭时会询问，不会自动退出或强制驻留。'),
+          if (skipConfirmation)
+            TextButton.icon(
+              onPressed: () => setState(() {
+                _closeToTray = closeToTray;
+                _skipCloseConfirmation = false;
+                _windowPreferencesDirty = true;
+              }),
+              icon: const Icon(Icons.restore_rounded, size: 18),
+              label: const Text('恢复关闭确认（保存后生效）'),
+            ),
+        ],
+        FilledButton(onPressed: _saveConfig, child: const Text('保存窗口设置')),
+      ],
+    );
+  }
+
   Widget _dataManagementCard() {
     return _card(
       title: '配置管理',
@@ -774,8 +779,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
       children: [
         _summaryLine('消息', '${bot.messages.length}'),
         _summaryLine('会话', '${bot.sessions.length}'),
-        _summaryLine('群聊', '${_monitoredGroups.length}'),
-        _summaryLine('好友', '${_monitoredFriends.length}'),
+        _summaryLine(
+          '群聊',
+          '${bot.sessions.where((session) => session.sessionType == 1).length}',
+        ),
+        _summaryLine(
+          '单聊',
+          '${bot.sessions.where((session) => session.sessionType == 0).length}',
+        ),
         Align(
           alignment: Alignment.centerRight,
           child: OutlinedButton(
@@ -833,7 +844,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Widget _connectionsPage() => SingleChildScrollView(
     padding: const EdgeInsets.all(14),
-    child: _connectionCard(),
+    child: Column(
+      children: [
+        _connectionCard(),
+        if (isDesktopPlatform) ...[const SizedBox(height: 12), _windowCard()],
+      ],
+    ),
   );
   Widget _autoReplyPage() => SingleChildScrollView(
     padding: const EdgeInsets.all(14),
@@ -853,11 +869,36 @@ class _SettingsScreenState extends State<SettingsScreen> {
     padding: const EdgeInsets.all(14),
     child: _dangerZoneCard(),
   );
-  Widget _aboutPage() => Center(
-    child: Text(
-      'QQ 机器人管理器\n基于 QQ 官方开放平台的跨平台桌面管理工具。',
-      textAlign: TextAlign.center,
-      style: TextStyle(color: Theme.of(context).hintColor),
+  Widget _aboutPage() => SingleChildScrollView(
+    padding: const EdgeInsets.all(24),
+    child: Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 520),
+        child: Column(
+          children: [
+            const AppLogo(size: 72),
+            const SizedBox(height: 16),
+            Text('QQ机器人管理器', style: Theme.of(context).textTheme.titleLarge),
+            const SizedBox(height: 12),
+            const Text('基于QQ官方开放平台的跨平台桌面管理工具。', textAlign: TextAlign.center),
+            const SizedBox(height: 24),
+            const Text('学习为目的编写的'),
+            const SizedBox(height: 8),
+            const SelectableText('作者QQ：2377130783'),
+            const SizedBox(height: 8),
+            const Text('问题建议可以反馈'),
+            const SizedBox(height: 28),
+            Text(
+              '第三方服务说明：单聊昵称默认由 OIAPI 自动补全。\n'
+              '查询仅发送 AppID 和 OpenID，不发送密钥、Token 或聊天正文。',
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: Theme.of(context).hintColor,
+              ),
+            ),
+          ],
+        ),
+      ),
     ),
   );
 
@@ -972,82 +1013,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
         ],
       ),
-    );
-  }
-
-  Widget _addRow(
-    TextEditingController controller,
-    String hint,
-    VoidCallback onAdd,
-  ) {
-    return Row(
-      children: [
-        Expanded(
-          child: TextField(
-            controller: controller,
-            decoration: InputDecoration(
-              hintText: hint,
-              prefixIcon: const Icon(Icons.search_rounded, size: 18),
-            ),
-          ),
-        ),
-        const SizedBox(width: 8),
-        OutlinedButton.icon(
-          onPressed: onAdd,
-          icon: const Icon(Icons.add_rounded),
-          label: const Text('添加'),
-        ),
-      ],
-    );
-  }
-
-  void _addTarget(TextEditingController controller, List<String> list) {
-    final id = controller.text.trim();
-    if (id.isEmpty || list.contains(id)) return;
-    setState(() {
-      list.add(id);
-      controller.clear();
-    });
-  }
-
-  Widget _targetTable(
-    String label,
-    List<String> rows,
-    Color color,
-    ValueChanged<String> onDelete,
-  ) {
-    if (rows.isEmpty) {
-      return Text(
-        '暂无$label。',
-        style: TextStyle(color: Theme.of(context).hintColor),
-      );
-    }
-    return Column(
-      children: [
-        for (final id in rows)
-          Container(
-            height: 36,
-            decoration: BoxDecoration(
-              border: Border(
-                bottom: BorderSide(color: Theme.of(context).dividerColor),
-              ),
-            ),
-            child: Row(
-              children: [
-                Expanded(child: Text(id)),
-                _statusChip('已启用', color),
-                IconButton(
-                  onPressed: () => onDelete(id),
-                  icon: const Icon(
-                    Icons.delete_outline_rounded,
-                    color: AppTheme.qqRed,
-                    size: 18,
-                  ),
-                ),
-              ],
-            ),
-          ),
-      ],
     );
   }
 

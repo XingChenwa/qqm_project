@@ -18,6 +18,23 @@ class StorageService {
     _emojisBox = await Hive.openBox<String>('emojis');
     _pluginsBox = await Hive.openBox<String>('plugins');
     _prefs = await SharedPreferences.getInstance();
+
+    // 只迁移一次旧版的默认关闭状态，后续用户主动关闭不再被重置。
+    final savedConfig = _prefs.getString('bot_config');
+    if (savedConfig != null) {
+      final map = Map<String, dynamic>.from(jsonDecode(savedConfig) as Map);
+      if (BotConfig.needsOiapiNicknameDefaultMigration(map)) {
+        await _prefs.setString(
+          'bot_config',
+          jsonEncode({
+            ...map,
+            'enableOiapiNickname': true,
+            'oiapiNicknameDefaultVersion':
+                BotConfig.oiapiNicknameDefaultVersion,
+          }),
+        );
+      }
+    }
   }
 
   // --- Bot Config ---
@@ -188,6 +205,15 @@ class StorageService {
   }
 
   // --- Clear all data ---
+  Future<void> flush() async {
+    await Future.wait([
+      _messagesBox.flush(),
+      _sessionsBox.flush(),
+      _emojisBox.flush(),
+      _pluginsBox.flush(),
+    ]);
+  }
+
   Future<void> clearAll() async {
     await _messagesBox.clear();
     await _sessionsBox.clear();

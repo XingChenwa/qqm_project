@@ -1,4 +1,4 @@
-package com.qqbot.qq_bot_manager
+package cn.uuze.botmanager
 
 import io.flutter.embedding.android.FlutterActivity
 

@@ -1,99 +1,233 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/plugin_manager.dart';
 import '../../models/plugin.dart';
+import '../../models/plugin_manifest.dart';
 import '../themes/app_theme.dart';
+import 'plugin_config_dialog.dart';
+import 'plugin_developer_dialog.dart';
+import 'plugin_import_dialog.dart';
 import 'weather_config_dialog.dart';
 
-class PluginPanel extends StatelessWidget {
+class PluginPanel extends StatefulWidget {
   const PluginPanel({super.key});
+  @override
+  State<PluginPanel> createState() => _PluginPanelState();
+}
+
+class _PluginPanelState extends State<PluginPanel> {
+  String _query = '';
+  int _filter = 0;
+
+  Future<void> _import([String initialSource = '']) async {
+    final installed = await showDialog<bool>(
+      context: context,
+      builder: (_) => PluginImportDialog(
+        manager: context.read<PluginManager>(),
+        initialSource: initialSource,
+      ),
+    );
+    if (mounted && installed == true) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('插件已安装并停用，请检查配置后手动启用。')));
+    }
+  }
+
+  Future<void> _developer() async {
+    late final List<String> contents;
+    try {
+      contents = await Future.wait(
+        PluginDeveloperDialog.assetPaths.map(rootBundle.loadString),
+      );
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('开发资源读取失败，请查看仓库中的 docs/plugin-development.md。'),
+          ),
+        );
+      }
+      return;
+    }
+    if (!mounted) return;
+    final source = await showDialog<String>(
+      context: context,
+      builder: (_) => PluginDeveloperDialog(contents: contents),
+    );
+    if (source != null && mounted) await _import(source);
+  }
 
   @override
   Widget build(BuildContext context) {
     final manager = context.watch<PluginManager>();
-    final plugins = manager.plugins;
-
+    final plugins = manager.plugins
+        .where(
+          (p) =>
+              (_filter == 0 ||
+                  manager.isBundled(p.info.id) == (_filter == 1)) &&
+              '${p.info.name} ${p.info.id} ${p.info.description}'
+                  .toLowerCase()
+                  .contains(_query.toLowerCase()),
+        )
+        .toList();
     return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(12, 4, 12, 10),
+          padding: const EdgeInsets.fromLTRB(20, 18, 16, 12),
           child: Row(
             children: [
-              const Icon(
-                Icons.extension_rounded,
-                size: 18,
-                color: AppTheme.qqBlue,
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      '插件中心',
+                      style: TextStyle(
+                        fontSize: 22,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: -.5,
+                      ),
+                    ),
+                    const SizedBox(height: 5),
+                    Text(
+                      '${manager.enabledCount} 个运行中 · ${manager.plugins.length} 个已安装',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Theme.of(context).hintColor,
+                      ),
+                    ),
+                  ],
+                ),
               ),
-              const SizedBox(width: 8),
-              const Text(
-                '插件',
-                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800),
+              IconButton(
+                tooltip: '开发者文档与示例',
+                onPressed: _developer,
+                icon: const Icon(Icons.code_rounded),
               ),
-              const Spacer(),
-              _countBadge(
-                plugins.where((plugin) => plugin.info.isEnabled).length,
-                plugins.length,
+              FilledButton.icon(
+                onPressed: _import,
+                icon: const Icon(Icons.add, size: 18),
+                label: const Text('导入'),
               ),
             ],
           ),
         ),
-        Expanded(
-          child: plugins.isEmpty
-              ? _emptyState(context)
-              : ListView.separated(
-                  padding: const EdgeInsets.fromLTRB(10, 0, 10, 12),
-                  itemCount: plugins.length,
-                  separatorBuilder: (_, _) => const SizedBox(height: 8),
-                  itemBuilder: (context, index) {
-                    return _PluginCard(
-                      plugin: plugins[index],
-                      manager: manager,
-                    );
-                  },
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          child: TextField(
+            onChanged: (value) => setState(() => _query = value),
+            decoration: const InputDecoration(
+              hintText: '搜索名称、ID 或功能',
+              prefixIcon: Icon(Icons.search, size: 19),
+            ),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 10, 20, 12),
+          child: Wrap(
+            spacing: 8,
+            runSpacing: 6,
+            children: [
+              for (final entry in const {0: '全部插件', 1: '内置', 2: '第三方'}.entries)
+                ChoiceChip(
+                  label: Text(entry.value),
+                  selected: _filter == entry.key,
+                  showCheckmark: false,
+                  onSelected: (_) => setState(() => _filter = entry.key),
                 ),
+            ],
+          ),
+        ),
+        Expanded(
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final columns = constraints.maxWidth >= 1120
+                  ? 3
+                  : constraints.maxWidth >= 740
+                  ? 2
+                  : 1;
+              final width =
+                  (constraints.maxWidth - 40 - (columns - 1) * 16) / columns;
+              return SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: AppTheme.qqBlue.withValues(alpha: .06),
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Icon(
+                            Icons.integration_instructions_outlined,
+                            color: AppTheme.qqBlue,
+                            size: 22,
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text(
+                                  '为机器人添加你自己的能力',
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: 13,
+                                  ),
+                                ),
+                                const SizedBox(height: 5),
+                                Text(
+                                  '导入 JSON / YAML 规则，或连接自己的 HTTP 服务。文档与示例可直接复制使用。',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    height: 1.6,
+                                    color: Theme.of(context).hintColor,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    if (plugins.isEmpty)
+                      const Padding(
+                        padding: EdgeInsets.all(28),
+                        child: Center(child: Text('没有匹配的插件，试试导入一个示例。')),
+                      )
+                    else
+                      Wrap(
+                        spacing: 16,
+                        runSpacing: 16,
+                        children: [
+                          for (final plugin in plugins)
+                            SizedBox(
+                              width: width,
+                              child: _PluginCard(
+                                plugin: plugin,
+                                manager: manager,
+                              ),
+                            ),
+                        ],
+                      ),
+                  ],
+                ),
+              );
+            },
+          ),
         ),
       ],
-    );
-  }
-
-  Widget _countBadge(int enabled, int total) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: AppTheme.qqBlue.withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Text(
-        '$enabled / $total',
-        style: const TextStyle(
-          fontSize: 11,
-          color: AppTheme.qqBlue,
-          fontWeight: FontWeight.w800,
-        ),
-      ),
-    );
-  }
-
-  Widget _emptyState(BuildContext context) {
-    return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(
-            Icons.extension_off_rounded,
-            size: 42,
-            color: Theme.of(context).hintColor.withValues(alpha: 0.45),
-          ),
-          const SizedBox(height: 10),
-          const Text('暂无插件', style: TextStyle(fontWeight: FontWeight.w800)),
-          const SizedBox(height: 4),
-          Text(
-            '插件加载后会显示在这里。',
-            style: TextStyle(fontSize: 12, color: Theme.of(context).hintColor),
-          ),
-        ],
-      ),
     );
   }
 }
@@ -101,49 +235,60 @@ class PluginPanel extends StatelessWidget {
 class _PluginCard extends StatelessWidget {
   final BotPlugin plugin;
   final PluginManager manager;
-
   const _PluginCard({required this.plugin, required this.manager});
-
   PluginInfo get info => plugin.info;
 
   @override
   Widget build(BuildContext context) {
-    final enabled = info.isEnabled;
-    final accent = enabled ? AppTheme.qqGreen : Theme.of(context).hintColor;
-
+    final bundled = manager.isBundled(info.id);
+    final runtime = info.manifest['runtime'];
+    final accent = runtime == 'http'
+        ? const Color(0xFF7C5CDA)
+        : AppTheme.qqBlue;
+    final error = manager.errorFor(info.id);
     return Card(
+      key: ValueKey('plugin-card-${info.id}'),
       child: Padding(
-        padding: const EdgeInsets.all(12),
+        padding: const EdgeInsets.all(18),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
               children: [
                 Container(
-                  width: 30,
-                  height: 30,
+                  width: 42,
+                  height: 42,
                   decoration: BoxDecoration(
-                    color: accent.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(8),
+                    color: accent.withValues(alpha: .08),
+                    borderRadius: BorderRadius.circular(13),
                   ),
-                  child: Icon(_iconFor(info.id), size: 17, color: accent),
+                  child: Icon(
+                    _iconFor(info.id, runtime),
+                    color: accent,
+                    size: 23,
+                  ),
                 ),
-                const SizedBox(width: 9),
+                const SizedBox(width: 12),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
                         info.name,
+                        maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w800,
+                          fontSize: 15,
+                          fontWeight: FontWeight.w700,
                         ),
                       ),
-                      const SizedBox(height: 2),
+                      const SizedBox(height: 4),
                       Text(
-                        'v${info.version}',
+                        'v${info.version} · ${bundled
+                            ? '内置 Dart'
+                            : runtime == 'http'
+                            ? 'HTTP 服务'
+                            : '规则插件'}',
                         style: TextStyle(
                           fontSize: 11,
                           color: Theme.of(context).hintColor,
@@ -152,52 +297,106 @@ class _PluginCard extends StatelessWidget {
                     ],
                   ),
                 ),
-                Switch(
-                  value: enabled,
-                  onChanged: (value) {
-                    if (value) {
-                      manager.enablePlugin(info.id);
-                    } else {
-                      manager.disablePlugin(info.id);
-                    }
-                  },
+                Transform.scale(
+                  scale: .82,
+                  child: Switch(
+                    value: info.isEnabled,
+                    onChanged: (value) async {
+                      final success = value
+                          ? await manager.enablePlugin(info.id)
+                          : await manager.disablePlugin(info.id);
+                      if (!success && context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(manager.errorFor(info.id) ?? '操作失败'),
+                          ),
+                        );
+                      }
+                    },
+                  ),
                 ),
               ],
             ),
-            const SizedBox(height: 9),
+            const SizedBox(height: 14),
             Text(
               info.description,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 fontSize: 12,
-                height: 1.35,
+                height: 1.7,
                 color: Theme.of(context).hintColor,
               ),
             ),
-            const SizedBox(height: 10),
-            Wrap(
-              spacing: 6,
-              runSpacing: 6,
-              crossAxisAlignment: WrapCrossAlignment.center,
+            const SizedBox(height: 14),
+            Row(
               children: [
-                _statusChip(enabled),
-                for (final permission in info.permissions.take(3))
-                  _permissionChip(permission),
-                if (info.permissions.length > 3)
-                  _permissionChip('+${info.permissions.length - 3}'),
-                if (info.id == 'weather_plugin')
-                  ActionChip(
-                    avatar: const Icon(Icons.settings_rounded, size: 15),
-                    label: const Text('配置'),
-                    tooltip: '配置高德天气与 IP 查询',
-                    onPressed: () => _showWeatherConfig(context),
-                    visualDensity: VisualDensity.compact,
+                Icon(
+                  Icons.circle,
+                  color: info.isEnabled ? AppTheme.qqGreen : AppTheme.muted,
+                  size: 7,
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  info.isEnabled ? '已启用' : '已停用',
+                  style: const TextStyle(fontSize: 11),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    info.id,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: Theme.of(context).hintColor,
+                    ),
                   ),
-                if (info.id == 'translate_comment')
-                  ActionChip(
-                    avatar: const Icon(Icons.settings_rounded, size: 15),
-                    label: const Text('配置'),
-                    onPressed: () => _showTranslateConfig(context),
-                    visualDensity: VisualDensity.compact,
+                ),
+              ],
+            ),
+            if (error != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text(
+                  error,
+                  style: const TextStyle(color: AppTheme.qqRed, fontSize: 12),
+                ),
+              ),
+            const Divider(height: 26),
+            Row(
+              children: [
+                Expanded(
+                  child: Tooltip(
+                    message: info.id == 'weather_plugin'
+                        ? '配置高德天气与 IP 查询'
+                        : '插件配置',
+                    child: OutlinedButton.icon(
+                      onPressed:
+                          (info.manifest['config_schema'] as List? ?? [])
+                              .isEmpty
+                          ? null
+                          : () => _configure(context),
+                      icon: const Icon(Icons.tune, size: 16),
+                      label: Text(
+                        (info.manifest['config_schema'] as List? ?? []).isEmpty
+                            ? '无需配置'
+                            : '配置',
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                IconButton(
+                  tooltip: '查看和复制插件清单',
+                  onPressed: () => _viewManifest(context),
+                  icon: const Icon(Icons.data_object, size: 19),
+                ),
+                if (!bundled)
+                  IconButton(
+                    tooltip: '卸载插件',
+                    onPressed: () => _uninstall(context),
+                    icon: const Icon(Icons.delete_outline, size: 19),
                   ),
               ],
             ),
@@ -207,124 +406,115 @@ class _PluginCard extends StatelessWidget {
     );
   }
 
-  IconData _iconFor(String id) {
-    return switch (id) {
-      'weather_plugin' => Icons.cloud_outlined,
-      'dice_plugin' => Icons.casino_outlined,
-      'translate_comment' => Icons.translate_rounded,
-      'example_plugin' => Icons.smart_toy_outlined,
-      _ => Icons.extension_rounded,
-    };
+  IconData _iconFor(String id, dynamic runtime) => switch (id) {
+    'weather_plugin' => Icons.cloud_outlined,
+    'dice_plugin' => Icons.casino_outlined,
+    'translate_comment' => Icons.translate_rounded,
+    'example_plugin' => Icons.waving_hand_outlined,
+    _ => runtime == 'http' ? Icons.hub_outlined : Icons.extension_outlined,
+  };
+
+  Future<void> _configure(BuildContext context) async {
+    try {
+      final definition = PluginManifest.parse(
+        jsonEncode(info.manifest),
+        allowBuiltin: true,
+      );
+      if (definition.fields.isEmpty) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('这个插件没有可配置项。')));
+        return;
+      }
+      final config = await showDialog<Map<String, dynamic>>(
+        context: context,
+        builder: (_) => info.id == 'weather_plugin'
+            ? WeatherConfigDialog(config: info.config)
+            : PluginConfigDialog(info: info, definition: definition),
+      );
+      if (config == null) return;
+      final saved = await manager.updatePluginConfig(info.id, config);
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(saved ? '${info.name}配置已保存' : '保存失败')),
+        );
+      }
+    } catch (_) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('配置无效，请检查必填项和类型。')));
+      }
+    }
   }
 
-  Widget _statusChip(bool enabled) {
-    final color = enabled ? AppTheme.qqGreen : AppTheme.muted;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Text(
-        enabled ? '已启用' : '已停用',
-        style: TextStyle(
-          fontSize: 11,
-          color: color,
-          fontWeight: FontWeight.w800,
-        ),
-      ),
-    );
-  }
-
-  Widget _permissionChip(String text) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
-      decoration: BoxDecoration(
-        color: AppTheme.qqBlue.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Text(
-        text,
-        style: const TextStyle(
-          fontSize: 10,
-          color: AppTheme.qqBlue,
-          fontWeight: FontWeight.w700,
-        ),
-      ),
-    );
-  }
-
-  void _showTranslateConfig(BuildContext context) {
-    final apiKeyController = TextEditingController(
-      text: info.config['api_key']?.toString() ?? '',
-    );
-    final langController = TextEditingController(
-      text: info.config['target_lang']?.toString() ?? '中文',
-    );
-
+  void _viewManifest(BuildContext context) {
+    final source = manager.exportPlugin(info.id);
     showDialog<void>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('代码注释翻译配置'),
+        insetPadding: const EdgeInsets.all(16),
+        title: const Text('插件清单（不包含本机密钥）'),
         content: SizedBox(
-          width: 420,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: apiKeyController,
-                obscureText: true,
-                decoration: const InputDecoration(
-                  labelText: 'DeepSeek API 密钥',
-                  hintText: 'sk-...',
-                  helperText: '可在 platform.deepseek.com 获取',
-                  prefixIcon: Icon(Icons.key_rounded),
+          width: 640,
+          height: MediaQuery.sizeOf(context).height * .55,
+          child: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (manager.isBundled(info.id))
+                  const Padding(
+                    padding: EdgeInsets.only(bottom: 12),
+                    child: Text('内置 Dart 清单只供查看；修改源码后需重新编译应用。'),
+                  ),
+                SelectableText(
+                  source,
+                  style: const TextStyle(
+                    fontFamily: 'monospace',
+                    fontSize: 12,
+                    height: 1.6,
+                  ),
                 ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: langController,
-                decoration: const InputDecoration(
-                  labelText: '目标语言',
-                  hintText: '默认：中文',
-                  prefixIcon: Icon(Icons.language_rounded),
-                ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('取消'),
+            child: const Text('关闭'),
           ),
-          FilledButton(
-            onPressed: () {
-              manager.updatePluginConfig(info.id, {
-                'api_key': apiKeyController.text.trim(),
-                'target_lang': langController.text.trim().isEmpty
-                    ? '中文'
-                    : langController.text.trim(),
-              });
-              Navigator.pop(dialogContext);
+          FilledButton.icon(
+            onPressed: () async {
+              await Clipboard.setData(ClipboardData(text: source));
+              if (dialogContext.mounted) Navigator.pop(dialogContext);
             },
-            child: const Text('保存'),
+            icon: const Icon(Icons.copy, size: 16),
+            label: const Text('复制清单'),
           ),
         ],
       ),
     );
   }
 
-  Future<void> _showWeatherConfig(BuildContext context) async {
-    final config = await showDialog<Map<String, dynamic>>(
+  Future<void> _uninstall(BuildContext context) async {
+    final confirmed = await showDialog<bool>(
       context: context,
-      builder: (_) => WeatherConfigDialog(config: info.config),
+      builder: (ctx) => AlertDialog(
+        title: const Text('卸载第三方插件'),
+        content: Text('将移除“${info.name}”及其本机配置。原始 JSON/YAML 文件不会删除。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('卸载'),
+          ),
+        ],
+      ),
     );
-    if (config == null) return;
-    final saved = await manager.updatePluginConfig(info.id, config);
-    if (!context.mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(saved ? '高德天气与 IP 查询配置已保存' : '保存失败，请重新打开插件配置')),
-    );
+    if (confirmed == true) await manager.uninstallPlugin(info.id);
   }
 }

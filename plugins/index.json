@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "plugins": [
+    "plugins/example_plugin/plugin.json",
+    "plugins/weather_plugin/plugin.json",
+    "plugins/dice_plugin/plugin.json",
+    "plugins/translate_comment/plugin.json"
+  ]
+}

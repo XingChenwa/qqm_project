@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "id": "weather_plugin",
+  "name": "天气与 IP 查询",
+  "version": "1.1.0",
+  "description": "高德实况天气与 IP 定位，支持天气 城市、/天气 城市、查ip地址 IPv4。",
+  "config": {
+    "amap_key": "",
+    "default_city": ""
+  },
+  "permissions": [
+    "message:read",
+    "message:send",
+    "network:amap"
+  ],
+  "config_schema": [
+    {
+      "key": "amap_key",
+      "label": "高德 Web 服务 Key",
+      "type": "secret",
+      "default": ""
+    },
+    {
+      "key": "default_city",
+      "label": "默认城市",
+      "type": "string",
+      "default": ""
+    }
+  ],
+  "author": "QQ 机器人管理器",
+  "runtime": "builtin",
+  "entrypoint": "lib/weather_plugin/plugin.dart"
+}

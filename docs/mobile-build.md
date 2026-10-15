@@ -8,7 +8,8 @@
 
 - Android：模板最低 Android 7.0（API 24），当前提供 debug 签名测试 APK。正式分发需配置自己的签名密钥。
 - 安卓构建固定使用 AGP 8.13.2、Gradle 8.13、Kotlin 2.3.20 和 JDK 17，以兼容现有 `file_picker 11.x`。不要单独升级 AGP 9：该插件会跳过传统 Kotlin 插件，而当前 Flutter 工程禁用内置 Kotlin，会导致 `FilePickerPlugin` 未编译。
-- iOS：最低 iOS 13，标识继承现有工程组织为 `com.qqbot.qqBotManager`。实际签名时须与证书/描述文件匹配；应用仍使用 Flutter 模板图标。
+- Android 和 iOS 包名均为 `cn.uuze.botmanager`，使用 `assets/branding/logo.png` 生成的应用图标。当前版本为 1.2.6+9。
+- iOS：最低 iOS 13；实际重签时 Bundle ID 须与证书/描述文件匹配。更换包名会视为新应用，不会自动迁移旧包名下的数据。
 - Windows 本机未配置 Android SDK 时不能编译 APK，也不能直接编译需要 Xcode 的 IPA。原生安装包应在下述云端或相应 SDK 环境构建，是否成功以具体运行记录和产物为准。
 
 ## 没有 Mac：用 Windows 操作 GitHub 云端构建
@@ -22,6 +23,12 @@
    - `ios-unsigned-ipa`：里面是 `qq_bot_manager-unsigned.ipa`。云端先实际编译 iPhone 真机 arm64 应用，再打包为 IPA；不是模拟器包，也不是直接把源码改后缀。
 
 GitHub 返回的外层 ZIP 是下载容器，不是安装包。一定要先解压取出 `.apk` 或 `.ipa` 文件。仅提交源码不会触发构建，必须手动启动工作流并等待成功；任务报错时请提供对应步骤的日志，不要提供密钥。
+
+## 内置浏览器与手机版网页
+
+聊天正文、Markdown、卡片和附件的网页链接保持在应用内浏览页，默认请求手机版，右上角可切换电脑版。桌面窗口里手机版网页居中显示为手机宽度；在手机端直接适应屏幕宽度。不会篡改链接的域名、签名参数或片段，也不会为了打不开的网页自动启动系统浏览器。网站没有手机版或要求特定客户端时，仍可能不提供移动布局。
+
+实现依据：[InAppWebView 设置](https://inappwebview.dev/docs/webview/in-app-weview-settings/)中的 `preferredContentMode` 和 `userAgent`；Windows WebView2 不实现移动内容模式，因此额外提供手机标识和窄视口。
 
 ## 全能签安装
 
