@@ -17,6 +17,7 @@ import '../themes/app_theme.dart';
 import '../../utils/platforms.dart';
 import '../widgets/app_logo.dart';
 import '../widgets/update_panel.dart';
+import '../widgets/app_dialogs.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -139,12 +140,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       }
       if (!mounted) return;
       _windowPreferencesDirty = false;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('配置已保存'),
-          backgroundColor: AppTheme.qqGreen,
-        ),
-      );
+      AppDialogs.show(context, '配置已保存');
     } catch (e) {
       if (mounted) _showError('配置保存失败: $e');
     } finally {
@@ -153,9 +149,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   void _showError(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message), backgroundColor: AppTheme.qqRed),
-    );
+    AppDialogs.show(context, message, title: '操作失败', error: true);
   }
 
   Future<void> _testCredentials() async {
@@ -194,9 +188,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           bytes: Uint8List.fromList(utf8.encode(json)),
         );
         if (!mounted || path == null) return;
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('配置已导出；文件包含密钥，请妥善保管')));
+        AppDialogs.show(context, '配置已导出；文件包含密钥，请妥善保管');
       } catch (_) {
         if (mounted) _showError('导出失败，请选择可写入的位置');
       }
@@ -210,12 +202,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
     await file.writeAsString(json);
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('配置已导出到：${file.path}'),
-        backgroundColor: AppTheme.qqGreen,
-      ),
-    );
+    AppDialogs.show(context, '配置已导出到：${file.path}');
   }
 
   Future<void> _importConfig() async {
@@ -238,9 +225,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (!mounted) return;
 
     setState(_loadConfig);
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('配置已导入'), backgroundColor: AppTheme.qqGreen),
-    );
+    AppDialogs.show(context, '配置已导入');
   }
 
   @override
@@ -819,9 +804,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 onPressed: () {
                   imageCache.clear();
                   imageCache.clearLiveImages();
-                  ScaffoldMessenger.of(
-                    context,
-                  ).showSnackBar(const SnackBar(content: Text('内存图片缓存已清除')));
+                  AppDialogs.show(context, '内存图片缓存已清除');
                 },
                 child: const Text('清除内存图片缓存'),
               ),
@@ -1096,9 +1079,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     await context.read<PluginManager>().init();
     if (!mounted) return;
     setState(_loadConfig);
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('所有数据已清除'), backgroundColor: AppTheme.qqRed),
-    );
+    AppDialogs.show(context, '所有数据已清除');
   }
 
   Future<void> _confirmResetConfig() async {
@@ -1124,9 +1105,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     await context.read<BotClient>().updateConfig(BotConfig());
     if (!mounted) return;
     setState(_loadConfig);
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(const SnackBar(content: Text('机器人配置已重置，聊天记录已保留')));
+    AppDialogs.show(context, '机器人配置已重置，聊天记录已保留');
   }
 
   Widget _summaryLine(String label, String value) {

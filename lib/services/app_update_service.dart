@@ -81,6 +81,8 @@ class AppUpdateService extends ChangeNotifier {
                ? 'android'
                : Platform.isIOS
                ? 'ios'
+               : Platform.isMacOS
+               ? 'macos'
                : 'unsupported'),
        arch =
            arch ??
@@ -422,6 +424,18 @@ class AppUpdateService extends ChangeNotifier {
         }
         await exitForUpdate();
         // If the window could not close, never leave the update UI stuck.
+        if (!_disposed) {
+          phase = UpdatePhase.ready;
+          _changed();
+        }
+      } else if (platform == 'macos') {
+        // The validated DMG is handed to Finder, not a shell or auto installer.
+        final opened = await Process.run('/usr/bin/open', [
+          file.path,
+        ], runInShell: false);
+        if (opened.exitCode != 0) {
+          throw const FormatException('系统未能打开 DMG，请稍后重试');
+        }
         if (!_disposed) {
           phase = UpdatePhase.ready;
           _changed();

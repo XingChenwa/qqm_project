@@ -5,7 +5,7 @@ import 'package:yaml/yaml.dart';
 import 'package:image/image.dart' as img;
 
 void main() {
-  test('Android 与 iOS 包名统一为 cn.uuze.botmanager，三端使用自定义图标', () {
+  test('Android、iOS、macOS 包名统一并使用自定义图标', () {
     final app = File('android/app/build.gradle.kts').readAsStringSync();
     expect(app, contains('namespace = "cn.uuze.botmanager"'));
     expect(app, contains('applicationId = "cn.uuze.botmanager"'));
@@ -42,6 +42,20 @@ void main() {
       greaterThan(1024),
     );
     expect(File('assets/branding/logo.png').existsSync(), isTrue);
+    expect(
+      File('macos/Runner/Configs/AppInfo.xcconfig').readAsStringSync(),
+      contains('PRODUCT_BUNDLE_IDENTIFIER = cn.uuze.botmanager'),
+    );
+    for (final name in ['DebugProfile', 'Release']) {
+      final entitlements = File(
+        'macos/Runner/$name.entitlements',
+      ).readAsStringSync();
+      expect(entitlements, contains('com.apple.security.network.client'));
+      expect(
+        entitlements,
+        contains('com.apple.security.files.user-selected.read-write'),
+      );
+    }
   });
   test('安卓工具链固定兼容的 AGP/Gradle，并显式编译应用和文件选择插件的 Kotlin', () {
     final settings = File('android/settings.gradle.kts').readAsStringSync();
@@ -69,6 +83,13 @@ void main() {
     expect(workflow['permissions']['contents'], 'read');
     expect(workflow['jobs']['android']['runs-on'], 'ubuntu-24.04');
     expect(workflow['jobs']['ios']['runs-on'], 'macos-15');
+    expect(workflow['jobs']['macos']['runs-on'], 'macos-15');
+    expect(
+      (workflow['jobs']['macos']['steps'] as YamlList).any(
+        (s) => s['run'] == 'bash scripts/build_macos_package.sh',
+      ),
+      isTrue,
+    );
     final androidSteps = workflow['jobs']['android']['steps'] as YamlList;
     final iosSteps = workflow['jobs']['ios']['steps'] as YamlList;
     expect(

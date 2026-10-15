@@ -288,7 +288,7 @@ final class Core
 
     public function signedUpdate(string $platform, string $arch, string $nonce): array
     {
-        if (!in_array($platform, ['windows', 'android', 'ios'], true) || !in_array($arch, ['x64', 'arm64', 'universal'], true) || !preg_match('/^[a-f0-9-]{16,64}$/D', $nonce)) { throw new HttpError(422, '更新请求参数无效'); }
+        if (!in_array($platform, ['windows', 'android', 'ios', 'macos'], true) || !in_array($arch, ['x64', 'arm64', 'universal'], true) || !preg_match('/^[a-f0-9-]{16,64}$/D', $nonce)) { throw new HttpError(422, '更新请求参数无效'); }
         $secret = base64_decode($this->config['signing_secret'], true);
         if ($secret === false || strlen($secret) !== SODIUM_CRYPTO_SIGN_SECRETKEYBYTES) { throw new HttpError(503, '更新签名公钥尚未初始化'); }
         $row = $this->query('SELECT * FROM qqm_releases WHERE published=1 AND platform=? AND arch=? ORDER BY build DESC LIMIT 1', [$platform, $arch])->fetch();
@@ -299,14 +299,17 @@ final class Core
     public function addRelease(array $fields, string $temporaryFile, bool $httpUpload = true): array
     {
         [$platform, $version, $build] = self::clientFields($fields); $format = $fields['format'] ?? ''; $arch = $fields['arch'] ?? '';
-        if (!in_array($platform, ['windows', 'android', 'ios'], true)
+        if (!in_array($platform, ['windows', 'android', 'ios', 'macos'], true)
             || !in_array($arch, $platform === 'windows' ? ['x64'] : ($platform === 'ios' ? ['arm64'] : ['universal']), true)
-            || !in_array($format, $platform === 'windows' ? ['zip', 'exe'] : ($platform === 'android' ? ['apk'] : ['ipa']), true)) { throw new HttpError(422, '平台、架构或包类型不匹配'); }
+            || !in_array($format, match ($platform) { 'windows' => ['zip', 'exe'], 'android' => ['apk'], 'macos' => ['dmg'], default => ['ipa'] }, true)) { throw new HttpError(422, '平台、架构或包类型不匹配'); }
         $size = is_file($temporaryFile) ? filesize($temporaryFile) : 0;
         if ($size < 1 || $size > (int)$this->config['max_upload_bytes']) { throw new HttpError(422, '安装包为空或超过上传限制'); }
         $notes = $fields['notes'] ?? '';
         if (!is_string($notes) || strlen($notes) > 12000) { throw new HttpError(422, '更新说明过长'); }
-        if ($format !== 'exe') {
+        if ($format === 'dmg') {
+            // UDIF trailer; uploads are opaque and are never mounted/executed by PHP.
+            if ($size < 512 || file_get_contents($temporaryFile, false, null, $size - 512, 4) !== 'koly') { throw new HttpError(422, '不是有效的 macOS DMG 镜像'); }
+        } elseif ($format !== 'exe') {
             $zip = new ZipArchive();
             if ($zip->open($temporaryFile) !== true) { throw new HttpError(422, '安装包不是有效 ZIP/APK/IPA'); }
             try {

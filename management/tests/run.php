@@ -92,6 +92,20 @@ try {
     rejects(fn() => $core->addRelease(['platform' => 'windows', 'version' => '1.3.0', 'build' => 11, 'arch' => 'x64', 'format' => 'zip'], $zipPath, false), 409);
     $badPath = $directory . '/bad.zip'; $zip = new ZipArchive(); $zip->open($badPath, ZipArchive::CREATE); $zip->addFromString('../escape.exe', 'no'); $zip->close();
     rejects(fn() => $core->addRelease(['platform' => 'windows', 'version' => '1.3.0', 'build' => 12, 'arch' => 'x64', 'format' => 'zip'], $badPath, false), 422);
+    // Synthetic UDIF trailer tests only; no disk image is mounted or executed.
+    $dmgPath = $directory . '/fixture.dmg'; file_put_contents($dmgPath, 'fixture-only' . 'koly' . str_repeat("\0", 508));
+    $macFields = ['platform' => 'macos', 'version' => '1.3.2', 'build' => 13, 'arch' => 'universal', 'format' => 'dmg'];
+    $mac = $core->addRelease($macFields, $dmgPath, false);
+    check($mac['format'] === 'dmg' && $mac['arch'] === 'universal', 'macOS DMG upload');
+    $core->publish($mac['id'], true);
+    $macEnvelope = $core->signedUpdate('macos', 'universal', $nonce);
+    $macPayload = base64_decode($macEnvelope['payload']);
+    check(sodium_crypto_sign_verify_detached(base64_decode($macEnvelope['signature']), $macPayload, sodium_crypto_sign_publickey($keys)), 'macOS signed manifest');
+    check(json_decode($macPayload, true)['release']['id'] === $mac['id'], 'macOS update selects own package');
+    $core->publish($mac['id'], false);
+    rejects(fn() => $core->addRelease(array_replace($macFields, ['arch' => 'x64']), $dmgPath, false), 422);
+    rejects(fn() => $core->addRelease(array_replace($macFields, ['format' => 'exe']), $dmgPath, false), 422);
+    rejects(fn() => $core->addRelease(array_replace($macFields, ['build' => 14]), $badPath, false), 422);
     $core->query('UPDATE qqm_installations SET ip_updated_at=?', [time() - 8 * 86400]); $core->prune();
     check($core->stats()['devices'][0]['last_ip'] === null, 'IP retention');
     $core->forget($token); check($core->stats()['installations'] === 0, 'Delete installation');

@@ -70,6 +70,7 @@ class AppRelease {
       'windows' => {'zip', 'exe'},
       'android' => {'apk'},
       'ios' => {'ipa'},
+      'macos' => {'dmg'},
       _ => <String>{},
     };
     if (release['platform'] != platform ||

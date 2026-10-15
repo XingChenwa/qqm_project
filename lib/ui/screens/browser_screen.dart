@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import '../widgets/app_dialogs.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:path/path.dart' as path;
@@ -23,9 +24,7 @@ Uri? browserUri(String value) {
 Future<void> openInAppBrowser(BuildContext context, String url) async {
   final uri = browserUri(url);
   if (uri == null) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('仅支持在应用内打开 HTTP / HTTPS 网页链接')),
-    );
+    AppDialogs.show(context, '仅支持在应用内打开 HTTP / HTTPS 网页链接');
     return;
   }
   await Navigator.of(
@@ -137,9 +136,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
 
   void _blocked() {
     if (!mounted) return;
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(const SnackBar(content: Text('已拦截外部应用跳转，链接保持在内置浏览器中')));
+    AppDialogs.show(context, '已拦截外部应用跳转，链接保持在内置浏览器中');
   }
 
   Future<void> _retry() async {
@@ -170,9 +167,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
     } catch (_) {
       if (mounted) {
         setState(() => _mobileMode = previousMode);
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('网页模式切换失败，请重试。')));
+        AppDialogs.show(context, '网页模式切换失败，请重试。', error: true);
       }
     } finally {
       if (mounted) setState(() => _modeChanging = false);
@@ -204,9 +199,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
           onPressed: () async {
             await Clipboard.setData(ClipboardData(text: _url));
             if (context.mounted) {
-              ScaffoldMessenger.of(
-                context,
-              ).showSnackBar(const SnackBar(content: Text('链接已复制')));
+              AppDialogs.show(context, '链接已复制');
             }
           },
         ),

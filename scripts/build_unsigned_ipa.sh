@@ -2,7 +2,7 @@
 set -euo pipefail
 
 if [[ "$(uname -s)" != Darwin ]]; then
-  printf '%s\n' 'IPA 编译需要 macOS/Xcode；Windows 请使用 GitHub 的“移动端安装包”工作流。' >&2
+  printf '%s\n' 'IPA 编译需要 macOS/Xcode；Windows 请使用 GitHub 的“移动端与 macOS 安装包”工作流。' >&2
   exit 1
 fi
 

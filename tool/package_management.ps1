@@ -2,9 +2,9 @@
 $ErrorActionPreference = 'Stop'
 $workspace = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $stage = Join-Path $workspace ('build\management-deploy-' + [Guid]::NewGuid().ToString('N'))
-$output = Join-Path $workspace 'dist\qqbotmanager-baota-mysql-v1.3.1-build12-device-info.zip'
+$output = Join-Path $workspace 'dist\qqbotmanager-baota-mysql-v1.3.2-build13.zip'
 if (Test-Path -LiteralPath $output) { throw 'Deployment ZIP already exists; preserve the existing artifact.' }
-$paths = @('management/config.example.php','management/README.md','management/DEPLOY.txt','management/data/.gitignore','docs/update-and-edgeone.md','docs/windows-release.md')
+$paths = @('management/config.example.php','management/README.md','management/DEPLOY.txt','management/data/.gitignore','docs/update-and-edgeone.md','docs/windows-release.md','docs/mobile-build.md')
 foreach ($directory in @('management/src','management/public','management/bin','management/deploy','management/database','management/tests')) {
   $paths += Get-ChildItem -LiteralPath (Join-Path $workspace $directory) -File -Recurse | ForEach-Object { $_.FullName.Substring($workspace.Length+1) }
 }

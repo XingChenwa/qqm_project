@@ -28,8 +28,9 @@ function serve(Core $core, AccountLogin $account): bool
     header('Cache-Control: no-store');
     try {
         $core->checkOriginToken($_SERVER); $method = $_SERVER['REQUEST_METHOD']; $ip = $core->clientIp($_SERVER);
-        if (($path === '/' || $path === '/admin' || $path === '/admin/') && $method === 'GET') {
-            header('Content-Type: text/html; charset=utf-8'); readfile($public . ($path === '/' ? '/home.html' : '/admin.html')); exit;
+        if (in_array($path, ['/', '/admin', '/admin/', '/privacy'], true) && $method === 'GET') {
+            header('Content-Type: text/html; charset=utf-8');
+            readfile($public . ($path === '/' ? '/home.html' : ($path === '/privacy' ? '/privacy.html' : '/admin.html'))); exit;
         }
         if ($path === '/api/v1/releases' && $method === 'GET') { respond(['releases' => $core->releases(), 'preview' => $core->config['environment'] === 'development']); }
         if ($path === '/api/v1/update' && $method === 'GET') { respond($core->signedUpdate((string)($_GET['platform'] ?? ''), (string)($_GET['arch'] ?? ''), (string)($_GET['nonce'] ?? ''))); }

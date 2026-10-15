@@ -9,6 +9,7 @@ import 'ui/widgets/desktop_window_frame.dart';
 import 'ui/widgets/window_close_dialog.dart';
 import 'services/app_update_service.dart';
 import 'ui/widgets/update_panel.dart';
+import 'ui/widgets/app_dialogs.dart';
 
 class QQBotManagerApp extends StatefulWidget {
   const QQBotManagerApp({super.key});
@@ -20,7 +21,6 @@ class QQBotManagerApp extends StatefulWidget {
 class _QQBotManagerAppState extends State<QQBotManagerApp> {
   ThemeMode _themeMode = ThemeMode.light;
   final _navigatorKey = GlobalKey<NavigatorState>();
-  final _messengerKey = GlobalKey<ScaffoldMessengerState>();
   DesktopWindowController? _desktopWindow;
   @override
   void initState() {
@@ -35,18 +35,32 @@ class _QQBotManagerAppState extends State<QQBotManagerApp> {
     if (updates == null || !updates.configured) return;
     if (updates.preferences.usageConsent &&
         !updates.preferences.usageNoticeSeen) {
-      _messengerKey.currentState?.showSnackBar(
-        SnackBar(
-          content: const Text(
-            '使用统计默认开启：发送设备名称／型号、系统、软件版本和来源 IP。可在「设置 → 更新」关闭并删除。',
+      final target = _navigatorKey.currentState?.overlay?.context;
+      if (target == null) return;
+      final enabled = await AppDialogs.present<bool>(
+        target,
+        key: 'usage-notice',
+        barrierDismissible: false,
+        builder: (dialog) => AlertDialog(
+          title: const Text('隐私与使用统计'),
+          content: const SingleChildScrollView(
+            child: Text(
+              '使用统计默认开启，用于了解设备活跃与版本分布。会发送随机安装 ID、设备名称／型号、系统、架构和软件版本，服务器记录来源 IP；不读取机器人密钥或聊天。\n\n可随时在「设置 → 更新 → 隐私与使用统计」关闭并删除记录，不影响软件更新。',
+            ),
           ),
-          duration: const Duration(seconds: 12),
-          action: SnackBarAction(
-            label: '关闭统计',
-            onPressed: () => updates.setUsageConsent(false),
-          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialog, false),
+              child: const Text('关闭统计'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialog, true),
+              child: const Text('知道了'),
+            ),
+          ],
         ),
       );
+      if (enabled == false) await updates.setUsageConsent(false);
       await updates.preferences.markUsageNoticeSeen();
     }
     if (mounted) updates.start();
@@ -90,7 +104,6 @@ class _QQBotManagerAppState extends State<QQBotManagerApp> {
   Widget build(BuildContext context) {
     return MaterialApp(
       navigatorKey: _navigatorKey,
-      scaffoldMessengerKey: _messengerKey,
       locale: const Locale('zh', 'CN'),
       supportedLocales: const [Locale('zh', 'CN')],
       localizationsDelegates: GlobalMaterialLocalizations.delegates,

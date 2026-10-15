@@ -1,5 +1,5 @@
 'use strict';
-const platformNames = {windows:'Windows',android:'Android',ios:'iOS'};
+const platformNames = {windows:'Windows',android:'Android',ios:'iOS',macos:'macOS'};
 const sizeText = bytes => bytes >= 1048576 ? `${(bytes/1048576).toFixed(1)} MB` : `${bytes} B`;
 const dateText = seconds => new Date(seconds*1000).toLocaleDateString('zh-CN',{timeZone:'Asia/Shanghai'});
 async function loadReleases() {
@@ -21,6 +21,7 @@ async function loadReleases() {
       link.classList.remove('disabled');link.removeAttribute('aria-disabled');link.setAttribute('download','');
       card.querySelector('.checksum').textContent=release.sha256;
       if (release.platform==='windows' && release.format==='exe') card.querySelector('.download-help').textContent='运行安装程序，按提示完成安装。';
+      if (release.platform==='macos') card.querySelector('.download-help').textContent='打开 DMG，将 QQBotManager 拖入“应用程序”；支持 Apple Silicon 与 Intel。';
     }
     const history = document.querySelector('#release-history'); history.replaceChildren();
     if (!releases.length) {const empty=document.createElement('p');empty.className='empty';empty.textContent='还没有已发布版本。管理员发布后会自动出现在这里。';history.append(empty);}

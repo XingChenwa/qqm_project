@@ -157,10 +157,15 @@ void main() {
     await tester.tap(find.byTooltip('复制全部日志'));
     await tester.pumpAndSettle();
     expect(clipboard.single, logs.join('\r\n'));
+    expect(find.byType(AlertDialog), findsOneWidget);
+    await tester.tap(find.text('知道了'));
+    await tester.pumpAndSettle();
     for (final extension in ['TXT', 'LOG']) {
       await tester.tap(find.byTooltip('导出全部日志'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('导出为 $extension'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('知道了'));
       await tester.pumpAndSettle();
     }
     expect(saved.length, 2);
@@ -242,6 +247,9 @@ void main() {
       await tester.tap(find.text('发送 Markdown'));
       await tester.pumpAndSettle();
       expect(sent, body);
+      expect(find.text('测试失败，草稿保留'), findsOneWidget);
+      await tester.tap(find.text('知道了'));
+      await tester.pumpAndSettle();
       expect(
         tester
             .widget<TextField>(find.byKey(const ValueKey('markdown-editor')))

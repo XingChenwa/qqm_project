@@ -21,6 +21,7 @@ import '../widgets/dashboard_panel.dart';
 import '../widgets/log_panel.dart';
 import '../widgets/app_logo.dart';
 import '../widgets/profile_avatar.dart';
+import '../widgets/app_dialogs.dart';
 import 'settings_screen.dart';
 
 class MainScreen extends StatefulWidget {
@@ -1308,8 +1309,11 @@ class _MainScreenState extends State<MainScreen> {
                       replyTo: _replyToMessage,
                     );
                     if (!sent && mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text(bot.lastSendError)),
+                      AppDialogs.show(
+                        context,
+                        bot.lastSendError,
+                        title: '发送失败',
+                        error: true,
                       );
                     }
                   },
@@ -1425,9 +1429,12 @@ class _MainScreenState extends State<MainScreen> {
                 replyTo: _replyToMessage,
               );
               if (!sent && mounted) {
-                ScaffoldMessenger.of(
+                AppDialogs.show(
                   context,
-                ).showSnackBar(SnackBar(content: Text(bot.lastSendError)));
+                  bot.lastSendError,
+                  title: '发送失败',
+                  error: true,
+                );
               }
             },
           ),
@@ -1504,10 +1511,7 @@ class _MainScreenState extends State<MainScreen> {
         );
         if (!mounted) return false;
         if (result == null) {
-          ScaffoldMessenger.of(
-            context,
-          ).showSnackBar(const SnackBar(content: Text('未找到可用命令，请检查插件是否启用')));
-          return false;
+          throw const FormatException('未找到可用命令，请检查插件是否启用');
         }
         final bot = context.read<BotClient>();
         return containsMarkdown(result)

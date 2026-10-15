@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'app_dialogs.dart';
 import 'package:flutter/services.dart';
 
 String logExportText(Iterable<String> logs) => logs.join('\r\n');
@@ -14,7 +15,7 @@ class LogPanel extends StatelessWidget {
 
   void _notice(BuildContext context, String text) {
     if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+      AppDialogs.show(context, text);
     }
   }
 

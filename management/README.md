@@ -120,6 +120,10 @@ Windows 可使用项目构建助手输出根目录正确的 ZIP 和中文安装 
 
 ## 上传和发布
 
+`1.3.2+13` 的首页提供 Windows、macOS、Android、iOS 下载和 macOS 安装步骤，移除了首页后台入口及登录页公开邮箱；后台仍在 `/admin`，管理员权限检查没有改变。隐私说明独立位于 `/privacy`。
+
+后台脚本和样式改用带版本号的文件名，避免 EdgeOne 缓存旧 JS 造成 11 列表头配 7 列数据。升级时同时上传 HTML 和完整 `public/assets`，不能只覆盖页面；发布后清理旧 HTML 缓存。浏览器开发者工具应看到 `/assets/admin-v1.3.2.js`，设备行有11列。没有名称的旧记录显示“未提供”，由新版客户端心跳补充，不能据错位文字推断设备名称。
+
 打开 `/admin` 的“版本发布”，填写版本号、递增构建号、平台和更新说明，上传包保存草稿。核对后点击“发布”，首页和更新接口才可见。客户端启动及每 5 分钟检查一次；这不是即时推送长连接，也不会绕过用户的安装确认。
 
 | 平台 | 架构 | 安装包 |
@@ -127,6 +131,7 @@ Windows 可使用项目构建助手输出根目录正确的 ZIP 和中文安装 
 | Windows | x64 | ZIP 根目录直接包含 `qq_bot_manager.exe`、`flutter_windows.dll`、`data/app.so`；或本项目 Inno Setup EXE |
 | Android | universal | APK，包名 `cn.uuze.botmanager`；覆盖升级必须与已安装版本同签名 |
 | iOS | arm64 | IPA，含 `Payload/Runner.app`；当前按需重签包提供下载和系统导出 |
+| macOS | universal | DMG；当前为临时签名测试包，未经过 Developer ID 签名或 Apple 公证 |
 
 一个平台、架构和构建号只能上传一次。修复包内容时使用新的构建号。后台验证基本结构、路径安全并计算 SHA-256，不会替你生成 Android 签名或 Apple 证书。Windows EXE 只应上传自己的 Inno Setup 安装器，不要上传任意来源的 EXE。
 

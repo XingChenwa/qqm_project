@@ -1,4 +1,4 @@
-QQ机器人管理器 1.3.1 宝塔 MySQL 与 EdgeOne 免费版
+QQ机器人管理器 1.3.2 宝塔 MySQL 与四端更新
 
 业务记录使用 MySQL。data/config.json 仅为自动生成的私密配置，并不是数据库。
 不要把数据库密码、账号中心 Secret、更新私钥发到聊天。
@@ -29,7 +29,14 @@ QQ机器人管理器 1.3.1 宝塔 MySQL 与 EdgeOne 免费版
 没有真实 config.php / config.json 被放进本 ZIP，是为了防止覆盖或泄露服务器密钥。
 本版增加设备名称、型号、系统版本和架构；覆盖代码后须执行上面的 install 和 db-check。
 db-check 应显示“数据表版本 2”。升级只新增缺少的字段，原记录及密钥不变，可重复执行。
-1.3.1+12 客户端首次默认统计、启动自动登记；旧版已关闭选择保留，用户仍可关闭并删除。
+1.3.2+13 客户端首次默认统计，说明展示后开始登记；已关闭选择保留，可关闭并删除。
+
+修复设备表格错位：本版脚本和样式使用带版本号的独立文件名，不依赖 URL 查询参数刷新。
+务必同时上传 public/admin.html、home.html、privacy.html 与整个 public/assets。
+后台应加载 /assets/admin-v1.3.2.js，设备行应有11列；不可仅上传新 HTML。
+EdgeOne 对 /、/admin*、/privacy、/api/* 不缓存，发布后清理旧页面缓存。
+旧设备缺少名称时显示“未提供”，新版下一次心跳会补充；不会把 Windows 或 IP 当电脑名。
+首页新增 macOS 安装方式。后台发布 macOS 时选择 universal 与 DMG，当前包为临时签名、未公证。
 
 EdgeOne 免费版获取访问 IP：
 1. 先配好 HTTPS 回源，再用“设置/覆盖”添加 X-QQM-Origin-Token 回源头并发布规则。

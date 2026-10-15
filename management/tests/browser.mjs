@@ -18,12 +18,16 @@ try{
     await page.setViewportSize({width,height:900});await page.goto(origin,{waitUntil:'networkidle'});
     await page.getByRole('heading',{name:'选择你的平台'}).waitFor();
     assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),`Homepage horizontal overflow at ${width}`);
-    assert.equal(await page.locator('.download-link.disabled').count(),3);
+    assert.equal(await page.locator('.download-link.disabled').count(),4);
+    assert.equal(await page.locator('a[href="/admin"]').count(),0);
+    assert.equal(await page.locator('.privacy-banner').count(),0);
+    assert.ok(await page.locator('#macos-install').isVisible());
     await page.screenshot({path:resolve(output,`home-${width}.png`),fullPage:true});
   }
   await page.setViewportSize({width:1280,height:900});await page.goto(origin+'/admin',{waitUntil:'networkidle'});
   assert.equal(await page.locator('input[type=password]').count(),0);
-  assert.ok(await page.locator('#login').innerText().then(text=>text.includes('2377130783@qq.com')));
+  assert.ok(await page.locator('#login').innerText().then(text=>!text.includes('2377130783@qq.com')));
+  assert.ok(await page.locator('script[src="/assets/admin-v1.3.2.js"]').count());
   for(const width of [1280,390,320]){
     await page.setViewportSize({width,height:900});assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
     await page.screenshot({path:resolve(output,`login-${width}.png`),fullPage:true});
@@ -52,6 +56,10 @@ try{
       assert.ok((await page.locator('#device-rows').innerText()).includes(deviceName));
       assert.ok((await page.locator('#device-rows').innerText()).includes('Windows 11 测试系统'));
       assert.equal(await page.locator('#device-rows img').count(),0);
+      assert.equal(await page.locator('#device-rows tr').first().locator('td').count(),11);
+      assert.equal(await page.locator('#device-rows tr').first().locator('td').nth(1).innerText(),deviceName);
+      assert.equal(await page.locator('#device-rows tr').first().locator('td').nth(3).innerText(),'Windows');
+      assert.equal(await page.locator('#device-rows tr').first().locator('td').nth(6).innerText(),'1.3.1 (12)');
       await page.screenshot({path:resolve(output,'devices-1280.png'),fullPage:true});
     }
   }

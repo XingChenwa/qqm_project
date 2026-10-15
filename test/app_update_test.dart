@@ -133,6 +133,8 @@ void main() {
       preferences,
       http: Dio()..httpClientAdapter = adapter,
       publicKey: key ?? publicKey,
+      currentBuild: 12,
+      currentVersion: '1.3.1',
       server: server,
       platform: platform,
       arch: platform == 'windows'
@@ -273,6 +275,25 @@ void main() {
     await updates.sendHeartbeat();
     expect(updates.configured, isFalse);
     expect(adapter.requests, isEmpty);
+  });
+  test('macOS 仅接受同源签名 DMG，拒绝跨平台格式', () async {
+    final selected = release(platform: 'macos')..['format'] = 'dmg';
+    Future<AppRelease?> verifyMac(Map<String, dynamic> data) =>
+        AppRelease.verifyEnvelope(
+          data,
+          publicKey: publicKey,
+          nonce: nonce,
+          platform: 'macos',
+          arch: 'universal',
+          server: server,
+        );
+    expect((await verifyMac(await envelope(selected)))!.format, 'dmg');
+    for (final format in ['exe', 'ipa', 'zip']) {
+      await expectLater(
+        verifyMac(await envelope({...selected, 'format': format})),
+        throwsFormatException,
+      );
+    }
   });
   test('更新检查独立于 QQ 鉴权，旧构建号不能降级', () async {
     final adapter = UpdateAdapter(
@@ -562,6 +583,59 @@ void main() {
   });
 
   for (final width in [320.0, 390.0, 1280.0]) {
+    for (final mode in ['latest', 'error', 'new']) {
+      testWidgets('手动更新弹窗 $mode 在 $width 宽显示结果且不会叠加自动提醒', (tester) async {
+        tester.view.physicalSize = Size(width, 800);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        final updates = service(
+          UpdateAdapter(
+            (request) async => mode == 'error'
+                ? jsonResponse({}, 503)
+                : jsonResponse(
+                    await envelope(
+                      mode == 'new' ? release() : null,
+                      requestNonce: request.uri.queryParameters['nonce']!,
+                    ),
+                  ),
+          ),
+        );
+        await tester.pumpWidget(
+          ChangeNotifierProvider<AppUpdateService>.value(
+            value: updates,
+            child: MaterialApp(
+              home: const UpdateNotice(child: Scaffold(body: UpdatePanel())),
+            ),
+          ),
+        );
+        // Ed25519 uses real asynchronous work, not the widget fake clock.
+        await tester.runAsync(() async {
+          await tester.tap(find.text('检查更新'));
+          for (var attempt = 0; attempt < 200 && updates.busy; attempt++) {
+            await Future<void>.delayed(const Duration(milliseconds: 10));
+          }
+          expect(updates.busy, isFalse);
+        });
+        await tester.pumpAndSettle();
+        expect(find.byType(Dialog), findsOneWidget);
+        expect(find.byType(BottomSheet), findsNothing);
+        expect(
+          find.text(
+            mode == 'latest'
+                ? '当前已是最新版本。'
+                : mode == 'error'
+                ? updates.error
+                : '下载新版',
+          ),
+          findsOneWidget,
+        );
+        await tester.tap(find.byTooltip('关闭更新'));
+        await tester.pumpAndSettle();
+        expect(find.byType(Dialog), findsNothing);
+        expect(tester.takeException(), isNull);
+      });
+    }
     testWidgets('更新通知与面板在 $width 宽可用，不丢失 Navigator/Overlay', (tester) async {
       tester.view.physicalSize = Size(width, 800);
       tester.view.devicePixelRatio = 1;
@@ -586,16 +660,12 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(find.text('发现新版本'), findsOneWidget);
-      await tester.tap(find.text('查看新版'));
-      await tester.pumpAndSettle();
-      expect(find.text('软件更新'), findsOneWidget);
-      expect(find.text('参与软件使用统计'), findsOneWidget);
+      expect(find.text('下载新版'), findsOneWidget);
+      expect(find.byType(BottomSheet), findsNothing);
       expect(tester.takeException(), isNull);
-      navigator.currentState!.pop();
+      await tester.tap(find.text('稍后'));
       await tester.pumpAndSettle();
       expect(find.text('原聊天保持在这里'), findsOneWidget);
-      await tester.tap(find.byTooltip('稍后提醒'));
-      await tester.pumpAndSettle();
       expect(find.text('查看更新'), findsNothing);
     });
   }

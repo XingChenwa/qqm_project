@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'app_dialogs.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 
@@ -75,9 +76,7 @@ class _PluginDeveloperDialogState extends State<PluginDeveloperDialog> {
             final content = _content;
             await Clipboard.setData(ClipboardData(text: content));
             if (context.mounted) {
-              ScaffoldMessenger.of(
-                context,
-              ).showSnackBar(const SnackBar(content: Text('已复制')));
+              AppDialogs.show(context, '已复制');
             }
           },
           icon: const Icon(Icons.copy_outlined),

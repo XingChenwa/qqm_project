@@ -11,6 +11,7 @@ import '../../utils/helpers.dart';
 import '../themes/app_theme.dart';
 import 'message_settings_dialog.dart';
 import 'markdown_workbench.dart';
+import 'app_dialogs.dart';
 
 class ChatInput extends StatefulWidget {
   final Future<bool> Function(String text) onSendText;
@@ -221,7 +222,9 @@ class _ChatInputState extends State<ChatInput> {
         _showSendError();
       }
     } catch (e) {
-      if (mounted) _showSendError('发送失败: $e');
+      if (mounted) {
+        _showSendError(e is FormatException ? e.message : '发送失败: $e');
+      }
     } finally {
       if (mounted) setState(() => _isSending = false);
     }
@@ -230,13 +233,11 @@ class _ChatInputState extends State<ChatInput> {
   void _showSendError([String? error]) {
     if (!mounted) return;
     final detail = error ?? widget.sendError?.call();
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          detail == null || detail.isEmpty ? '发送失败，请查看日志中的详细原因' : detail,
-        ),
-        backgroundColor: AppTheme.qqRed,
-      ),
+    AppDialogs.show(
+      context,
+      detail == null || detail.isEmpty ? '发送失败，请查看日志中的详细原因' : detail,
+      title: '发送失败',
+      error: true,
     );
   }
 

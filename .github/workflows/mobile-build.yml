@@ -1,4 +1,4 @@
-name: 移动端安装包
+name: 移动端与 macOS 安装包
 
 on:
   workflow_dispatch:
@@ -8,7 +8,7 @@ on:
         required: true
         default: all
         type: choice
-        options: [all, android, ios]
+        options: [all, android, ios, macos]
 
 permissions:
   contents: read
@@ -45,6 +45,36 @@ jobs:
         with:
           name: android-debug-apk
           path: build/app/outputs/flutter-apk/app-debug.apk
+          if-no-files-found: error
+          retention-days: 7
+
+  macos:
+    if: inputs.platform == 'all' || inputs.platform == 'macos'
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: 安装固定版本 Flutter
+        shell: bash
+        run: |
+          git clone --depth 1 --branch "$FLUTTER_VERSION" https://github.com/flutter/flutter.git "$RUNNER_TEMP/flutter"
+          printf '%s/bin\n' "$RUNNER_TEMP/flutter" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/flutter/bin/flutter" --version
+      - run: xcodebuild -version
+      - run: flutter pub get
+      - run: flutter analyze --no-pub
+      - run: flutter test --no-pub
+      - name: 编译 Universal macOS 应用并打包 DMG
+        run: bash scripts/build_macos_package.sh
+      - name: 保存 macOS 安装包（临时签名，未公证）
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: macos-universal-packages
+          path: |
+            dist/qqbotmanager-macos-universal.dmg
+            dist/qqbotmanager-macos-universal.zip
           if-no-files-found: error
           retention-days: 7
 

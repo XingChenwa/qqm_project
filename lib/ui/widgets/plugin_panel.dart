@@ -12,6 +12,7 @@ import 'plugin_config_dialog.dart';
 import 'plugin_developer_dialog.dart';
 import 'plugin_import_dialog.dart';
 import 'weather_config_dialog.dart';
+import 'app_dialogs.dart';
 
 class PluginPanel extends StatefulWidget {
   const PluginPanel({super.key});
@@ -32,9 +33,7 @@ class _PluginPanelState extends State<PluginPanel> {
       ),
     );
     if (mounted && installed == true) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('插件已安装并停用，请检查配置后手动启用。')));
+      AppDialogs.show(context, '插件已安装并停用，请检查配置后手动启用。');
     }
   }
 
@@ -46,10 +45,10 @@ class _PluginPanelState extends State<PluginPanel> {
       );
     } catch (_) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('开发资源读取失败，请查看仓库中的 docs/plugin-development.md。'),
-          ),
+        AppDialogs.show(
+          context,
+          '开发资源读取失败，请查看仓库中的 docs/plugin-development.md。',
+          error: true,
         );
       }
       return;
@@ -306,10 +305,10 @@ class _PluginCard extends StatelessWidget {
                           ? await manager.enablePlugin(info.id)
                           : await manager.disablePlugin(info.id);
                       if (!success && context.mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text(manager.errorFor(info.id) ?? '操作失败'),
-                          ),
+                        AppDialogs.show(
+                          context,
+                          manager.errorFor(info.id) ?? '操作失败',
+                          error: true,
                         );
                       }
                     },
@@ -421,9 +420,7 @@ class _PluginCard extends StatelessWidget {
         allowBuiltin: true,
       );
       if (definition.fields.isEmpty) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('这个插件没有可配置项。')));
+        AppDialogs.show(context, '这个插件没有可配置项。');
         return;
       }
       final config = await showDialog<Map<String, dynamic>>(
@@ -435,15 +432,15 @@ class _PluginCard extends StatelessWidget {
       if (config == null) return;
       final saved = await manager.updatePluginConfig(info.id, config);
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(saved ? '${info.name}配置已保存' : '保存失败')),
+        AppDialogs.show(
+          context,
+          saved ? '${info.name}配置已保存' : '保存失败',
+          error: !saved,
         );
       }
     } catch (_) {
       if (context.mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('配置无效，请检查必填项和类型。')));
+        AppDialogs.show(context, '配置无效，请检查必填项和类型。', error: true);
       }
     }
   }

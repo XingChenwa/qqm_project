@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 
 import '../../models/message.dart';
 import '../../models/received_message.dart';
+import 'app_dialogs.dart';
 
 Future<void> showMessageDetails(BuildContext context, MessageModel message) {
   final text = const JsonEncoder.withIndent('  ').convert(
@@ -49,9 +50,7 @@ Future<void> showMessageDetails(BuildContext context, MessageModel message) {
           onPressed: () async {
             await Clipboard.setData(ClipboardData(text: text));
             if (context.mounted) {
-              ScaffoldMessenger.of(
-                context,
-              ).showSnackBar(const SnackBar(content: Text('已复制脱敏后的消息详情')));
+              AppDialogs.show(context, '已复制脱敏后的消息详情');
             }
           },
           icon: const Icon(Icons.copy_rounded, size: 16),

@@ -131,6 +131,8 @@ void main() {
     await tester.pumpAndSettle();
     expect(manager.plugins, hasLength(5));
     expect(manager.plugins.last.info.isEnabled, false);
+    await tester.tap(find.text('知道了'));
+    await tester.pumpAndSettle();
     final card = find.byKey(const ValueKey('plugin-card-custom_hello'));
     await tester.ensureVisible(card);
     await tester.pumpAndSettle();
@@ -145,6 +147,8 @@ void main() {
     await tester.tap(find.text('保存'));
     await tester.pumpAndSettle();
     expect(storage.storedPlugins['custom_hello']!.config['salutation'], '欢迎你');
+    await tester.tap(find.text('知道了'));
+    await tester.pumpAndSettle();
     await tester.ensureVisible(card);
     await tester.tap(find.descendant(of: card, matching: find.byType(Switch)));
     await tester.pumpAndSettle();

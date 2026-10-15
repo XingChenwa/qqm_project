@@ -31,7 +31,8 @@ function check(value,expected){assert.equal(value,expected);checks++;}
 try{
   for(let attempt=0;attempt<80;attempt++){try{const response=await request('/');if(response.status===200)break;}catch{}await new Promise(resolve=>setTimeout(resolve,100));}
   const home=await request('/');check(home.status,200);assert.match(await home.text(),/选择你的平台/);checks++;
-  check((await request('/assets/admin.js')).status,200);
+  check((await request('/assets/admin-v1.3.2.js')).status,200);
+  check((await request('/privacy')).status,200);
   check((await request('/data/config.json')).status,404);
   check((await request('/api/admin/stats')).status,401);
   check((await request('/api/admin/proxy')).status,401);

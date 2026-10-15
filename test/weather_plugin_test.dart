@@ -419,6 +419,8 @@ void main() {
       storage.storedPlugins['weather_plugin']?.config['default_city'],
       '深圳',
     );
+    await tester.tap(find.text('知道了'));
+    await tester.pumpAndSettle();
     await tester.runAsync(() => manager.init());
     await tester.pumpAndSettle();
     await tester.ensureVisible(find.byTooltip('配置高德天气与 IP 查询'));
