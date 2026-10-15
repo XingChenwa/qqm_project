@@ -80,40 +80,6 @@ class UpdatePanel extends StatelessWidget {
             ),
           ),
         ),
-        const SizedBox(height: 12),
-        Card(
-          child: ExpansionTile(
-            title: const Text('隐私与使用统计'),
-            subtitle: Text(
-              updates.preferences.usageConsent
-                  ? '统计已开启 · 可关闭并删除记录'
-                  : '统计已关闭 · 不影响更新',
-            ),
-            children: [
-              SwitchListTile(
-                title: const Text('参与软件使用统计'),
-                subtitle: const Text('发送设备名称／型号、系统、架构和软件版本，服务器记录来源 IP。'),
-                value: updates.preferences.usageConsent,
-                onChanged: (value) async {
-                  await updates.setUsageConsent(value);
-                  if (context.mounted) {
-                    AppDialogs.show(
-                      context,
-                      value ? '使用统计已开启' : '使用统计已关闭；已请求删除，离线时将在网络恢复后重试。',
-                    );
-                  }
-                },
-              ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                child: Text(
-                  '统计发送至 botmanager.uuze.cn，不读取机器人密钥、聊天、文件或硬件标识。电脑名称可能含个人姓名。'
-                  'IP 保留7天，失活设备资料90天清理。${updates.usageStatus.isEmpty ? '' : '\n${updates.usageStatus}'}',
-                ),
-              ),
-            ],
-          ),
-        ),
       ],
     );
   }

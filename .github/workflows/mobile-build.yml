@@ -1,4 +1,4 @@
-name: 移动端与 macOS 安装包
+name: 客户端安装包
 
 on:
   workflow_dispatch:
@@ -8,7 +8,7 @@ on:
         required: true
         default: all
         type: choice
-        options: [all, android, ios, macos]
+        options: [all, android, ios, macos, windows]
 
 permissions:
   contents: read
@@ -103,5 +103,45 @@ jobs:
         with:
           name: ios-unsigned-ipa
           path: dist/qq_bot_manager-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 7
+
+  windows:
+    if: inputs.platform == 'all' || inputs.platform == 'windows'
+    runs-on: windows-2022
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: 安装固定版本 Flutter
+        shell: pwsh
+        run: |
+          git clone --depth 1 --branch "$env:FLUTTER_VERSION" https://github.com/flutter/flutter.git "$env:RUNNER_TEMP\flutter"
+          Add-Content -Path $env:GITHUB_PATH -Value "$env:RUNNER_TEMP\flutter\bin"
+          & "$env:RUNNER_TEMP\flutter\bin\flutter.bat" --version
+      - run: flutter config --enable-windows-desktop
+      - run: flutter pub get
+      - run: flutter analyze --no-pub
+      - run: flutter test --no-pub
+      - name: 准备 Inno Setup
+        shell: pwsh
+        run: ./tool/prepare_inno.ps1
+      - name: 构建 Windows 安装包
+        shell: pwsh
+        run: |
+          ./tool/build_windows_release.ps1 `
+            -UpdatePublicKey "$env:UPDATE_PUBLIC_KEY" `
+            -UpdateBaseUrl "$env:UPDATE_BASE_URL" `
+            -Installer `
+            -Iscc "./build/tools/inno-6.7.3/ISCC.exe"
+      - name: 保存 Windows 安装包
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: windows-x64-packages
+          path: |
+            dist/qqbotmanager-windows-*.zip
+            dist/qqbotmanager-windows-*-setup.exe
+            dist/qqbotmanager-windows-*-build-info.json
           if-no-files-found: error
           retention-days: 7
