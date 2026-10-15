@@ -7,6 +7,7 @@
 手机后台/锁屏后，系统可能暂停进程或断开 WebSocket，**不能把手机端当成 24 小时在线的机器人服务器**。长期值守请继续使用桌面/服务器版本。本次没有添加虚假的后台音频或无限后台保活权限。
 
 - Android：模板最低 Android 7.0（API 24），当前提供 debug 签名测试 APK。正式分发需配置自己的签名密钥。
+- 安卓构建固定使用 AGP 8.13.2、Gradle 8.13、Kotlin 2.3.20 和 JDK 17，以兼容现有 `file_picker 11.x`。不要单独升级 AGP 9：该插件会跳过传统 Kotlin 插件，而当前 Flutter 工程禁用内置 Kotlin，会导致 `FilePickerPlugin` 未编译。
 - iOS：最低 iOS 13，标识继承现有工程组织为 `com.qqbot.qqBotManager`。实际签名时须与证书/描述文件匹配；应用仍使用 Flutter 模板图标。
 - Windows 本机未配置 Android SDK 时不能编译 APK，也不能直接编译需要 Xcode 的 IPA。原生安装包应在下述云端或相应 SDK 环境构建，是否成功以具体运行记录和产物为准。
 

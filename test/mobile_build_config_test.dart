@@ -4,6 +4,24 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:yaml/yaml.dart';
 
 void main() {
+  test('安卓工具链固定兼容的 AGP/Gradle，并显式编译应用和文件选择插件的 Kotlin', () {
+    final settings = File('android/settings.gradle.kts').readAsStringSync();
+    final app = File('android/app/build.gradle.kts').readAsStringSync();
+    final wrapper = File(
+      'android/gradle/wrapper/gradle-wrapper.properties',
+    ).readAsStringSync();
+    expect(
+      settings,
+      contains('id("com.android.application") version "8.13.2"'),
+    );
+    expect(
+      settings,
+      contains('id("org.jetbrains.kotlin.android") version "2.3.20"'),
+    );
+    expect(app, contains('id("org.jetbrains.kotlin.android")'));
+    expect(wrapper, contains('gradle-8.13-bin.zip'));
+  });
+
   test('移动构建工作流只手动触发，两个平台保存正确产物且不需要 Apple 私钥', () {
     final workflow =
         loadYaml(File('.github/workflows/mobile-build.yml').readAsStringSync())
