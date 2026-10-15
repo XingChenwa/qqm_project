@@ -6,6 +6,7 @@ import 'dart:typed_data';
 import 'package:crypto/crypto.dart';
 import 'package:cryptography/cryptography.dart';
 import 'package:dio/dio.dart';
+import 'package:dio/io.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
@@ -45,6 +46,53 @@ class DelayedInstallationPreferences extends UpdatePreferences {
     await allowSave.future;
     await super.setInstallation(id, token);
   }
+}
+
+class InterruptedDownloadDio extends DioForNative {
+  final File Function(String) realFile;
+  InterruptedDownloadDio(this.realFile);
+
+  @override
+  Future<Response> downloadUri(
+    Uri uri,
+    dynamic savePath, {
+    ProgressCallback? onReceiveProgress,
+    CancelToken? cancelToken,
+    bool deleteOnError = true,
+    FileAccessMode fileAccessMode = FileAccessMode.write,
+    String lengthHeader = Headers.contentLengthHeader,
+    Object? data,
+    Options? options,
+  }) async {
+    await realFile(savePath as String).writeAsString('incomplete download');
+    throw DioException(
+      requestOptions: RequestOptions(path: uri.toString()),
+      type: DioExceptionType.cancel,
+    );
+  }
+}
+
+class RemovedPartialFile extends Fake implements File {
+  final File realFile;
+  final VoidCallback onRemoved;
+  RemovedPartialFile(this.realFile, this.onRemoved);
+
+  @override
+  String get path => realFile.path;
+
+  @override
+  Future<bool> exists() async {
+    final existed = await realFile.exists();
+    if (existed) {
+      await realFile.delete();
+      onRemoved();
+    }
+    return existed;
+  }
+
+  @override
+  Future<FileSystemEntity> delete({bool recursive = false}) =>
+      realFile.delete(recursive: recursive);
 }
 
 void main() {
@@ -124,6 +172,7 @@ void main() {
       );
   AppUpdateService service(
     UpdateAdapter adapter, {
+    Dio? http,
     Directory? directory,
     String platform = 'windows',
     String? key,
@@ -131,7 +180,7 @@ void main() {
   }) {
     final updates = AppUpdateService(
       preferences,
-      http: Dio()..httpClientAdapter = adapter,
+      http: http ?? (Dio()..httpClientAdapter = adapter),
       publicKey: key ?? publicKey,
       currentBuild: 12,
       currentVersion: '1.3.1',
@@ -390,6 +439,43 @@ void main() {
       );
     }
   });
+  test('下载库抢先删除临时文件时清理幂等，不抛出异常或进入安装就绪', () async {
+    final directory = await Directory.systemTemp.createTemp(
+      'qqm-cleanup-race-',
+    );
+    addTearDown(() => directory.delete(recursive: true));
+    final adapter = UpdateAdapter(
+      (options) async => jsonResponse(
+        await envelope(
+          release(),
+          requestNonce: options.uri.queryParameters['nonce']!,
+        ),
+      ),
+    );
+    final parentZone = Zone.current;
+    File realFile(String path) => parentZone.run(() => File(path));
+    final http = InterruptedDownloadDio(realFile)..httpClientAdapter = adapter;
+    final updates = service(adapter, directory: directory, http: http);
+    await updates.check();
+    var removedBeforeDelete = false;
+    await IOOverrides.runZoned(
+      updates.download,
+      createFile: (path) => path.endsWith('.part')
+          ? RemovedPartialFile(realFile(path), () => removedBeforeDelete = true)
+          : realFile(path),
+    );
+    expect(removedBeforeDelete, isTrue);
+    expect(updates.phase, UpdatePhase.failed);
+    expect(updates.downloadedFile, isNull);
+    expect(
+      await directory
+          .list(recursive: true)
+          .where((file) => file.path.endsWith('.part'))
+          .length,
+      0,
+    );
+  });
+
   test('超限 JSON 清单被流式截断，不接受无界响应', () async {
     final adapter = UpdateAdapter(
       (_) async => ResponseBody.fromString('x' * 70000, 200),

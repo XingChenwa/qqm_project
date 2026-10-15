@@ -318,8 +318,13 @@ class AppUpdateService extends ChangeNotifier {
         _changed();
       }
     } finally {
-      if (part != null && await part.exists()) await part.delete();
-      _downloadCancel = null;
+      try {
+        if (part != null && await part.exists()) await part.delete();
+      } on PathNotFoundException {
+        // Dio can remove a cancelled download between exists() and delete().
+      } finally {
+        _downloadCancel = null;
+      }
     }
   }
 

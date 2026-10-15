@@ -33,7 +33,11 @@ try {
   $stage = Join-Path $workspace ('build\windows-package-' + [Guid]::NewGuid().ToString('N'))
   $null = New-Item -ItemType Directory -Path $stage
   $files = @(Get-Content -LiteralPath (Join-Path $workspace 'build\windows\x64\install_manifest.txt'))
-  $files += @('qq_bot_manager.exe','WebView2Loader.dll','native_assets.json') | ForEach-Object { Join-Path $source $_ }
+  $files += @('qq_bot_manager.exe','WebView2Loader.dll') | ForEach-Object { Join-Path $source $_ }
+  # Current Flutter uses the installed NativeAssetsManifest.json. Older SDKs may
+  # also emit this root manifest; it is not present in every clean build.
+  $optionalManifest = Join-Path $source 'native_assets.json'
+  if (Test-Path -LiteralPath $optionalManifest -PathType Leaf) { $files += $optionalManifest }
   foreach ($file in ($files | Select-Object -Unique)) {
     $resolved = [IO.Path]::GetFullPath($file)
     if (-not $resolved.StartsWith($source+'\',[StringComparison]::OrdinalIgnoreCase)) { throw 'Runtime source outside Release.' }
