@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:image/image.dart' as img;
 import 'package:provider/provider.dart';
@@ -179,12 +180,16 @@ void main() {
     });
   }
 
-  testWidgets('真实会话收到群消息保持阅读位置，切换页面重开才到最新', (tester) async {
+  testWidgets('真实会话接收不滚动，手动发送成功才定位最新，失败保持原位置', (tester) async {
     tester.view.physicalSize = const Size(1280, 800);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
-    final storage = MemoryStorage();
+    final storage = MemoryStorage(
+      config: validConfig()
+        ..appId = ''
+        ..clientSecret = '',
+    );
     storage.storedSessions['group-openid'] = ChatSession(
       id: 'group-openid',
       name: '测试群聊',
@@ -204,11 +209,8 @@ void main() {
       );
     }
     final gateway = TestGateway();
-    final bot = BotClient(
-      storage,
-      apiService: RecordingApi(),
-      webSocketService: gateway,
-    );
+    final api = RecordingApi();
+    final bot = BotClient(storage, apiService: api, webSocketService: gateway);
     final plugins = PluginManager(storage);
     addTearDown(bot.dispose);
     addTearDown(plugins.dispose);
@@ -245,13 +247,50 @@ void main() {
     expect(controller.offset, closeTo(-400, .01));
     expect(tester.getTopLeft(latestOld).dy, closeTo(before.dy, .01));
     expect(find.text('有 1 条新消息，点击查看'), findsOneWidget);
+    await tester.enterText(find.byType(TextField).last, '手动回复后应看到这一条');
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    expect(api.calls, hasLength(1));
+    expect(controller.offset, 0);
+    expect(find.byKey(const ValueKey('new-messages-indicator')), findsNothing);
+    final sentMessage = find.text('手动回复后应看到这一条');
+    expect(sentMessage, findsWidgets);
+    final sentY = tester.getTopLeft(sentMessage.last).dy;
+    gateway.events.add({
+      'id': 'arrival-after-send',
+      'sessionId': 'group-openid',
+      'senderId': 'member-openid',
+      'senderName': '群成员',
+      'content': '发送后再次收到的新消息',
+      'timestamp': DateTime.now(),
+      'isGroup': true,
+      'eventType': 'GROUP_MESSAGE_CREATE',
+    });
+    await tester.pumpAndSettle();
+    expect(controller.offset, 0);
+    expect(tester.getTopLeft(sentMessage.last).dy, closeTo(sentY, .01));
+    expect(find.text('有 1 条新消息，点击查看'), findsOneWidget);
+    controller.jumpTo(-300);
+    await tester.pumpAndSettle();
+    api.failSend = true;
+    await tester.enterText(find.byType(TextField).last, '失败时保留的草稿');
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    expect(controller.offset, closeTo(-300, .01));
+    expect(find.byType(AlertDialog), findsOneWidget);
+    expect(
+      tester.widget<TextField>(find.byType(TextField).last).controller!.text,
+      '失败时保留的草稿',
+    );
+    await tester.tap(find.text('知道了'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('日志').first);
     await tester.pumpAndSettle();
     await tester.tap(find.text('聊天会话').first);
     await tester.pumpAndSettle();
     expect(controller.offset, 0);
     expect(find.byKey(const ValueKey('new-messages-indicator')), findsNothing);
-    expect(find.text('刚刚收到的新消息'), findsWidgets);
+    expect(find.text('发送后再次收到的新消息'), findsWidgets);
     expect(tester.takeException(), isNull);
   });
 

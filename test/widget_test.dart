@@ -39,7 +39,7 @@ void main() {
     expect(parsed?.args.single, body);
   });
 
-  testWidgets('代码块自动使用 Markdown，Ctrl+回车发送且不改动原文', (tester) async {
+  testWidgets('代码块自动使用 Markdown，回车发送且不改动原文', (tester) async {
     String? sent;
     await tester.pumpWidget(
       MaterialApp(
@@ -60,9 +60,7 @@ void main() {
     );
     const code = '```python\n# 中文\nif True:\n    print("你好")\n```';
     await tester.enterText(find.byType(TextField), code);
-    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
     await tester.pump();
     expect(sent, code);
     expect(

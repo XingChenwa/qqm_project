@@ -1,10 +1,10 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 
 import '../screens/browser_screen.dart';
+import 'composer_keyboard.dart';
 
 /// An independent Markdown draft, with a live preview that never sends messages.
 class MarkdownWorkbench extends StatefulWidget {
@@ -45,13 +45,10 @@ class _MarkdownWorkbenchState extends State<MarkdownWorkbench> {
     widget.focusNode.requestFocus();
   }
 
-  Widget _editor() => CallbackShortcuts(
-    bindings: {
-      const SingleActivator(LogicalKeyboardKey.enter, control: true):
-          widget.onSend,
-      const SingleActivator(LogicalKeyboardKey.enter, meta: true):
-          widget.onSend,
-    },
+  Widget _editor() => ComposerKeyboard(
+    controller: widget.controller,
+    focusNode: widget.focusNode,
+    onSend: widget.onSend,
     child: TextField(
       key: const ValueKey('markdown-editor'),
       controller: widget.controller,
@@ -61,6 +58,9 @@ class _MarkdownWorkbenchState extends State<MarkdownWorkbench> {
       maxLines: null,
       textAlignVertical: TextAlignVertical.top,
       keyboardType: TextInputType.multiline,
+      textInputAction: TextInputAction.send,
+      onEditingComplete: () {},
+      onSubmitted: (_) => widget.onSend(),
       style: const TextStyle(
         fontFamily: 'Consolas',
         fontFamilyFallback: [

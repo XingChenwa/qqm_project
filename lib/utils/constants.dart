@@ -1,6 +1,6 @@
 class AppConstants {
-  static const String appVersion = '1.3.2';
-  static const int appBuild = 13;
+  static const String appVersion = '1.3.3';
+  static const int appBuild = 14;
   // QQ Bot API endpoints
   static const String qqBaseUrl = 'https://api.bot.qq.com';
   static const String qqTokenUrl = '$qqBaseUrl/app/getAppAccessToken';

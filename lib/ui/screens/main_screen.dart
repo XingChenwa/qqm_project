@@ -55,6 +55,7 @@ class _MainScreenState extends State<MainScreen> {
   bool _mobileChatOpen = false;
   bool _startupConnectTried = false;
   int _chatOpenRevision = 0;
+  int _chatSentRevision = 0;
 
   @override
   void initState() {
@@ -425,6 +426,13 @@ class _MainScreenState extends State<MainScreen> {
       if (index == 3) _toolIndex = 0;
       if (index == 4) _toolIndex = 2;
     });
+  }
+
+  void _onManualMessageSent(String sessionId) {
+    if (!mounted || _selectedSession?.id != sessionId || _sideIndex != 2) {
+      return;
+    }
+    setState(() => _chatSentRevision++);
   }
 
   Future<void> _openSettings() async {
@@ -1170,6 +1178,7 @@ class _MainScreenState extends State<MainScreen> {
       messages: messages,
       controller: _messageScrollController,
       openRevision: _chatOpenRevision,
+      sentRevision: _chatSentRevision,
       itemBuilder: (_, chronologicalIndex) {
         final message = messages[chronologicalIndex];
         final showSender =
@@ -1308,7 +1317,9 @@ class _MainScreenState extends State<MainScreen> {
                       isGroup: session.sessionType == 1,
                       replyTo: _replyToMessage,
                     );
-                    if (!sent && mounted) {
+                    if (sent) {
+                      _onManualMessageSent(session.id);
+                    } else if (mounted) {
                       AppDialogs.show(
                         context,
                         bot.lastSendError,
@@ -1428,7 +1439,9 @@ class _MainScreenState extends State<MainScreen> {
                 isGroup: session.sessionType == 1,
                 replyTo: _replyToMessage,
               );
-              if (!sent && mounted) {
+              if (sent) {
+                _onManualMessageSent(session.id);
+              } else if (mounted) {
                 AppDialogs.show(
                   context,
                   bot.lastSendError,
@@ -1472,6 +1485,7 @@ class _MainScreenState extends State<MainScreen> {
       replyTo: _replyToMessage,
       onCancelReply: () => setState(() => _replyToMessage = null),
       onEmojiTap: () => _showEmojiPicker(session),
+      onMessageSent: () => _onManualMessageSent(session.id),
       onSendText: (text) => context.read<BotClient>().sendTextMessage(
         session.id,
         text,

@@ -3,12 +3,13 @@ import 'package:flutter/material.dart';
 import '../../models/message.dart';
 
 /// The last message on opening is a fixed viewport anchor. New messages grow
-/// below it, history grows above it: insertions never move the reading position.
+/// below it, history grows above it. Only an explicit open/send action resets it.
 class ChatTimeline extends StatefulWidget {
   final String sessionId;
   final List<MessageModel> messages;
   final ScrollController controller;
   final int openRevision;
+  final int sentRevision;
   final IndexedWidgetBuilder itemBuilder;
 
   const ChatTimeline({
@@ -17,6 +18,7 @@ class ChatTimeline extends StatefulWidget {
     required this.messages,
     required this.controller,
     required this.openRevision,
+    this.sentRevision = 0,
     required this.itemBuilder,
   });
 
@@ -52,7 +54,8 @@ class _ChatTimelineState extends State<ChatTimeline> {
   @override
   void didUpdateWidget(covariant ChatTimeline oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.openRevision != widget.openRevision) {
+    if (oldWidget.openRevision != widget.openRevision ||
+        oldWidget.sentRevision != widget.sentRevision) {
       _resetAnchor();
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted && widget.controller.hasClients) {

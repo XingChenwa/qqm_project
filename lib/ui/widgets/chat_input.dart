@@ -2,7 +2,6 @@ import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../../models/message.dart';
@@ -12,6 +11,7 @@ import '../themes/app_theme.dart';
 import 'message_settings_dialog.dart';
 import 'markdown_workbench.dart';
 import 'app_dialogs.dart';
+import 'composer_keyboard.dart';
 
 class ChatInput extends StatefulWidget {
   final Future<bool> Function(String text) onSendText;
@@ -29,6 +29,7 @@ class ChatInput extends StatefulWidget {
   final MessageModel? replyTo;
   final VoidCallback? onCancelReply;
   final VoidCallback? onEmojiTap;
+  final VoidCallback? onMessageSent;
   final Future<bool> Function(OutgoingMessage)? onSendConfigured;
   final Map<String, dynamic> Function(OutgoingMessage)? previewConfigured;
   final bool isGroup;
@@ -46,6 +47,7 @@ class ChatInput extends StatefulWidget {
     this.replyTo,
     this.onCancelReply,
     this.onEmojiTap,
+    this.onMessageSent,
     this.onSendConfigured,
     this.previewConfigured,
     this.isGroup = false,
@@ -218,6 +220,7 @@ class _ChatInputState extends State<ChatInput> {
         if (controller.text == text) controller.clear();
         widget.onCancelReply?.call();
         _focusNode.requestFocus();
+        widget.onMessageSent?.call();
       } else {
         _showSendError();
       }
@@ -257,6 +260,7 @@ class _ChatInputState extends State<ChatInput> {
       if (!mounted) return;
       if (sent) {
         widget.onCancelReply?.call();
+        widget.onMessageSent?.call();
       } else {
         _showSendError();
       }
@@ -446,7 +450,7 @@ class _ChatInputState extends State<ChatInput> {
                 ),
                 const SizedBox(width: 6),
                 const Tooltip(
-                  message: '回车换行 · Ctrl+回车发送',
+                  message: '回车发送 · Ctrl+回车换行',
                   child: Icon(Icons.keyboard_return_rounded, size: 18),
                 ),
               ],
@@ -465,24 +469,19 @@ class _ChatInputState extends State<ChatInput> {
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
                   Expanded(
-                    child: CallbackShortcuts(
-                      bindings: {
-                        const SingleActivator(
-                          LogicalKeyboardKey.enter,
-                          control: true,
-                        ): _sendMessage,
-                        const SingleActivator(
-                          LogicalKeyboardKey.enter,
-                          meta: true,
-                        ): _sendMessage,
-                      },
+                    child: ComposerKeyboard(
+                      controller: _textController,
+                      focusNode: _focusNode,
+                      onSend: _sendMessage,
                       child: TextField(
                         controller: _textController,
                         focusNode: _focusNode,
                         maxLines: 5,
                         minLines: 1,
                         keyboardType: TextInputType.multiline,
-                        textInputAction: TextInputAction.newline,
+                        textInputAction: TextInputAction.send,
+                        onEditingComplete: () {},
+                        onSubmitted: (_) => _sendMessage(),
                         decoration: InputDecoration(
                           hintText: _hintText,
                           suffixIcon: Padding(
