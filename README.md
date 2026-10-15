@@ -7,7 +7,7 @@
 - 点击链接仍在应用内浏览页打开，关闭浏览页回到原聊天；网页默认请求手机版。Android/iOS/macOS 使用原生移动内容模式；Windows 使用手机 User-Agent，并在宽屏下以 430 像素的手机宽度显示网页。
 - 浏览器右上角可随时切换「电脑版 / 手机版」，在当前浏览页重新加载，不新建系统浏览器窗口；原始链接、参数和片段保持不变，不擅自猜测 `m.` 域名。网站是否提供手机版仍由网站自身决定。
 - 手机包名统一为 `cn.uuze.botmanager`，安装包使用当前 Logo，并包含 1.2.5 的引用消息、图片预览、阅读位置和 QFace 修复。
-- 「设置 → 关于」更新学习用途与作者 QQ（2377130783），可反馈问题建议；第三方昵称查询的数据说明仍保留。
+- 「设置 → 关于」仅显示指定的软件介绍、学习用途、作者 QQ（2377130783）和反馈提示，不显示第三方服务说明。
 
 ## 1.2.5 引用、图片预览与阅读位置
 
@@ -61,7 +61,7 @@
 - **清理无效入口**：删除设置页无实现的好友、群聊、事件等导航、无作用的关注会话表单和定时任务占位。群聊/单聊收发、消息设置、插件、凭据验证等有效功能保留。统计改用真实会话数量，旧配置字段保留读取兼容。
 - **品牌与包名**：应用内 Logo、Windows 图标、Android 启动图标、iOS AppIcon 均由 `assets/branding/logo.png` 生成；可用 `dart run flutter_launcher_icons` 重建。Android applicationId/namespace 与 iOS bundle identifier 均为 `cn.uuze.botmanager`。更换包名后手机端会视为新应用，旧应用数据不会自动迁移；iOS 重签需使用匹配新包名的描述文件。
 
-当前源码版本为 1.2.6+9。旧版已下载的 APK/IPA 不会因源码变更而更新，需重新构建后安装。Windows 不能本机构建 IPA，仍需 macOS CI 编译和有效证书重签。
+当前源码版本为 1.2.6+10。旧版已下载的 APK/IPA 不会因源码变更而更新，需重新构建后安装。Windows 不能本机构建 IPA，仍需 macOS CI 编译和有效证书重签。
 
 Windows 原生浏览器自测入口为 `tool/browser_smoke.dart`：仅启动本机临时 HTTP 服务验证 HTML、JavaScript 和应用内导航，不初始化机器人配置或连接 QQ。维护者可用 `flutter build windows --release --target=tool/browser_smoke.dart` 构建并运行该测试；结果写入 `build/browser-smoke-result.json`。测试后务必用 `flutter build windows --release --target=lib/main.dart` 重新构建正式程序再分发。
 

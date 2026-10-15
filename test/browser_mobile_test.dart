@@ -19,6 +19,10 @@ void main() {
     expect(agent, isNot(contains('Windows NT')));
     expect(agent, isNot(contains('Edg/')));
     expect(windowsMobileUserAgent(''), contains('Mobile Safari/'));
+    final fallback = windowsDesktopUserAgent('142.0.3537.99');
+    expect(fallback, contains('Chrome/142.0.0.0'));
+    expect(windowsMobileUserAgent(fallback), contains('Chrome/142.0.0.0'));
+    expect(windowsDesktopUserAgent('invalid'), isNot(contains('Chrome/')));
     const url = 'https://example.com/p?a=1&signature=a%2Bb#section';
     expect(browserUri(url).toString(), url);
   });

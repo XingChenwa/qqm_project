@@ -887,15 +887,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
             const SelectableText('作者QQ：2377130783'),
             const SizedBox(height: 8),
             const Text('问题建议可以反馈'),
-            const SizedBox(height: 28),
-            Text(
-              '第三方服务说明：单聊昵称默认由 OIAPI 自动补全。\n'
-              '查询仅发送 AppID 和 OpenID，不发送密钥、Token 或聊天正文。',
-              textAlign: TextAlign.center,
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: Theme.of(context).hintColor,
-              ),
-            ),
           ],
         ),
       ),

@@ -73,7 +73,8 @@ class _BrowserScreenState extends State<BrowserScreen> {
         throw const FormatException('内置浏览器组件未初始化，请完整解压应用并重新启动。可先复制链接。');
       }
       if (Platform.isWindows) {
-        if (await WebViewEnvironment.getAvailableVersion() == null) {
+        final browserVersion = await WebViewEnvironment.getAvailableVersion();
+        if (browserVersion == null) {
           throw const FormatException(
             '缺少 Microsoft Edge WebView2 Runtime，请安装后重新打开链接。链接不会自动跳到外部浏览器。',
           );
@@ -86,9 +87,10 @@ class _BrowserScreenState extends State<BrowserScreen> {
         );
         // WebView2 has no preferredContentMode support. Other platforms use
         // their native mobile content mode and native browser identity.
+        _desktopUserAgent = windowsDesktopUserAgent(browserVersion);
         try {
-          _desktopUserAgent =
-              await InAppWebViewController.getDefaultUserAgent();
+          final agent = await InAppWebViewController.getDefaultUserAgent();
+          if (agent.trim().isNotEmpty) _desktopUserAgent = agent;
         } catch (_) {
           // A missing UA helper must not prevent browsing.
         }

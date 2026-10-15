@@ -77,7 +77,10 @@ Future<void> main() async {
         seen.contains('/ready') &&
             seen.contains('/next') &&
             mobileViewport &&
-            agents.every((agent) => agent.contains('Mobile Safari/')),
+            agents.every(
+              (agent) =>
+                  agent.contains('Mobile Safari/') && agent.contains('Chrome/'),
+            ),
         'Native WebView loaded mobile HTML/UA, checked viewport and navigated in-app',
       );
       return;

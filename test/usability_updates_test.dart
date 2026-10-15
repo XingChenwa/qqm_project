@@ -385,7 +385,7 @@ void main() {
   }
 
   for (final width in [320.0, 1280.0]) {
-    testWidgets('关于页在 $width 宽显示作者及学习用途，保留第三方数据说明', (tester) async {
+    testWidgets('关于页在 $width 宽只显示指定的作者及学习用途文案', (tester) async {
       tester.view.physicalSize = Size(width, 800);
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.resetPhysicalSize);
@@ -408,7 +408,9 @@ void main() {
       expect(find.text('学习为目的编写的'), findsOneWidget);
       expect(find.text('作者QQ：2377130783'), findsOneWidget);
       expect(find.text('问题建议可以反馈'), findsOneWidget);
-      expect(find.textContaining('单聊昵称默认由 OIAPI'), findsOneWidget);
+      expect(find.textContaining('单聊昵称默认由'), findsNothing);
+      expect(find.textContaining('第三方服务说明'), findsNothing);
+      expect(find.textContaining('不发送密钥'), findsNothing);
       expect(tester.takeException(), isNull);
     });
   }

@@ -1,6 +1,15 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 
+/// The Windows plugin's static UA method is absent in some native releases.
+/// WebView2 reports its real engine version even in those releases.
+String windowsDesktopUserAgent(String browserVersion) {
+  final major = RegExp(r'^\d{1,4}(?=\.)').stringMatch(browserVersion.trim());
+  return 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+      'AppleWebKit/537.36 (KHTML, like Gecko) '
+      '${major == null ? '' : 'Chrome/$major.0.0.0 '}Safari/537.36';
+}
+
 /// WebView2 does not implement preferredContentMode. Keep its engine version
 /// while asking sites for Android content; never rewrite a site's URL to m.*.
 String windowsMobileUserAgent(String desktopUserAgent) {
