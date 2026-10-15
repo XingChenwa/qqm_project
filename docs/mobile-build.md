@@ -6,7 +6,7 @@
 
 手机后台/锁屏后，系统可能暂停进程或断开 WebSocket，**不能把手机端当成 24 小时在线的机器人服务器**。长期值守请继续使用桌面/服务器版本。本次没有添加虚假的后台音频或无限后台保活权限。
 
-- Android：模板最低 Android 7.0（API 24），当前提供 debug 签名测试 APK。正式分发需配置自己的签名密钥。
+- Android：模板最低 Android 7.0（API 24）。GitHub 构建使用仓库密钥里的同一把上传证书，并同时启用 V1、V2、V3 签名，后续正式包可以互相覆盖安装。
 - 安卓构建固定使用 AGP 8.13.2、Gradle 8.13、Kotlin 2.3.20 和 JDK 17，以兼容现有 `file_picker 11.x`。不要单独升级 AGP 9：该插件会跳过传统 Kotlin 插件，而当前 Flutter 工程禁用内置 Kotlin，会导致 `FilePickerPlugin` 未编译。
 - Android、iOS 和 macOS 包名均为 `cn.uuze.botmanager`，使用 `assets/branding/logo.png` 生成的应用图标。当前源码版本为 1.3.4+15；现有下载产物不会因改源码自动更新。
 - iOS：最低 iOS 13；实际重签时 Bundle ID 须与证书/描述文件匹配。更换包名会视为新应用，不会自动迁移旧包名下的数据。
@@ -14,12 +14,12 @@
 
 ## 没有 Mac：用 Windows 操作 GitHub 云端构建
 
-仓库内已提供 `.github/workflows/mobile-build.yml`，**只允许手动触发**，不会在每次推送时自动花费运行额度。没有添加上传到 App Store、发布 Release 或上传证书的步骤，也不会把机器人密钥/高德 Key 打进包里。运行可能消耗 GitHub Actions 额度，按你账号的权限与计费规则执行。
+仓库内已提供 `.github/workflows/mobile-build.yml`，**只允许手动触发**，不会在每次推送时自动花费运行额度。没有添加上传到 App Store 或发布 Release 的步骤，也不会把机器人密钥、高德 Key 或安卓私钥打进源码。安卓私钥只放在 GitHub Actions 密钥中。运行可能消耗 GitHub Actions 额度，按你账号的权限与计费规则执行。
 
 1. 将本次源码改动提交并推送到自己的 GitHub 仓库，确保工作流已在默认分支。
 2. 在仓库的 **Actions → 移动端与 macOS 安装包 → Run workflow** 中选择 `all`、`android`、`ios` 或 `macos`。
 3. 等待对应任务成功。在运行页面下方的 **Artifacts** 下载产物 ZIP，并解压：
-   - `android-debug-apk`：里面是 `app-debug.apk`，用于安卓测试安装。每次云端 debug 证书可能不同，可能无法直接覆盖上次安装；卸载会删除本机记录，请先导出配置。
+   - `android-release-apk`：里面是 `app-release.apk`。云端每次使用同一把上传证书。以前用 debug 证书安装的版本签名不同，不能直接覆盖，需先导出配置再卸载旧版。
    - `ios-unsigned-ipa`：里面是 `qq_bot_manager-unsigned.ipa`。云端先实际编译 iPhone 真机 arm64 应用，再打包为 IPA；不是模拟器包，也不是直接把源码改后缀。
 
 `macos-universal-packages` 包含 DMG 安装镜像和 ZIP 备用包。构建须通过 Apple Silicon、Intel 双架构和签名完整性检查；当前为临时签名、未公证测试包。

@@ -38,6 +38,9 @@ android {
                 storePassword = releaseKeys.getProperty("storePassword")
                 keyAlias = releaseKeys.getProperty("keyAlias")
                 keyPassword = releaseKeys.getProperty("keyPassword")
+                enableV1Signing = true
+                enableV2Signing = true
+                enableV3Signing = true
             }
         }
     }
