@@ -72,10 +72,13 @@ void main() {
       contains('id("org.jetbrains.kotlin.android") version "2.3.20"'),
     );
     expect(app, contains('id("org.jetbrains.kotlin.android")'));
+    expect(app, contains('enableV1Signing = true'));
+    expect(app, contains('enableV2Signing = true'));
+    expect(app, contains('enableV3Signing = true'));
     expect(wrapper, contains('gradle-8.13-bin.zip'));
   });
 
-  test('移动构建工作流只手动触发，两个平台保存正确产物且不需要 Apple 私钥', () {
+  test('移动构建工作流只手动触发，安卓使用固定签名正式包且不需要 Apple 私钥', () {
     final workflow =
         loadYaml(File('.github/workflows/mobile-build.yml').readAsStringSync())
             as YamlMap;
@@ -94,8 +97,14 @@ void main() {
     final iosSteps = workflow['jobs']['ios']['steps'] as YamlList;
     expect(
       androidSteps.any(
+        (s) => (s['run']?.toString() ?? '').contains('android/key.properties'),
+      ),
+      isTrue,
+    );
+    expect(
+      androidSteps.any(
         (s) => (s['run']?.toString() ?? '').startsWith(
-          'flutter build apk --debug --no-pub ',
+          'flutter build apk --release --no-pub ',
         ),
       ),
       isTrue,
@@ -104,7 +113,7 @@ void main() {
       iosSteps.any((s) => s['run'] == 'bash scripts/build_unsigned_ipa.sh'),
       isTrue,
     );
-    expect(androidSteps.last['with']['path'], endsWith('app-debug.apk'));
+    expect(androidSteps.last['with']['path'], endsWith('app-release.apk'));
     expect(iosSteps.last['with']['path'], 'dist/qq_bot_manager-unsigned.ipa');
     expect(
       workflow['env']['UPDATE_PUBLIC_KEY'],
@@ -117,10 +126,15 @@ void main() {
         .toString();
     expect(apkBuild, contains('--dart-define="UPDATE_PUBLIC_KEY='));
     expect(apkBuild, contains('--dart-define="UPDATE_BASE_URL='));
-    expect(
-      File('.github/workflows/mobile-build.yml').readAsStringSync(),
-      isNot(contains('secrets.')),
-    );
+    final source = File(
+      '.github/workflows/mobile-build.yml',
+    ).readAsStringSync();
+    expect(source, contains('secrets.ANDROID_KEYSTORE_BASE64'));
+    expect(source, contains('secrets.ANDROID_KEYSTORE_PASSWORD'));
+    expect(source, contains('secrets.ANDROID_KEY_ALIAS'));
+    expect(source, isNot(contains('APPLE_')));
+    expect(source, isNot(contains('.p12')));
+    expect(source, isNot(contains('PROVISIONING_PROFILE')));
   });
 
   test('IPA 打包必须先编译 iPhone 真机应用并验证 arm64，不会将源代码改名充当安装包', () {
