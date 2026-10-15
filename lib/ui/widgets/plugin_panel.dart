@@ -1,16 +1,21 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/plugin_manager.dart';
 import '../../models/plugin.dart';
 import '../../models/plugin_manifest.dart';
+import '../../services/plugin_workspace.dart';
 import '../themes/app_theme.dart';
 import 'plugin_config_dialog.dart';
 import 'plugin_developer_dialog.dart';
 import 'plugin_import_dialog.dart';
+import 'plugin_workshop.dart';
 import 'weather_config_dialog.dart';
 import 'app_dialogs.dart';
 
@@ -61,6 +66,25 @@ class _PluginPanelState extends State<PluginPanel> {
     if (source != null && mounted) await _import(source);
   }
 
+  Future<void> _workshop({String? id, String? source}) async {
+    final directory = Directory(
+      p.join((await getApplicationSupportDirectory()).path, 'plugin_workspace'),
+    );
+    await directory.create(recursive: true);
+    if (id != null && source != null) {
+      await PluginWorkspace(directory).write(id, 'plugin.json', source);
+    }
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (_) => PluginWorkshop(
+        manager: context.read<PluginManager>(),
+        root: directory,
+        initialId: id,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final manager = context.watch<PluginManager>();
@@ -109,6 +133,13 @@ class _PluginPanelState extends State<PluginPanel> {
                 onPressed: _developer,
                 icon: const Icon(Icons.code_rounded),
               ),
+              const SizedBox(width: 4),
+              OutlinedButton.icon(
+                onPressed: _workshop,
+                icon: const Icon(Icons.edit_note, size: 18),
+                label: const Text('写插件'),
+              ),
+              const SizedBox(width: 8),
               FilledButton.icon(
                 onPressed: _import,
                 icon: const Icon(Icons.add, size: 18),
@@ -186,7 +217,7 @@ class _PluginPanelState extends State<PluginPanel> {
                                 ),
                                 const SizedBox(height: 5),
                                 Text(
-                                  '导入 JSON / YAML 规则，或连接自己的 HTTP 服务。文档与示例可直接复制使用。',
+                                  '用「写插件」按命令和回复生成清单，也可以管理插件文件夹里的文本。导入 JSON / YAML 仍然可用。',
                                   style: TextStyle(
                                     fontSize: 12,
                                     height: 1.6,
@@ -391,6 +422,19 @@ class _PluginCard extends StatelessWidget {
                   onPressed: () => _viewManifest(context),
                   icon: const Icon(Icons.data_object, size: 19),
                 ),
+                if (!bundled)
+                  IconButton(
+                    tooltip: '在工作台编辑',
+                    onPressed: () {
+                      final panel = context
+                          .findAncestorStateOfType<_PluginPanelState>();
+                      panel?._workshop(
+                        id: info.id,
+                        source: manager.exportPlugin(info.id),
+                      );
+                    },
+                    icon: const Icon(Icons.edit_outlined, size: 19),
+                  ),
                 if (!bundled)
                   IconButton(
                     tooltip: '卸载插件',

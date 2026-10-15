@@ -102,8 +102,17 @@ function serve(Core $core, AccountLogin $account): bool
                 respond($core->addRelease($fields, $upload['tmp_name']), 201);
             }
             if (preg_match('~^/api/admin/releases/([a-f0-9]{24})$~D', $path, $match) && $method === 'PATCH') {
-                $input = body(); if (!is_bool($input['published'] ?? null)) { throw new HttpError(422, '发布状态需要布尔值'); }
-                $core->publish($match[1], $input['published']); respond(['ok' => true]);
+                $input = body(); $touched = false;
+                if (array_key_exists('published', $input)) {
+                    if (!is_bool($input['published'])) { throw new HttpError(422, '发布状态需要布尔值'); }
+                    $core->publish($match[1], $input['published']); $touched = true;
+                }
+                if (array_key_exists('force_update', $input)) {
+                    if (!is_bool($input['force_update'])) { throw new HttpError(422, '强制更新需要布尔值'); }
+                    $core->setForceUpdate($match[1], $input['force_update']); $touched = true;
+                }
+                if (!$touched) { throw new HttpError(422, '需要发布状态或强制更新开关'); }
+                respond(['ok' => true]);
             }
             if (preg_match('~^/api/admin/devices/([a-f0-9-]{36})$~D', $path, $match) && $method === 'DELETE') {
                 $core->query('DELETE FROM qqm_installations WHERE id=?', [$match[1]]); respond(['ok' => true]);

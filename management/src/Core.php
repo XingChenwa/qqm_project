@@ -16,7 +16,7 @@ final class HttpError extends RuntimeException
 
 final class Core
 {
-    public const SCHEMA_VERSION = 2;
+    public const SCHEMA_VERSION = 3;
     private const DEVICE_COLUMNS = ['device_name' => 128, 'device_model' => 128, 'system_version' => 255, 'system_arch' => 64];
     public readonly PDO $db;
     public readonly array $config;
@@ -84,6 +84,10 @@ final class Core
             $existing = array_column($this->query('SHOW COLUMNS FROM qqm_installations')->fetchAll(), 'Field');
             foreach (self::DEVICE_COLUMNS as $name => $length) {
                 if (!in_array($name, $existing, true)) { $this->db->exec("ALTER TABLE qqm_installations ADD COLUMN `{$name}` VARCHAR({$length}) NULL"); }
+            }
+            $releaseColumns = array_column($this->query('SHOW COLUMNS FROM qqm_releases')->fetchAll(), 'Field');
+            if (!in_array('force_update', $releaseColumns, true)) {
+                $this->db->exec('ALTER TABLE qqm_releases ADD COLUMN force_update TINYINT UNSIGNED NOT NULL DEFAULT 0');
             }
             $this->query('INSERT INTO qqm_schema_migrations(version,installed_at) VALUES(?,?) ON DUPLICATE KEY UPDATE version=version', [self::SCHEMA_VERSION, time()]);
             $this->requireSchema();
@@ -282,6 +286,7 @@ final class Core
     public function publicRelease(array $row): array
     {
         $row['build'] = (int)$row['build']; $row['size'] = (int)$row['size']; $row['published'] = (bool)$row['published'];
+        $row['force_update'] = (int)($row['force_update'] ?? 0) === 1;
         $row['url'] = rtrim($this->config['app_url'], '/') . '/packages/' . $row['sha256'] . '/' . rawurlencode($row['filename']);
         $row['package_id'] = 'cn.uuze.botmanager'; $row['requires_resigning'] = $row['platform'] === 'ios'; return $row;
     }
@@ -339,7 +344,7 @@ final class Core
             chmod($destination, 0600);
         }
         try {
-            $this->query('INSERT INTO qqm_releases(id,platform,arch,version,build,`format`,filename,sha256,size,notes,published,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,0,?)', [$id, $platform, $arch, $version, $build, $format, $filename, $hash, $size, $notes, time()]);
+            $this->query('INSERT INTO qqm_releases(id,platform,arch,version,build,`format`,filename,sha256,size,notes,published,force_update,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,0,0,?)', [$id, $platform, $arch, $version, $build, $format, $filename, $hash, $size, $notes, time()]);
         } catch (\PDOException $error) { if ($error->getCode() === '23000') { throw new HttpError(409, '该平台/架构的构建号已经存在'); } throw $error; }
         return $this->publicRelease($this->query('SELECT * FROM qqm_releases WHERE id=?', [$id])->fetch());
     }
@@ -348,5 +353,11 @@ final class Core
     {
         if (!$this->query('SELECT 1 FROM qqm_releases WHERE id=?', [$id])->fetchColumn()) { throw new HttpError(404, '版本不存在'); }
         $this->query('UPDATE qqm_releases SET published=? WHERE id=?', [$published ? 1 : 0, $id]);
+    }
+
+    public function setForceUpdate(string $id, bool $force): void
+    {
+        if (!$this->query('SELECT 1 FROM qqm_releases WHERE id=?', [$id])->fetchColumn()) { throw new HttpError(404, '版本不存在'); }
+        $this->query('UPDATE qqm_releases SET force_update=? WHERE id=?', [$force ? 1 : 0, $id]);
     }
 }

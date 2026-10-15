@@ -78,6 +78,7 @@ try {
     foreach (['qq_bot_manager.exe', 'flutter_windows.dll', 'data/app.so'] as $name) { $zip->addFromString($name, 'synthetic-fixture'); } $zip->close();
     $release = $core->addRelease(['platform' => 'windows', 'version' => '1.3.0', 'build' => 11, 'arch' => 'x64', 'format' => 'zip', 'notes' => '测试发布 🤖'], $zipPath, false);
     check($release['notes'] === '测试发布 🤖', 'utf8mb4 Chinese and emoji');
+    check($release['force_update'] === false, 'Force update defaults off');
     check(count($core->releases()) === 0, 'Draft not public');
     $nonce = '11111111-2222-4333-8444-555555555555';
     $empty = $core->signedUpdate('windows', 'x64', $nonce);
@@ -88,6 +89,10 @@ try {
     check(!sodium_crypto_sign_verify_detached(base64_decode($envelope['signature']), $payload . ' ', sodium_crypto_sign_publickey($keys)), 'Tampering rejected');
     check(json_decode($payload, true)['release']['sha256'] === hash_file('sha256', $zipPath), 'Hash matches package');
     check(json_decode($payload, true)['nonce'] === $nonce, 'Replay nonce included');
+    $core->setForceUpdate($release['id'], true);
+    $forced = json_decode(base64_decode($core->signedUpdate('windows', 'x64', $nonce)['payload']), true);
+    check($forced['release']['force_update'] === true, 'Signed manifest carries force update');
+    $core->setForceUpdate($release['id'], false);
     $core->publish($release['id'], false); check(count($core->releases()) === 0, 'Unpublish');
     rejects(fn() => $core->addRelease(['platform' => 'windows', 'version' => '1.3.0', 'build' => 11, 'arch' => 'x64', 'format' => 'zip'], $zipPath, false), 409);
     $badPath = $directory . '/bad.zip'; $zip = new ZipArchive(); $zip->open($badPath, ZipArchive::CREATE); $zip->addFromString('../escape.exe', 'no'); $zip->close();

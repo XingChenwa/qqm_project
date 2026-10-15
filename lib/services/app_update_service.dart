@@ -207,8 +207,8 @@ class AppUpdateService extends ChangeNotifier {
       _changed();
       if (hasUpdate &&
           phase == UpdatePhase.available &&
-          platform == 'windows' &&
-          preferences.autoDownload) {
+          ((platform == 'windows' && preferences.autoDownload) ||
+              release?.forceUpdate == true)) {
         await download();
       }
     } catch (exception) {
@@ -229,6 +229,7 @@ class AppUpdateService extends ChangeNotifier {
   }
 
   void dismiss() {
+    if (release?.forceUpdate == true) return;
     dismissedBuild = release?.build ?? 0;
     _changed();
   }

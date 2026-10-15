@@ -29,6 +29,32 @@ String windowsMobileUserAgent(String desktopUserAgent) {
   return agent;
 }
 
+const blockedExternalSchemes = {
+  'javascript',
+  'data',
+  'file',
+  'content',
+  'blob',
+  'about',
+  'filesystem',
+  'chrome',
+  'chrome-error',
+};
+
+/// App links stay out of the page view so the system can open another app.
+Uri? externalAppUri(String value) {
+  final uri = Uri.tryParse(value.trim());
+  if (uri == null || !uri.hasScheme) return null;
+  final scheme = uri.scheme.toLowerCase();
+  if (scheme == 'http' ||
+      scheme == 'https' ||
+      blockedExternalSchemes.contains(scheme)) {
+    return null;
+  }
+  if (!RegExp(r'^[a-z][a-z0-9+.-]{0,31}$').hasMatch(scheme)) return null;
+  return uri;
+}
+
 InAppWebViewSettings browserSettings({
   required TargetPlatform platform,
   bool mobile = true,

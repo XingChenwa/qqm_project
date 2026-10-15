@@ -75,7 +75,7 @@
 - **清理无效入口**：删除设置页无实现的好友、群聊、事件等导航、无作用的关注会话表单和定时任务占位。群聊/单聊收发、消息设置、插件、凭据验证等有效功能保留。统计改用真实会话数量，旧配置字段保留读取兼容。
 - **品牌与包名**：应用内 Logo、Windows 图标、Android 启动图标、iOS AppIcon 均由 `assets/branding/logo.png` 生成；可用 `dart run flutter_launcher_icons` 重建。Android applicationId/namespace 与 iOS bundle identifier 均为 `cn.uuze.botmanager`。更换包名后手机端会视为新应用，旧应用数据不会自动迁移；iOS 重签需使用匹配新包名的描述文件。
 
-当前源码版本为 1.3.4+15。旧版已下载的安装包不会因源码变更而更新，需重新构建后安装。Windows 不能本机构建 IPA 或 macOS 应用，需 macOS CI 编译；IPA 安装前仍需有效证书重签。
+当前源码版本为 1.3.6+17。旧版已下载的安装包不会因源码变更而更新，需重新构建后安装。Windows 不能本机构建 IPA 或 macOS 应用，需 macOS CI 编译；IPA 安装前仍需有效证书重签。
 
 Windows 原生浏览器自测入口为 `tool/browser_smoke.dart`：仅启动本机临时 HTTP 服务验证 HTML、JavaScript 和应用内导航，不初始化机器人配置或连接 QQ。维护者可用 `flutter build windows --release --target=tool/browser_smoke.dart` 构建并运行该测试；结果写入 `build/browser-smoke-result.json`。测试后务必用 `flutter build windows --release --target=lib/main.dart` 重新构建正式程序再分发。
 
@@ -172,7 +172,7 @@ Windows 本机不能直接编译 iOS IPA 或 macOS 应用。可操作 GitHub 的
 
 Windows 支持单个中文 Setup.exe 首次安装、签名校验后的应用内覆盖更新，并保留机器人数据。构建与发布步骤见 [Windows 安装包与自动更新](docs/windows-release.md)。
 
-更新服务始于 `1.3.0+11`，当前源码为 `1.3.4+15`，每次启动发现新版都会弹窗提醒。需部署服务器并把公开公钥内置到客户端，原有 `1.2.6` 安装包不会自动拥有更新功能。Windows 自动下载后由用户确认重启，Android 调用系统安装器，iOS 导出 IPA 后合法重签，macOS 打开 DMG 后手动替换，不承诺静默安装。
+更新服务始于 `1.3.0+11`，当前源码为 `1.3.6+17`，每次启动发现新版都会弹窗提醒。需部署服务器并把公开公钥内置到客户端，原有 `1.2.6` 安装包不会自动拥有更新功能。Windows 自动下载后由用户确认重启，Android 调用系统安装器，iOS 导出 IPA 后合法重签，macOS 打开 DMG 后手动替换，不承诺静默安装。
 
 ## 开发
 

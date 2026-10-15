@@ -25,6 +25,11 @@ void main() {
     expect(windowsDesktopUserAgent('invalid'), isNot(contains('Chrome/')));
     const url = 'https://example.com/p?a=1&signature=a%2Bb#section';
     expect(browserUri(url).toString(), url);
+    expect(externalAppUri('mqqapi://card/show_pslcard')?.scheme, 'mqqapi');
+    expect(externalAppUri('weixin://dl/business')?.scheme, 'weixin');
+    expect(externalAppUri('https://example.com'), isNull);
+    expect(externalAppUri('javascript:alert(1)'), isNull);
+    expect(externalAppUri('file:///C:/secret.txt'), isNull);
   });
 
   test('默认移动内容模式覆盖所有平台，切换电脑版保留安全限制', () {

@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS qqm_releases (
     size BIGINT UNSIGNED NOT NULL,
     notes TEXT NOT NULL,
     published TINYINT UNSIGNED NOT NULL DEFAULT 0,
+    force_update TINYINT UNSIGNED NOT NULL DEFAULT 0,
     created_at BIGINT UNSIGNED NOT NULL,
     UNIQUE KEY qqm_release_build (platform,arch,build),
     KEY qqm_release_latest (platform,arch,published,build),

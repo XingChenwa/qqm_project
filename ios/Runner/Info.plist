@@ -26,6 +26,18 @@
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>LSApplicationQueriesSchemes</key>
+	<array>
+		<string>weixin</string>
+		<string>alipay</string>
+		<string>alipays</string>
+		<string>mqq</string>
+		<string>mqqapi</string>
+		<string>mqqwpa</string>
+		<string>tel</string>
+		<string>mailto</string>
+		<string>sms</string>
+	</array>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>选择图片并通过 QQ 机器人发送到指定会话。</string>
 	<key>UIApplicationSceneManifest</key>

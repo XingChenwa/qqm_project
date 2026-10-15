@@ -360,6 +360,21 @@ void main() {
     expect(adapter.requests.single.headers['Authorization'], isNull);
     expect(adapter.requests.single.uri.path, '/api/v1/update');
   });
+  test('强制更新写入清单，且不能被稍后关掉', () async {
+    final optional = await verify(await envelope(release()));
+    expect(optional?.forceUpdate, isFalse);
+    final forced = await verify(
+      await envelope({...release(), 'force_update': true}),
+    );
+    expect(forced?.forceUpdate, isTrue);
+    final updates = service(UpdateAdapter((_) async => jsonResponse({})));
+    updates.release = forced;
+    updates.dismiss();
+    expect(updates.dismissedBuild, 0);
+    updates.release = optional;
+    updates.dismiss();
+    expect(updates.dismissedBuild, optional?.build);
+  });
   test('完整下载校验后才就绪，缓存按 SHA 复用且不重复请求', () async {
     final directory = await Directory.systemTemp.createTemp('qqm-update-test-');
     addTearDown(() => directory.delete(recursive: true));

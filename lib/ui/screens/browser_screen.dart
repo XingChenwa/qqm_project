@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:path/path.dart' as path;
 import 'package:path_provider/path_provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../utils/browser_policy.dart';
 import '../../utils/platforms.dart';
@@ -134,9 +135,17 @@ class _BrowserScreenState extends State<BrowserScreen> {
     }
   }
 
-  void _blocked() {
-    if (!mounted) return;
-    AppDialogs.show(context, '已拦截外部应用跳转，链接保持在内置浏览器中');
+  Future<void> _openExternal(String url) async {
+    final uri = externalAppUri(url);
+    if (uri == null || !mounted) return;
+    try {
+      final opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
+      if (!opened && mounted) {
+        AppDialogs.show(context, '没有找到可以打开此链接的应用');
+      }
+    } catch (_) {
+      if (mounted) AppDialogs.show(context, '没有找到可以打开此链接的应用');
+    }
   }
 
   Future<void> _retry() async {
@@ -277,7 +286,9 @@ class _BrowserScreenState extends State<BrowserScreen> {
                                     url == 'about:blank')) {
                               return NavigationActionPolicy.ALLOW;
                             }
-                            _blocked();
+                            if (externalAppUri(url) != null) {
+                              await _openExternal(url);
+                            }
                             return NavigationActionPolicy.CANCEL;
                           },
                           onCreateWindow: (controller, action) async {
@@ -286,8 +297,8 @@ class _BrowserScreenState extends State<BrowserScreen> {
                               await controller.loadUrl(
                                 urlRequest: URLRequest(url: WebUri(url)),
                               );
-                            } else {
-                              _blocked();
+                            } else if (externalAppUri(url) != null) {
+                              await _openExternal(url);
                             }
                             return false;
                           },
@@ -344,7 +355,12 @@ class _BrowserScreenState extends State<BrowserScreen> {
                               );
                             }
                           },
-                          onDownloadStartRequest: (_, _) => _blocked(),
+                          onDownloadStartRequest: (_, request) async {
+                            final url = request.url.toString();
+                            if (externalAppUri(url) != null) {
+                              await _openExternal(url);
+                            }
+                          },
                         ),
                       if (_error != null)
                         ColoredBox(

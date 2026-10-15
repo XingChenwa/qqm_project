@@ -22,6 +22,7 @@ Future<void> showUpdateDialog(
   final dialog = AppDialogs.present<void>(
     context,
     key: 'software-update',
+    barrierDismissible: updates.release?.forceUpdate != true,
     builder: (_) => MultiProvider(
       providers: [
         ChangeNotifierProvider<AppUpdateService>.value(value: updates),
@@ -118,6 +119,7 @@ class _UpdateDialog extends StatelessWidget {
     final updates = context.watch<AppUpdateService>();
     final release = updates.release;
     final phase = updates.phase;
+    final forced = updates.hasUpdate && release?.forceUpdate == true;
     final size = MediaQuery.sizeOf(context);
     final windows = updates.platform == 'windows';
     final installLabel = switch (updates.platform) {
@@ -126,148 +128,160 @@ class _UpdateDialog extends StatelessWidget {
       'macos' => '打开安装包',
       _ => '导出 IPA / 用全能签打开',
     };
-    return Dialog(
-      insetPadding: const EdgeInsets.all(16),
-      child: SizedBox(
-        width: 600,
-        height: math.min(
-          640,
-          math.max(
-            200,
-            size.height - MediaQuery.viewInsetsOf(context).bottom - 48,
-          ),
-        ),
-        child: Column(
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 14, 8, 8),
-              child: Row(
-                children: [
-                  const Icon(Icons.system_update_alt),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      updates.hasUpdate ? '发现新版本' : '软件更新',
-                      style: Theme.of(context).textTheme.titleLarge,
-                    ),
-                  ),
-                  IconButton(
-                    tooltip: '关闭更新',
-                    onPressed: () => Navigator.pop(context),
-                    icon: const Icon(Icons.close),
-                  ),
-                ],
-              ),
+    return PopScope(
+      canPop: !forced,
+      child: Dialog(
+        insetPadding: const EdgeInsets.all(16),
+        child: SizedBox(
+          width: 600,
+          height: math.min(
+            640,
+            math.max(
+              200,
+              size.height - MediaQuery.viewInsetsOf(context).bottom - 48,
             ),
-            const Divider(height: 1),
-            Expanded(
-              child: ListView(
-                padding: const EdgeInsets.all(20),
-                children: [
-                  const Text(
-                    '当前版本 ${AppConstants.appVersion}（构建 ${AppConstants.appBuild}）',
-                  ),
-                  const SizedBox(height: 16),
-                  if (!updates.configured)
-                    const Text('更新服务尚未配置，暂时无法检查更新。')
-                  else if (!updates.hasUpdate &&
-                      !updates.busy &&
-                      updates.error.isEmpty)
-                    const Text('当前已是最新版本。'),
-                  if (updates.hasUpdate && release != null) ...[
-                    Text(
-                      '最新版本 ${release.version}（${release.build}）',
-                      style: Theme.of(context).textTheme.titleMedium,
+          ),
+          child: Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 14, 8, 8),
+                child: Row(
+                  children: [
+                    const Icon(Icons.system_update_alt),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        updates.hasUpdate ? '发现新版本' : '软件更新',
+                        style: Theme.of(context).textTheme.titleLarge,
+                      ),
                     ),
-                    const SizedBox(height: 12),
-                    SelectableText(
-                      release.notes.isEmpty ? '新版本已发布，可下载后安装。' : release.notes,
-                    ),
-                    const SizedBox(height: 12),
-                    Text(
-                      '${(release.size / 1048576).toStringAsFixed(1)} MB · ${release.format.toUpperCase()} · 签名已验证',
-                    ),
+                    if (!forced)
+                      IconButton(
+                        tooltip: '关闭更新',
+                        onPressed: () => Navigator.pop(context),
+                        icon: const Icon(Icons.close),
+                      ),
                   ],
-                  if (updates.busy) ...[
-                    const SizedBox(height: 20),
-                    LinearProgressIndicator(
-                      value: phase == UpdatePhase.downloading
-                          ? updates.progress
-                          : null,
+                ),
+              ),
+              const Divider(height: 1),
+              Expanded(
+                child: ListView(
+                  padding: const EdgeInsets.all(20),
+                  children: [
+                    const Text(
+                      '当前版本 ${AppConstants.appVersion}（构建 ${AppConstants.appBuild}）',
                     ),
-                    const SizedBox(height: 10),
-                    Text(switch (phase) {
-                      UpdatePhase.downloading =>
-                        '正在下载 ${(updates.progress * 100).toStringAsFixed(0)}%',
-                      UpdatePhase.installing => '正在打开安装程序…',
-                      _ => '正在检查更新…',
+                    const SizedBox(height: 16),
+                    if (!updates.configured)
+                      const Text('更新服务尚未配置，暂时无法检查更新。')
+                    else if (!updates.hasUpdate &&
+                        !updates.busy &&
+                        updates.error.isEmpty)
+                      const Text('当前已是最新版本。'),
+                    if (forced)
+                      const Padding(
+                        padding: EdgeInsets.only(bottom: 12),
+                        child: Text('此版本为强制更新，完成后才能继续使用。'),
+                      ),
+                    if (updates.hasUpdate && release != null) ...[
+                      Text(
+                        '最新版本 ${release.version}（${release.build}）',
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
+                      const SizedBox(height: 12),
+                      SelectableText(
+                        release.notes.isEmpty
+                            ? '新版本已发布，可下载后安装。'
+                            : release.notes,
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        '${(release.size / 1048576).toStringAsFixed(1)} MB · ${release.format.toUpperCase()} · 签名已验证',
+                      ),
+                    ],
+                    if (updates.busy) ...[
+                      const SizedBox(height: 20),
+                      LinearProgressIndicator(
+                        value: phase == UpdatePhase.downloading
+                            ? updates.progress
+                            : null,
+                      ),
+                      const SizedBox(height: 10),
+                      Text(switch (phase) {
+                        UpdatePhase.downloading =>
+                          '正在下载 ${(updates.progress * 100).toStringAsFixed(0)}%',
+                        UpdatePhase.installing => '正在打开安装程序…',
+                        _ => '正在检查更新…',
+                      }),
+                    ],
+                    if (phase == UpdatePhase.ready) ...[
+                      const SizedBox(height: 16),
+                      const Text('安装包已下载，SHA-256 校验通过。'),
+                    ],
+                    if (updates.error.isNotEmpty) ...[
+                      const SizedBox(height: 16),
+                      SelectableText(
+                        updates.error,
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.error,
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 20),
+                    Text(switch (updates.platform) {
+                      'windows' => '确认后才重启安装，稍后关闭此弹窗不影响后台下载。',
+                      'android' => '安装需系统确认，新 APK 签名须与旧版一致；不会自动卸载旧版。',
+                      'macos' => '打开 DMG 后，将应用拖入“应用程序”替换旧版；替换前请退出管理器。',
+                      _ => 'IPA 需适用于设备的有效证书重签；下载或导出成功不代表已经安装。',
                     }),
                   ],
-                  if (phase == UpdatePhase.ready) ...[
-                    const SizedBox(height: 16),
-                    const Text('安装包已下载，SHA-256 校验通过。'),
-                  ],
-                  if (updates.error.isNotEmpty) ...[
-                    const SizedBox(height: 16),
-                    SelectableText(
-                      updates.error,
-                      style: TextStyle(
-                        color: Theme.of(context).colorScheme.error,
-                      ),
-                    ),
-                  ],
-                  const SizedBox(height: 20),
-                  Text(switch (updates.platform) {
-                    'windows' => '确认后才重启安装，稍后关闭此弹窗不影响后台下载。',
-                    'android' => '安装需系统确认，新 APK 签名须与旧版一致；不会自动卸载旧版。',
-                    'macos' => '打开 DMG 后，将应用拖入“应用程序”替换旧版；替换前请退出管理器。',
-                    _ => 'IPA 需适用于设备的有效证书重签；下载或导出成功不代表已经安装。',
-                  }),
-                ],
+                ),
               ),
-            ),
-            const Divider(height: 1),
-            Padding(
-              padding: const EdgeInsets.all(12),
-              child: Wrap(
-                alignment: WrapAlignment.end,
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  TextButton(
-                    onPressed: () => Navigator.pop(context),
-                    child: Text(updates.hasUpdate ? '稍后' : '关闭'),
-                  ),
-                  OutlinedButton.icon(
-                    onPressed: updates.configured && !updates.busy
-                        ? updates.check
-                        : null,
-                    icon: const Icon(Icons.refresh, size: 18),
-                    label: const Text('重新检查'),
-                  ),
-                  if (updates.hasUpdate)
-                    FilledButton.icon(
-                      onPressed: updates.busy
-                          ? null
-                          : phase == UpdatePhase.ready
-                          ? () => _install(context, updates)
-                          : updates.download,
-                      icon: Icon(
-                        phase == UpdatePhase.ready
-                            ? windows
-                                  ? Icons.restart_alt
-                                  : Icons.open_in_new
-                            : Icons.download,
-                        size: 18,
+              const Divider(height: 1),
+              Padding(
+                padding: const EdgeInsets.all(12),
+                child: Wrap(
+                  alignment: WrapAlignment.end,
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    if (!forced)
+                      TextButton(
+                        onPressed: () => Navigator.pop(context),
+                        child: Text(updates.hasUpdate ? '稍后' : '关闭'),
                       ),
-                      label: Text(
-                        phase == UpdatePhase.ready ? installLabel : '下载新版',
-                      ),
+                    OutlinedButton.icon(
+                      onPressed: updates.configured && !updates.busy
+                          ? updates.check
+                          : null,
+                      icon: const Icon(Icons.refresh, size: 18),
+                      label: const Text('重新检查'),
                     ),
-                ],
+                    if (updates.hasUpdate)
+                      FilledButton.icon(
+                        onPressed: updates.busy
+                            ? null
+                            : phase == UpdatePhase.ready
+                            ? () => _install(context, updates)
+                            : updates.download,
+                        icon: Icon(
+                          phase == UpdatePhase.ready
+                              ? windows
+                                    ? Icons.restart_alt
+                                    : Icons.open_in_new
+                              : Icons.download,
+                          size: 18,
+                        ),
+                        label: Text(
+                          phase == UpdatePhase.ready ? installLabel : '下载新版',
+                        ),
+                      ),
+                  ],
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

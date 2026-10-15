@@ -6,6 +6,7 @@ class AppRelease {
   final String platform, arch, version, format, sha256, notes;
   final int build, size;
   final Uri url;
+  final bool forceUpdate;
 
   const AppRelease({
     required this.platform,
@@ -17,6 +18,7 @@ class AppRelease {
     required this.size,
     required this.url,
     this.notes = '',
+    this.forceUpdate = false,
   });
 
   static Future<AppRelease?> verifyEnvelope(
@@ -103,6 +105,7 @@ class AppRelease {
       size: size,
       url: url,
       notes: release['notes'] is String ? release['notes'] : '',
+      forceUpdate: release['force_update'] == true,
     );
   }
 }
