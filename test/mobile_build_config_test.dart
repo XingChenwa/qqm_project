@@ -135,4 +135,11 @@ void main() {
     expect(script, contains('Payload/Runner.app'));
     expect(script, isNot(contains('\r')));
   });
+  test('macOS 校验主程序及原生库双架构，lipo 输入文件位于校验参数之前', () {
+    final script = File('scripts/build_macos_package.sh').readAsStringSync();
+    expect(script, contains('lipo "\$binary" -verify_arch arm64 x86_64'));
+    expect(script, contains('lipo "\$candidate" -verify_arch arm64 x86_64'));
+    expect(script, contains('codesign --verify --deep --strict'));
+    expect(script, contains('hdiutil verify'));
+  });
 }

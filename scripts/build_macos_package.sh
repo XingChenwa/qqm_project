@@ -16,7 +16,13 @@ flutter build macos --release --no-pub "${update_args[@]}"
 app_path="$project_dir/build/macos/Build/Products/Release/QQBotManager.app"
 binary="$app_path/Contents/MacOS/QQBotManager"
 test -f "$binary"
-lipo -verify_arch arm64 x86_64 "$binary"
+lipo "$binary" -verify_arch arm64 x86_64
+# Native assets and embedded frameworks must also contain both slices.
+while IFS= read -r -d '' candidate; do
+  case "$(/usr/bin/file -b "$candidate")" in
+    *Mach-O*) lipo "$candidate" -verify_arch arm64 x86_64 ;;
+  esac
+done < <(find "$app_path/Contents" -type f -print0)
 codesign --verify --deep --strict "$app_path"
 test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app_path/Contents/Info.plist")" = cn.uuze.botmanager
 
