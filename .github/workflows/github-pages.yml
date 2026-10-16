@@ -1,20 +1,14 @@
-name: GitHub 下载首页
+name: 刷新网站下载与更新清单
 
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - 'site/**'
-      - 'tool/github_release*.mjs'
-      - 'tool/github_site_sync.mjs'
-      - '.github/workflows/github-pages.yml'
 
 permissions:
-  contents: read
+  contents: write
+  pages: write
 
 concurrency:
-  group: public-distribution-sync
+  group: project-website-sync
   cancel-in-progress: false
 
 jobs:
@@ -25,18 +19,18 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-      - run: node --test tool/tests/github_release.test.mjs tool/tests/github_site_sync.test.mjs
-      - name: 检出公开下载仓库（独立部署密钥，不授予私有源码权限）
+      - name: 检出同仓库的网站分支
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          repository: XingChenwa/qqm-releases
-          ref: main
-          path: build/distribution
-          ssh-key: ${{ secrets.DISTRIBUTION_DEPLOY_KEY }}
+          ref: docs
+          path: build/website
           persist-credentials: true
-      - name: 仅同步网页与已签名的公开更新清单
+      - run: node --test tool/tests/github_release.test.mjs tool/tests/github_site_sync.test.mjs
+        env:
+          WEBSITE_DIRECTORY: build/website
+      - name: 同步已签名版本并请求 Pages 构建（不覆盖网站源码）
         run: node tool/github_release.mjs pages
         env:
           GH_TOKEN: ${{ github.token }}
-          DISTRIBUTION_DIRECTORY: build/distribution
+          WEBSITE_DIRECTORY: build/website
           UPDATE_PUBLIC_KEY: ${{ vars.UPDATE_PUBLIC_KEY || 'EmpeSLtZms6Uz7D61o6E3gQzBytIPqsNU+dSq47M9ko=' }}

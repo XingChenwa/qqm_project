@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {generateKeyPairSync} from 'node:crypto';
 import {readFile} from 'node:fs/promises';
+import {join} from 'node:path';
 import {repository, readVersion, signingKeys, assetDefinitions, sha256, signManifest, verifyManifest, validateManifest, trustedAsset} from '../github_release_core.mjs';
 
 const keys = generateKeyPairSync('ed25519');
@@ -37,7 +38,7 @@ test('拒绝缺平台、重复平台、跨仓库、恶意跳转、无效包身�
     d => d.releases[0].url += '?target=evil', d => d.releases[0].url += '#fragment']) {
     const data = fixture(); change(data); assert.throws(() => validateManifest(data));
   }
-  assert.equal(trustedAsset('https://user:pass@github.com/XingChenwa/qqm-releases/releases/download/v1.3.7/setup.exe', 'v1.3.7'), false);
+  assert.equal(trustedAsset('https://user:pass@github.com/XingChenwa/qqm_project/releases/download/v1.3.7/setup.exe', 'v1.3.7'), false);
 });
 test('清单体积限制及源码版本一致性', async () => {
   const data = fixture(); data.releases[0].notes = 'x'.repeat(4001); assert.throws(() => signManifest(data, secret, publicKey));
@@ -51,21 +52,27 @@ test('GitHub 发布需要四端完成、签名并部署 Pages；手动构建不�
   assert.match(workflow, /needs: \[preflight, android, ios, macos, windows\]/);
   assert.match(workflow, /publish:\s+needs:[^\n]+\s+if: github.event_name == 'release'/);
   assert.match(workflow, /UPDATE_SIGNING_PRIVATE_KEY/);
-  assert.match(workflow, /PUBLIC_RELEASE_TOKEN/);
-  assert.match(workflow, /DISTRIBUTION_DEPLOY_KEY/);
-  assert.ok(!workflow.includes('actions/deploy-pages@'));
-  const publicWorkflow = await readFile('deploy/github-distribution/pages.yml', 'utf8');
-  assert.match(publicWorkflow, /actions\/deploy-pages@[a-f0-9]{40}/);
+  assert.ok(!workflow.includes('PUBLIC_RELEASE_TOKEN') && !workflow.includes('DISTRIBUTION_DEPLOY_KEY'));
+  assert.match(workflow, /contents: write\s+pages: write/);
+  assert.match(workflow, /ref: docs/);
+  const websiteWorkflow = await readFile('.github/workflows/github-pages.yml', 'utf8');
+  assert.match(websiteWorkflow, /ref: docs/);
+  assert.match(websiteWorkflow, /WEBSITE_DIRECTORY: build\/website/);
   const publish = await readFile('tool/github_release.mjs', 'utf8');
   assert.ok(!publish.includes("'--clobber'"));
   assert.match(publish, /files\.push\(\{file:manifestPath/);
-  assert.match(publish, /--draft=false/);
+  assert.ok(!publish.includes("'release','create'") && !publish.includes('PUBLIC_RELEASE_TOKEN'));
+  assert.match(publish, /\/pages\/builds/);
+  assert.match(publish, /!release.immutable/);
 });
-test('静态首页有 Star 和四平台下载，无管理后台或统计 API', async () => {
-  const html = await readFile('site/index.html', 'utf8');
-  const js = await readFile('site/assets/site.js', 'utf8');
+test('静态首页有原项目链接、Star、插件和四平台下载，无管理后台或统计 API', {skip:!process.env.WEBSITE_DIRECTORY}, async () => {
+  const html = await readFile(join(process.env.WEBSITE_DIRECTORY,'index.html'), 'utf8');
+  const js = await readFile(join(process.env.WEBSITE_DIRECTORY,'assets/site.js'), 'utf8');
   assert.match(html, /如果喜欢这个项目/); assert.match(html, /给项目点个 Star/);
   assert.equal((html.match(/data-platform=/g) ?? []).length, 4);
+  assert.equal((html.match(/class="plugin-card"/g) ?? []).length, 6);
+  assert.ok(html.includes('https://github.com/'+repository));
+  assert.ok(!html.includes('qqm-releases') && !js.includes('qqm-releases'));
   assert.ok(!html.includes('/admin') && !html.includes('使用统计'));
   assert.ok(!js.includes('/api/') && !js.includes('innerHTML'));
   assert.ok(!html.includes('src="/assets/') && !html.includes('href="/assets/'));

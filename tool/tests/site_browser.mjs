@@ -7,23 +7,24 @@ import assert from 'node:assert/strict';
 import {assetDefinitions, repository, sha256} from '../github_release_core.mjs';
 const require = createRequire(import.meta.url);
 const {chromium} = require(process.env.QQM_PLAYWRIGHT || 'playwright');
-const site = resolve('site');
+assert.ok(process.env.WEBSITE_DIRECTORY, '请用 WEBSITE_DIRECTORY 指定 docs 分支 checkout');
+const site = resolve(process.env.WEBSITE_DIRECTORY);
 const screenshots = resolve('build/github-pages-previews');
 await mkdir(screenshots,{recursive:true});
 let mode = 'empty';
 const data = {schema:2,repository,tag:'v1.3.7',version:'1.3.7',build:18,published_at:Math.floor(Date.now()/1000),
-  releases:assetDefinitions('1.3.7',18).map(a => ({platform:a.platform,arch:a.arch,format:a.format,version:'1.3.7',build:18,size:42,sha256:sha256('fixture'),
+  releases:assetDefinitions('1.3.7',18).map(a => ({platform:a.platform,arch:a.arch,format:a.format,package_id:'cn.uuze.botmanager',version:'1.3.7',build:18,size:42,sha256:sha256('fixture'),
     url:`https://github.com/${repository}/releases/download/v1.3.7/${a.name}`,notes:'本地界面测试，不是真实发布。<img src=x onerror=alert(1)>\n多行说明保持文本。'}))};
 const server = createServer(async (request,response) => {
   try {
     const url = new URL(request.url,'http://127.0.0.1');
-    if (url.pathname === '/qqm-releases/releases.json') {
+    if (url.pathname === '/qqm_project/releases.json') {
       const payload = structuredClone(data);
       if (mode === 'invalid') payload.releases[0].url = 'https://evil.invalid/setup.exe';
       response.setHeader('content-type','application/json');
       response.end(JSON.stringify(mode === 'empty' ? {releases:[]} : payload)); return;
     }
-    const relative = decodeURIComponent(url.pathname).replace(/^\/qqm-releases\//,'');
+    const relative = decodeURIComponent(url.pathname).replace(/^\/qqm_project\//,'');
     const path = resolve(site,relative || 'index.html');
     assert.ok(path.startsWith(site + (process.platform === 'win32' ? '\\' : '/')));
     const bytes = await readFile(path);
@@ -32,7 +33,7 @@ const server = createServer(async (request,response) => {
   } catch {response.statusCode=404;response.end('not found');}
 });
 await new Promise(resolve => server.listen(0,'127.0.0.1',resolve));
-const origin = `http://127.0.0.1:${server.address().port}/qqm-releases/`;
+const origin = `http://127.0.0.1:${server.address().port}/qqm_project/`;
 const browser = await chromium.launch({headless:true,...(process.env.QQM_CHROME ? {executablePath:process.env.QQM_CHROME} : {})});
 try {
   const page = await browser.newPage();

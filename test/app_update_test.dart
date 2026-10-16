@@ -198,7 +198,7 @@ void main() {
   test('默认更新地址使用 GitHub Pages，旧 PHP 地址仅保留兼容', () {
     expect(
       AppUpdateService.defaultServer,
-      'https://xingchenwa.github.io/qqm-releases',
+      'https://xingchenwa.github.io/qqm_project',
     );
   });
 

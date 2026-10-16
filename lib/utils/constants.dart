@@ -1,4 +1,5 @@
 class AppConstants {
+  static const String projectUrl = 'https://github.com/XingChenwa/qqm_project';
   static const String appVersion = '1.3.6';
   static const int appBuild = 17;
   // QQ Bot API endpoints

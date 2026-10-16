@@ -18,13 +18,16 @@ permissions:
 env:
   FLUTTER_VERSION: '3.44.3'
   UPDATE_PUBLIC_KEY: ${{ vars.UPDATE_PUBLIC_KEY || 'EmpeSLtZms6Uz7D61o6E3gQzBytIPqsNU+dSq47M9ko=' }}
-  UPDATE_BASE_URL: ${{ vars.UPDATE_BASE_URL || 'https://xingchenwa.github.io/qqm-releases' }}
+  UPDATE_BASE_URL: ${{ vars.UPDATE_BASE_URL || 'https://xingchenwa.github.io/qqm_project' }}
 
 jobs:
   preflight:
     if: github.event_name != 'release' || !github.event.release.prerelease
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    permissions:
+      contents: read
+      pages: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -35,7 +38,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           UPDATE_SIGNING_PRIVATE_KEY: ${{ secrets.UPDATE_SIGNING_PRIVATE_KEY }}
-          PUBLIC_RELEASE_TOKEN: ${{ secrets.PUBLIC_RELEASE_TOKEN }}
 
   android:
     needs: preflight
@@ -194,27 +196,25 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     concurrency:
-      group: public-distribution-sync
+      group: project-website-sync
       cancel-in-progress: false
     permissions:
       actions: read
-      contents: read
+      contents: write
+      pages: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-      - name: 检出公开下载仓库（只写此仓库）
+      - name: 检出同仓库的网站分支
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          repository: XingChenwa/qqm-releases
-          ref: main
-          path: build/distribution
-          ssh-key: ${{ secrets.DISTRIBUTION_DEPLOY_KEY }}
+          ref: docs
+          path: build/website
           persist-credentials: true
-      - name: 私有构建产物校验后发布到公开仓库，再同步首页
+      - name: 发布到当前 Release，再同步 docs 首页下载资料
         run: node tool/github_release.mjs publish
         env:
           GH_TOKEN: ${{ github.token }}
-          DISTRIBUTION_DIRECTORY: build/distribution
+          WEBSITE_DIRECTORY: build/website
           UPDATE_SIGNING_PRIVATE_KEY: ${{ secrets.UPDATE_SIGNING_PRIVATE_KEY }}
-          PUBLIC_RELEASE_TOKEN: ${{ secrets.PUBLIC_RELEASE_TOKEN }}

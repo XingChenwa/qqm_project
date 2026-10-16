@@ -1,98 +1,120 @@
-# 双仓库 GitHub 首页与自动更新
+# GitHub 版本发布与网站
 
-主源码与公开下载分开管理，不需要宝塔、PHP、MySQL 或 EdgeOne。
+## 1. 一个仓库，三个位置
 
-| 用途 | 仓库或地址 | 可见范围 |
+| 内容 | 位置 |
+| --- | --- |
+| 客户端源码、开发文档、Actions | [qqm_project / main](https://github.com/XingChenwa/qqm_project/tree/main) |
+| 官网 HTML / CSS / JS | [qqm_project / docs](https://github.com/XingChenwa/qqm_project/tree/docs) 分支根目录 |
+| 四端安装包与签名清单 | [qqm_project / Releases](https://github.com/XingChenwa/qqm_project/releases) |
+| 首页 | <https://xingchenwa.github.io/qqm_project/> |
+| 客户端更新入口 | `https://xingchenwa.github.io/qqm_project/updates/stable.json` |
+
+不需要宝塔、PHP、MySQL 或额外下载仓库。设备统计已移除，现有历史数据库不会被流程删除。
+
+**仓库可见性由所有者自己修改。** 迁移脚本和工作流不会把私有仓库自动公开。使用免费 GitHub Pages 时，应先公开仓库，再启用网站；在此之前，源码和分支准备好不代表网站已能公开访问。公开会暴露所有可访问的分支、标签与 Git 历史，请先检查历史凭据，必要时先轮换密钥，不要只删除当前文件。
+
+## 2. 一次性配置
+
+### 启用 Pages
+
+在本仓库 Settings → Pages：
+
+1. Source 选择 **Deploy from a branch**。
+2. Branch 选择 **docs**，目录选择 **/ (root)**，保存。
+3. 首次构建完成后访问上表首页地址；不要选 main，也不要把 docs 分支与 main 中的 docs/ 文档目录混淆。
+4. 在 Actions 中手动运行“刷新网站下载与更新清单”，验证下载信息同步。
+
+网站分支根目录有 `.nojekyll`，不需要安装构建工具。直接编辑并推送该分支的网站会触发 Pages；Actions 使用 GITHUB_TOKEN 推送的更新不会自动触发，因此同步脚本会额外请求 Pages 构建。参见 [GitHub 的发布源说明](https://docs.github.com/en/pages/getting-started-with-github-pages/configuring-a-publishing-source-for-your-github-pages-site) 和 [Pages 构建 API](https://docs.github.com/en/rest/pages/pages#request-a-github-pages-build)。
+
+### Actions Secrets / Variables
+
+在 Settings → Secrets and variables → Actions 配置：
+
+| 类型 | 名称 | 用途 |
 | --- | --- | --- |
-| 源码、测试和四端构建 | `XingChenwa/qqm_project` | 保持私有，不复制 Git 历史 |
-| 首页、安装包、更新清单与反馈 | [qqm-releases](https://github.com/XingChenwa/qqm-releases) | 公开 |
-| 下载首页 | <https://xingchenwa.github.io/qqm-releases/> | 公开 |
-| 客户端更新清单 | `https://xingchenwa.github.io/qqm-releases/updates/stable.json` | 首个完整签名版本发布后生成 |
+| Secret | `UPDATE_SIGNING_PRIVATE_KEY` | 必填：原 Ed25519 私钥的标准 Base64，32 字节种子或 64 字节 libsodium 私钥 |
+| Secret | `ANDROID_KEYSTORE_BASE64` | 固定 Android 签名文件的 Base64 |
+| Secret | `ANDROID_KEYSTORE_PASSWORD` | Android 签名密码，当前流程用同一密码解锁 Key |
+| Secret | `ANDROID_KEY_ALIAS` | Android Key 别名 |
+| Variable | `UPDATE_PUBLIC_KEY` | 对应的 32 字节 Ed25519 公钥 Base64，嵌入安装包 |
+| Variable | `UPDATE_BASE_URL` | `https://xingchenwa.github.io/qqm_project` |
 
-公开首页已启用 GitHub Pages，包含四端下载、macOS 安装说明、更新记录、Star 与反馈入口。还没有完整签名安装包时，首页显示等待发布；页面可访问不表示新版安装包已经构建。旧客户端需要手动安装一次迁移版，才能更改内置的更新地址与下载仓库校验范围。
+沿用原公钥：`EmpeSLtZms6Uz7D61o6E3gQzBytIPqsNU+dSq47M9ko=`。这是公开验证材料，**不能当私钥填写**。现有私钥只留在你自己的安全存储和 Actions Secret 中，不要发送到聊天。公钥不匹配时流程会拒绝发布，客户端不会从网页自动信任新公钥。
 
-## 配置位置
+同仓库发布直接使用 GitHub 自动提供的 `GITHUB_TOKEN`，不再需要跨仓库 PAT 或 SSH 部署密钥。不要将任何 token、私钥、证书上传到 docs 分支。
 
-所有私密配置都放在**私有源码仓库**的 [Actions Secrets](https://github.com/XingChenwa/qqm_project/settings/secrets/actions)。公开仓库不需要机器人凭据、安装包签名私钥或其他 Secrets。
+权限限制：
 
-| Secret | 状态及用途 |
-| --- | --- |
-| `DISTRIBUTION_DEPLOY_KEY` | 已配置，仅能写公开 `qqm-releases` 仓库的 SSH 部署密钥，用于首页同步 |
-| `UPDATE_SIGNING_PRIVATE_KEY` | 需由你填写原更新签名私钥的 Base64 值；支持 PHP/libsodium 64 字节私钥或 32 字节 Ed25519 种子 |
-| `PUBLIC_RELEASE_TOKEN` | 需由你创建并填写，仅授予公开 `qqm-releases` 仓库 Contents 读写权限的 fine-grained token，用于发布安装包 |
-| `ANDROID_KEYSTORE_BASE64` | 现有安卓签名证书 Base64，保持原值 |
-| `ANDROID_KEYSTORE_PASSWORD` | 现有安卓证书密码，保持原值 |
-| `ANDROID_KEY_ALIAS` | 现有安卓证书别名，保持原值 |
+- 构建任务只读源码，发布前检查任务另有 Pages 只读权限。
+- 发布任务有 Actions 读取、Contents 写入和 Pages 写入权限。
+- 网站刷新任务只有 Contents / Pages 写入权限。
+- 不修改仓库可见性、标签指向、既有安装包或历史数据库。
+- 若组织策略限制 GITHUB_TOKEN 写入，应由管理员按需放行上述权限；不要把令牌直接写入 YAML。
 
-仓库 Variables 已设置 `UPDATE_BASE_URL=https://xingchenwa.github.io/qqm-releases` 与原公开公钥 `UPDATE_PUBLIC_KEY=EmpeSLtZms6Uz7D61o6E3gQzBytIPqsNU+dSq47M9ko=`。更新签名私钥必须与该公钥匹配；公钥不能当成私钥填写，客户端也不会从网页下载新公钥自行信任。
+### 关于 Release 不可变设置
 
-### 填写更新签名私钥
+当前流程监听正式 Release 的 `published` 事件，构建结束后才上传附件。因此用于此流程的 Release **不能在发布时立即启用不可变锁定**，否则 GitHub 不允许追加安装包。预检会在耗时构建前明确拒绝不可变版本。若需要不可变发布，应另行设计“先构建并上传草稿，再发布”的流程，不要通过关闭签名校验绕过。
 
-在自己的可信设备上，从原服务器私密配置中取得原 `signing_secret` **值**，存入 `UPDATE_SIGNING_PRIVATE_KEY`。不要上传整个 `data/config.json`，不要提交源码、写入 Variables、放进公开仓库或发送到聊天。
+## 3. 发布一个正式版本
 
-如果原私钥丢失，必须先明确换钥与重新分发客户端。辅助命令只在本机生成新密钥，不覆盖旧文件；输出路径必须在源码外：
+1. 修改 `pubspec.yaml` 的版本与递增 build，例如 `1.3.7+18`，同时更新 `lib/utils/constants.dart` 中的版本常量。
+2. 运行测试、审阅改动并提交到 main。构建号必须递增，不复用已正式发布的构建号。
+3. 在本仓库创建匹配的正式 Release，例如标签 `v1.3.7`，写明更新内容，目标选已核验的提交，不勾选预发布。
+4. “客户端安装包”自动预检标签、仓库公开状态、Pages 来源、签名密钥，然后构建 Windows、Android、iOS、macOS。
+5. 四端全部成功后，同一任务下载这些构建产物，核对 Windows 更新配置，计算包大小及 SHA-256。
+6. 上传四个安装包；**签名清单最后上传**。不覆盖同名附件，不创建另一个 Release、不移动标签。
+7. 更新 docs 根目录 `releases.json`、`updates/stable.json`，提交后显式请求 Pages 构建。网页源文件保持原样。
+8. Pages 完成后，客户端下次检查更新即可发现更高构建号。Windows 下载校验后打开安装程序；其他平台提供系统允许的安装或下载入口，不能绕过系统签名授权。
 
-```powershell
-node tool/generate_update_key.mjs 'E:\private-keys\botmanager.ed25519.key'
+正式附件：
+
+```text
+qqbotmanager-windows-v<版本>-build<构建号>-setup.exe
+app-release.apk
+qq_bot_manager-unsigned.ipa
+qqbotmanager-macos-universal.dmg
+update-manifest.json
 ```
 
-先创建并限制该目录权限。命令只打印公钥，私钥保存到指定文件；Windows 还需限制文件 ACL。使用新公钥后要同步修改私有仓库 Variables 并重新构建，旧公钥客户端不会接受新签名。
+签名清单采用 schema 2：Ed25519 签名包含仓库、标签、构建号及四平台 URL、大小和 SHA-256。客户端同时限制仓库和下载跳转域名，并拒绝回退。首页 JSON 用于展示，客户端以签名清单为信任依据。
 
-### 创建公开仓库发布令牌
+如果只需测试包，手动启动“客户端安装包”并选择平台；产物保存在 Actions Artifacts，**不发布正式版，不触发推送更新**。
 
-在 GitHub **Settings → Developer settings → Personal access tokens → Fine-grained tokens** 新建令牌：
+## 4. 维护网站
 
-1. Resource owner 选择 `XingChenwa`。
-2. Repository access 选 **Only select repositories**，仅选 `qqm-releases`，不要授权私有源码仓库。
-3. Repository permissions 只给 **Contents: Read and write**，Metadata 保留默认读取。不需要管理账号、修改工作流或读取其他私有仓库。
-4. 设置适当有效期，将令牌保存到私有源码仓库的 `PUBLIC_RELEASE_TOKEN` Secret；到期后需更新。
+请在独立 checkout 中编辑 docs，避免切换覆盖未提交的源码改动：
 
-不要将电脑上的高权限登录凭据复制给 Actions。[GitHub 创建细粒度令牌说明](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens)
-
-SSH 部署密钥只能同步 Git 文件，不能代替 Release API 令牌。它与更新签名私钥是不同用途：撤销公开仓库 Deploy Key 后可重新配置，不要因此更换客户端信任的 Ed25519 更新公钥。[部署密钥说明](https://docs.github.com/en/authentication/connecting-to-github-with-ssh/managing-deploy-keys)
-
-## 每次发布安装包
-
-1. 在私有源码中同步增加 `pubspec.yaml` 版本和构建号，以及 `lib/utils/constants.dart` 的 `appVersion/appBuild`。例如 `1.3.7+18` 对应标签 `v1.3.7`，构建号严格递增。推送通过测试的源码。
-2. 在**私有源码仓库** Releases 创建该标签的正式 Release，选择正确提交，不勾选 pre-release。更新说明的前 2000 字符将公开到下载仓库，不能填写密钥、内网地址或其他私密内容。仅保存草稿或推送标签不会触发。
-3. 点击 Publish release 后，私有 `客户端安装包` 工作流预检版本、公私钥与公开仓库令牌，再构建 Windows EXE、固定签名 Android APK、未签名 iOS IPA 和 macOS Universal DMG。
-4. 四端均成功后，只从**同一次运行**取得四个明确的安装包文件，校验版本与公钥，计算大小和 SHA-256。公开仓库创建独立草稿 Release，标签指向公开仓库 main，而不是私有源码提交。
-5. 所有附件及 Ed25519 签名清单上传成功后，才发布公开草稿。最后将静态首页与签名清单同步到公开仓库，由公开仓库的 Pages 工作流部署。支持公开仓库的不可变版本，因为发布前附件已经齐备。
-6. 检查私有构建、公开 Release 与公开 Pages 均成功，再验证四端下载及客户端弹窗。Windows 默认自动下载，安装仍需确认；客户端启动及每五分钟检查，不是即时推送，缓存或网络可能延迟显示。
-
-跨仓库令牌只用于公开 Release API；私有仓库的临时 `GITHUB_TOKEN` 用于读取本次构建产物。网页同步仅复制 `site/` 的允许文件，禁止应用源码、私密配置、符号链接和私有仓库路径。公开仓库不会获得私有源码或其 Git 历史。
-
-云端构建可能消耗 Actions 额度。通过另一个工作流的 `GITHUB_TOKEN` 创建私有 Release 不一定触发新工作流，标准入口是在 GitHub 网页发布正式版。[工作流触发说明](https://docs.github.com/en/actions/how-tos/writing-workflows/choosing-when-your-workflow-runs/triggering-a-workflow#triggering-a-workflow-from-a-workflow)
-
-## 首页与失败重试
-
-- 私有 main 中的 `site/`、首页构建脚本或首页工作流变化会自动同步公开首页。也可手动运行私有 `GitHub 下载首页`。仅需部署密钥和公钥，不依赖安装包签名私钥或发布令牌。
-- 公开仓库 Pages 设置为 **GitHub Actions**；环境只需允许 main。工作流模板在 `deploy/github-distribution/pages.yml`，仅上传公开 `site/`，没有私有仓库 Secrets。
-- 首页选择最近 100 个公开 Release 中构建号最高、签名正确且四端附件齐全的正式版本。新版本未完成时保留上个完整版本，不发布半成品。
-- 安装包上传失败后只重跑失败的发布任务，复用同一次运行产物。相同附件必须字节一致，绝不覆盖不同内容；重新构建产生不同文件时，使用新版本和更高构建号。
-- 公开 Release 成功但首页同步失败，可单独运行私有 `GitHub 下载首页`，无需重新构建四端。
-- 私有 `客户端安装包 → Run workflow` 仍可仅构建测试包，保存在私有 Actions Artifacts，不创建公开 Release。没有签名私钥时不要声称已完成自动更新发布。
-
-## 平台与校验
-
-客户端验证内置公钥签名、公开仓库、平台、包名、大小、SHA-256 和指定 GitHub HTTPS 下载跳转。不会执行未通过校验的文件。静态清单不能为每次请求生成 nonce；客户端记录已见过的最高有效构建号以防回退，但无法保证服务器上的版本绝对最新。
-
-| 平台 | 安装方式 |
-| --- | --- |
-| Windows x64 | 下载校验后的 EXE，用户确认后退出并覆盖安装，保留应用数据 |
-| Android | 同证书 APK，交给系统安装器，不绕过安装授权 |
-| iOS arm64 | 导出未签名 IPA，需合法有效证书及描述文件在全能签等工具中重签，下载不等于安装 |
-| macOS Universal | 打开 DMG，拖入应用程序；当前为临时签名、未公证测试包 |
-
-设备统计已整套移除，客户端不再读取设备名称、型号或生成统计安装 ID，不发送统计注册和心跳。旧后台统计接口返回 410，历史数据库不自动删除。旧 `management/` 不参与部署。GitHub 托管仍会收到正常访问及来源 IP，设备统计移除不代表网络访问没有托管方日志。
-
-## 验证
-
-```bash
-flutter analyze --no-pub
-flutter test --no-pub
-node --test tool/tests/github_release.test.mjs tool/tests/github_site_sync.test.mjs
-dart run tool/check_update_server.dart https://xingchenwa.github.io/qqm-releases 你的公开公钥
+```sh
+git worktree add ../qqm-website docs
 ```
 
-最后一条只读取签名清单，不启动机器人或下载安装包；首个完整签名版本发布前会返回不存在。Playwright 可运行 `tool/tests/site_browser.mjs` 验证 320/390/1280px 页面、空版本、恶意文本和下载地址。原生四端安装与用户设备上的系统授权仍需实际验证。
+若本地没有 docs，先 `git fetch origin docs`，再从 `origin/docs` 创建本地跟踪分支。网页文件位于该 checkout 根目录：
+
+- `index.html`：首页内容。
+- `assets/site.css`：样式与手机布局。
+- `assets/site.js`：下载资料校验与显示。
+- `assets/logo.png`：项目 Logo。
+- `releases.json`、`updates/stable.json`：自动生成，不手写版本或假下载地址。
+
+只有这两个 JSON 会被自动发布流程修改。首页暂未发布、读取失败和异常下载链接均有明确回退。SHA-256 不替代来源校验和客户端数字签名。
+
+## 5. 检查与恢复
+
+在 main checkout 中，指定网站 checkout 后运行：
+
+```sh
+WEBSITE_DIRECTORY=../qqm-website node --test tool/tests/github_release.test.mjs tool/tests/github_site_sync.test.mjs
+WEBSITE_DIRECTORY=../qqm-website node tool/tests/site_browser.mjs
+dart run tool/check_update_server.dart https://xingchenwa.github.io/qqm_project 你的公开公钥
+```
+
+以上环境变量写法适用于 Bash；PowerShell 使用 `$env:WEBSITE_DIRECTORY='../qqm-website'`。网页浏览器测试需要 Playwright / Chromium，可设置 `QQM_PLAYWRIGHT` 和 `QQM_CHROME` 指定本机依赖。
+
+- 网站 404：确认仓库已公开、Pages 选 docs 根目录、Pages 构建完成。
+- 签名错误：检查原私钥与客户端内置公钥，不要随意重新生成或换钥。
+- 某端失败：不会更新签名入口，上一正式版仍可用；修复后重跑。已上传但未签名的部分附件不会作为新版推送。
+- 同名附件不同：流程拒绝覆盖，请使用新版本和新构建号，不加 `--clobber`。
+- 附件已上传但 Pages 失败：修复 Pages 后运行“刷新网站下载与更新清单”；它会验证已有签名再同步，不重新构建四端。
+- docs 并发修改：推送遇到非快进会失败，不会强推；重新运行会基于最新 docs 重试。
+- 旧客户端仍绑定旧下载地址：手动安装一次迁移后的客户端，不能依靠更换网页让旧客户端自动信任不同仓库。

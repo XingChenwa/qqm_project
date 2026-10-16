@@ -50,7 +50,7 @@ GitHub 返回的外层 ZIP 是下载容器，不是安装包。一定要先解�
 
 Windows 使用上述 macOS 云端任务；有 Mac 时运行 `flutter pub get` 和 `bash scripts/build_macos_package.sh`。脚本真实编译 `QQBotManager.app`、验证双架构与签名完整性，再生成 DMG 和 ZIP，不会以源码替代应用。需要 macOS 11 或更新版本；实际系统要求也受 Flutter 与插件支持范围约束。
 
-打开 DMG，将 QQBotManager 拖入“应用程序”，推出镜像后再启动；覆盖更新前先退出旧版。后台发布选择 macOS / universal / DMG，客户端校验更新后打开镜像，手动完成替换。
+打开 DMG，将 QQBotManager 拖入“应用程序”，推出镜像后再启动；覆盖更新前先退出旧版。正式包由本仓库 Release 的四端工作流生成，客户端校验更新后打开镜像，手动完成替换；不再需要网页管理后台上传。
 
 当前仅使用 ad-hoc 临时签名，未提供 Developer ID 证书和 Apple 公证，因此不能保证所有 Mac 都可直接启动。不要关闭 Gatekeeper 或运行未知绕过命令，核验来源后参考 [Apple 安全打开说明](https://support.apple.com/zh-cn/102445)。面向公众正式分发应使用自己的有效 Developer ID 签名并公证。[Flutter macOS 发布说明](https://docs.flutter.dev/deployment/macos)
 

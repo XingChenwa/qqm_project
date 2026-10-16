@@ -20,7 +20,7 @@ void main() {
   late String publicKey;
   late UpdatePreferences preferences;
   final package = utf8.encode('synthetic GitHub package; never execute');
-  final server = Uri.parse('https://xingchenwa.github.io/qqm-releases/');
+  final server = Uri.parse('https://xingchenwa.github.io/qqm_project/');
 
   Map<String, dynamic> manifest({int build = 18}) => {
     'schema': 2,
@@ -149,7 +149,7 @@ void main() {
     final request = adapter.requests.single;
     expect(
       request.uri.toString(),
-      'https://xingchenwa.github.io/qqm-releases/updates/stable.json',
+      'https://xingchenwa.github.io/qqm_project/updates/stable.json',
     );
     expect(request.method, 'GET');
     expect(request.data, isNull);
@@ -296,13 +296,14 @@ void main() {
       'macos',
       'windows',
     ]);
-    expect(yaml['jobs']['publish']['permissions']['contents'], 'read');
-    expect(yaml['jobs']['publish']['permissions']['pages'], isNull);
+    expect(yaml['jobs']['publish']['permissions']['contents'], 'write');
+    expect(yaml['jobs']['publish']['permissions']['pages'], 'write');
     expect(yaml['jobs']['publish']['permissions']['id-token'], isNull);
-    final publicWorkflow = loadYaml(
-      File('deploy/github-distribution/pages.yml').readAsStringSync(),
+    final websiteWorkflow = loadYaml(
+      File('.github/workflows/github-pages.yml').readAsStringSync(),
     );
-    expect(publicWorkflow['permissions']['pages'], 'write');
-    loadYaml(File('.github/workflows/github-pages.yml').readAsStringSync());
+    expect(websiteWorkflow['permissions']['pages'], 'write');
+    expect(websiteWorkflow['permissions']['contents'], 'write');
+    expect(websiteWorkflow['jobs']['sync']['steps'][1]['with']['ref'], 'docs');
   });
 }

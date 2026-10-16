@@ -18,6 +18,7 @@ import '../../utils/platforms.dart';
 import '../widgets/app_logo.dart';
 import '../widgets/update_panel.dart';
 import '../widgets/app_dialogs.dart';
+import 'browser_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -798,6 +799,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
             const SelectableText('作者QQ：2377130783'),
             const SizedBox(height: 8),
             const Text('问题建议可以反馈'),
+            const SizedBox(height: 24),
+            const Text('项目地址'),
+            const SizedBox(height: 4),
+            const SelectableText(
+              AppConstants.projectUrl,
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: () =>
+                  openInAppBrowser(context, AppConstants.projectUrl),
+              icon: const Icon(Icons.code),
+              label: const Text('在应用内打开项目'),
+            ),
           ],
         ),
       ),
