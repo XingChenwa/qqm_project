@@ -65,7 +65,7 @@
   <section class="section wrap" id="start">
     <div class="section-heading"><div><p class="eyebrow">从这里出发</p><h2>接入，然后开始创造。</h2></div></div>
     <ol class="steps"><li><span>1</span><h3>准备官方机器人</h3><p>在 QQ 开放平台创建机器人，确认所需权限与接入环境。</p></li><li><span>2</span><h3>下载并连接</h3><p>安装对应客户端，在设置中填写自己的应用凭据并连接。</p></li><li><span>3</span><h3>挑选你的玩法</h3><p>在插件中心配置、启用插件，或者导入你自己写的清单。</p></li></ol>
-    <div class="developer-card"><div><p class="eyebrow">写给开发者</p><h3>从规则，到你自己的服务。</h3><p>JSON / YAML 写轻量命令，Node.js / Python 等通过 HTTP 接入复杂玩法。<br>命令、权限、冷却与回复上下文由宿主管理，不直接运行 Yunzai JS 插件。</p><a class="text-link" href="https://github.com/XingChenwa/qqm_project/tree/main/plugins/examples">查看完整示例 ↗</a></div><div class="code-card" aria-label="插件清单结构示意"><span>plugin.json · SDK v2</span><pre><code>{
+    <div class="developer-card"><div><p class="eyebrow">写给开发者</p><h3>从规则，到你自己的服务。</h3><p>JSON / YAML 写轻量命令，Node.js / Python 等通过 HTTP 接入复杂玩法。<br>命令、权限、冷却与回复上下文由宿主管理，插件只需专注自己的逻辑。</p><a class="text-link" href="https://github.com/XingChenwa/qqm_project/tree/main/plugins/examples">查看完整示例 ↗</a></div><div class="code-card" aria-label="插件清单结构示意"><span>plugin.json · SDK v2</span><pre><code>{
   "schema_version": 2,
   "runtime": "rules",
   "permissions": [
