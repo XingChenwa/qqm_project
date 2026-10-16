@@ -31,29 +31,27 @@ function check(value,expected){assert.equal(value,expected);checks++;}
 try{
   for(let attempt=0;attempt<80;attempt++){try{const response=await request('/');if(response.status===200)break;}catch{}await new Promise(resolve=>setTimeout(resolve,100));}
   const home=await request('/');check(home.status,200);assert.match(await home.text(),/选择你的平台/);checks++;
-  check((await request('/assets/admin-v1.3.2.js')).status,200);
+  check((await request('/assets/admin-releases.js')).status,200);
   check((await request('/privacy')).status,200);
   check((await request('/data/config.json')).status,404);
-  check((await request('/api/admin/stats')).status,401);
+  check((await request('/api/admin/releases')).status,401);
   check((await request('/api/admin/proxy')).status,401);
   const session=await (await request('/api/admin/session')).json();csrf=session.csrf;
   check((await request('/api/admin/oauth/start',{method:'POST',json:{}})).status,403);
   async function start(){const result=await request('/api/admin/oauth/start',{method:'POST',headers:{'x-csrf-token':csrf},json:{}});check(result.status,200);return new URL((await result.json()).url);}
   let authorization=await start();check(authorization.origin,'https://account.uuze.cn');check(authorization.searchParams.has('client_secret'),false);
   let callback=await request('/api/admin/oauth/callback?code=test-admin-code&state=wrong-state',{redirect:'manual'});check(callback.status,303);check(callback.headers.get('location'),'/admin?login=denied');
-  check((await request('/api/admin/stats')).status,401);
-  authorization=await start();callback=await request('/api/admin/oauth/callback?code=test-other-code&state='+authorization.searchParams.get('state')+'&email=2377130783%40qq.com',{redirect:'manual'});check(callback.headers.get('location'),'/admin?login=denied');check((await request('/api/admin/stats')).status,401);
+  check((await request('/api/admin/releases')).status,401);
+  authorization=await start();callback=await request('/api/admin/oauth/callback?code=test-other-code&state='+authorization.searchParams.get('state')+'&email=2377130783%40qq.com',{redirect:'manual'});check(callback.headers.get('location'),'/admin?login=denied');check((await request('/api/admin/releases')).status,401);
   authorization=await start();callback=await request('/api/admin/oauth/callback?code=test-no-email-code&state='+authorization.searchParams.get('state'),{redirect:'manual'});check(callback.headers.get('location'),'/admin?login=denied');
   authorization=await start();callback=await request('/api/admin/oauth/callback?code=test-admin-code&state='+authorization.searchParams.get('state'),{redirect:'manual'});check(callback.status,303);check(callback.headers.get('location'),'/admin?login=success');
   const authenticated=await(await request('/api/admin/session')).json();check(authenticated.authenticated,true);check(authenticated.admin.email,'2377130783@qq.com');check('oauth_access_token' in authenticated,false);csrf=authenticated.csrf;
   callback=await request('/api/admin/oauth/callback?code=test-admin-code&state='+authorization.searchParams.get('state'),{redirect:'manual'});check(callback.headers.get('location'),'/admin?login=denied');check((await(await request('/api/admin/session')).json()).authenticated,true);
-  const empty=await (await request('/api/admin/stats')).json();check(empty.installations,0);
-  const malformed=await request('/api/v1/telemetry/register',{method:'POST',json:{}});check(malformed.status,422);
-  const fields={platform:'windows',version:'1.3.1',build:12,installation_id:'22222222-3333-4444-8555-666666666666',consent_version:'2',device_name:'HTTP测试电脑 🤖',device_model:'Test Laptop',system_version:'Windows 11',system_arch:'x64'};
-  const registration=await request('/api/v1/telemetry/register',{method:'POST',headers:{'EO-Connecting-IP':'203.0.113.42'},json:fields});check(registration.status,201);const token=(await registration.json()).token;
-  check((await request('/api/v1/telemetry/heartbeat',{method:'POST',headers:{authorization:'Bearer '+token},json:fields})).status,200);
-  const stats=await (await request('/api/admin/stats')).json();check(stats.installations,1);check(stats.today,1);check(stats.devices[0].last_ip,'127.0.0.1');
-  check(stats.devices[0].device_name,fields.device_name);check(stats.devices[0].system_version,fields.system_version);
+  check((await request('/api/admin/stats')).status,410);
+  for (const [path,method] of [['register','POST'],['heartbeat','POST'],['installation','DELETE']]) {
+    check((await request('/api/v1/telemetry/'+path,{method,json:{device_name:'must-not-store'}})).status,410);
+  }
+  check((await request('/api/admin/devices/22222222-3333-4444-8555-666666666666',{method:'DELETE',headers:{'x-csrf-token':csrf}})).status,410);
   const form=new FormData();for(const [key,value]of Object.entries({platform:'windows',arch:'x64',format:'zip',version:'1.3.0',build:'12',notes:'HTTP integration fixture'}))form.append(key,value);form.append('package',new Blob([await readFile(fixture)]),'fixture.zip');
   const upload=await request('/api/admin/releases',{method:'POST',headers:{'x-csrf-token':csrf},body:form});check(upload.status,201);const release=await upload.json();check((await(await request('/api/v1/releases')).json()).releases.length,0);
   check((await request('/api/admin/releases/'+release.id,{method:'PATCH',headers:{'x-csrf-token':csrf,origin:'https://evil.invalid'},json:{published:true}})).status,403);
@@ -64,8 +62,6 @@ try{
   const range=await fetch(release.url,{headers:{range:'bytes=0-3'}});check(range.status,206);check((await range.arrayBuffer()).byteLength,4);
   const invalidRange=await fetch(release.url,{headers:{range:'bytes=9999999999-'}});check(invalidRange.status,416);check(invalidRange.headers.get('cache-control'),'no-store');
   check((await request('/api/admin/releases/'+release.id,{method:'PATCH',headers:{'x-csrf-token':csrf},json:{published:false}})).status,200);
-  check((await request('/api/v1/telemetry/installation',{method:'DELETE',headers:{authorization:'Bearer '+token}})).status,200);
-  check((await(await request('/api/admin/stats')).json()).installations,0);
   const strictDiagnostic=await(await request('/api/admin/proxy',{headers:{'X-QQM-Origin-Token':settings.origin_token,'EO-Connecting-IP':'203.0.113.42'}})).json();
   check(strictDiagnostic.trust_mode,'cidr_and_token');check(strictDiagnostic.reason,'proxy_not_in_trusted_cidrs');
   // Reconfigure only the isolated fixture. Production files and signing identity are untouched.
@@ -78,18 +74,11 @@ try{
   check(diagnostic.trust_mode,'edgeone_token');check(diagnostic.reason,'accepted');check(diagnostic.detected.ip,'203.0.113.42');
   check(diagnostic.origin_token_matches,true);check(diagnostic.trusted_cidrs_count,0);check(diagnostic.proxy_peer_trusted,false);
   check(diagnosticText.includes(settings.origin_token),false);check(diagnosticText.includes(settings.signing_secret),false);
-  const freeRegistration=await request('/api/v1/telemetry/register',{method:'POST',json:fields});check(freeRegistration.status,201);
-  const freeToken=(await freeRegistration.json()).token;
-  let freeStats=await(await request('/api/admin/stats')).json();check(freeStats.devices[0].last_ip,'203.0.113.42');check(freeStats.devices[0].ip_source,'EO-Connecting-IP');
-  check((await request('/api/v1/telemetry/heartbeat',{method:'POST',headers:{authorization:'Bearer '+freeToken,'EO-Connecting-IP':'2001:db8::42'},json:fields})).status,200);
-  freeStats=await(await request('/api/admin/stats')).json();check(freeStats.devices[0].last_ip,'2001:db8::42');
-  check((await request('/api/v1/telemetry/heartbeat',{method:'POST',headers:{authorization:'Bearer '+freeToken,'EO-Connecting-IP':'203.0.113.42, 1.1.1.1'},json:fields})).status,200);
-  freeStats=await(await request('/api/admin/stats')).json();check(freeStats.devices[0].last_ip,'127.0.0.1');
+  check((await request('/api/v1/telemetry/register',{method:'POST',json:{}})).status,410);
   const stillSigned=await(await request('/api/v1/update?platform=windows&arch=x64&nonce='+randomBytes(16).toString('hex'))).json();
   check(verify(null,Buffer.from(stillSigned.payload,'base64'),publicKey,Buffer.from(stillSigned.signature,'base64')),true);
-  check((await request('/api/v1/telemetry/installation',{method:'DELETE',headers:{authorization:'Bearer '+freeToken}})).status,200);
   check((await request('/api/admin/logout',{method:'POST',headers:{'x-csrf-token':csrf},json:{confirm:true}})).status,200);
-  check((await request('/api/admin/stats')).status,401);
+  check((await request('/api/admin/releases')).status,401);
   await writeFile(join(directory,'config.json'),JSON.stringify(settings));proxyHeaders={};
   console.log(`HTTP integration: ${checks} checks passed.`);
   if(process.env.QQM_BROWSER_TEST==='1'){const {runBrowserQA}=await import('./browser.mjs');await runBrowserQA(origin,true);}

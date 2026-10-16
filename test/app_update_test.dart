@@ -36,18 +36,6 @@ class UpdateAdapter implements HttpClientAdapter {
   void close({bool force = false}) {}
 }
 
-class DelayedInstallationPreferences extends UpdatePreferences {
-  final saveStarted = Completer<void>();
-  final allowSave = Completer<void>();
-  DelayedInstallationPreferences(super.preferences);
-  @override
-  Future<void> setInstallation(String id, String token) async {
-    saveStarted.complete();
-    await allowSave.future;
-    await super.setInstallation(id, token);
-  }
-}
-
 class InterruptedDownloadDio extends DioForNative {
   final File Function(String) realFile;
   InterruptedDownloadDio(this.realFile);
@@ -176,7 +164,6 @@ void main() {
     Directory? directory,
     String platform = 'windows',
     String? key,
-    Future<Map<String, String>> Function()? deviceInfoProvider,
   }) {
     final updates = AppUpdateService(
       preferences,
@@ -192,14 +179,6 @@ void main() {
           ? 'arm64'
           : 'universal',
       supportDirectory: directory == null ? null : () async => directory,
-      deviceInfoProvider:
-          deviceInfoProvider ??
-          () async => {
-            'device_name': '测试电脑',
-            'device_model': '测试型号',
-            'system_version': '测试系统 1.0',
-            'system_arch': 'test-x64',
-          },
     );
     addTearDown(updates.dispose);
     return updates;
@@ -216,12 +195,11 @@ void main() {
     await preferences.setAutoDownload(false);
   });
 
-  test('默认更新站点与后台配置均使用 botmanager.uuze.cn', () {
-    expect(AppUpdateService.defaultServer, server.toString());
-    final backendConfig = File(
-      'management/config.example.php',
-    ).readAsStringSync();
-    expect(backendConfig, contains("'app_url' => '$server'"));
+  test('默认更新地址使用 GitHub Pages，旧 PHP 地址仅保留兼容', () {
+    expect(
+      AppUpdateService.defaultServer,
+      'https://xingchenwa.github.io/qqm_project',
+    );
   });
 
   test('当前版本与 pubspec 的版本号、构建号一致', () {
@@ -321,7 +299,6 @@ void main() {
     final updates = service(adapter, key: '');
     updates.start();
     await updates.check();
-    await updates.sendHeartbeat();
     expect(updates.configured, isFalse);
     expect(adapter.requests, isEmpty);
   });
@@ -499,190 +476,6 @@ void main() {
     await updates.check();
     expect(updates.phase, UpdatePhase.failed);
   });
-  test('统计首次默认开启；只发送允许字段，关闭后请求删除且不再心跳', () async {
-    final adapter = UpdateAdapter(
-      (options) async => jsonResponse(
-        options.uri.path.endsWith('/register')
-            ? {'token': 'a' * 64}
-            : {'ok': true},
-      ),
-    );
-    final updates = service(adapter);
-    expect(preferences.usageConsent, isTrue);
-    await updates.sendHeartbeat();
-    expect(adapter.requests.map((request) => request.uri.path), [
-      '/api/v1/telemetry/register',
-      '/api/v1/telemetry/heartbeat',
-    ]);
-    expect((adapter.requests.first.data as Map).keys.toSet(), {
-      'platform',
-      'version',
-      'build',
-      'installation_id',
-      'consent_version',
-      ...AppUpdateService.deviceFieldLimits.keys,
-    });
-    expect((adapter.requests.last.data as Map).keys.toSet(), {
-      'platform',
-      'version',
-      'build',
-      ...AppUpdateService.deviceFieldLimits.keys,
-    });
-    expect((adapter.requests.first.data as Map)['consent_version'], '2');
-    expect((adapter.requests.last.data as Map)['device_name'], '测试电脑');
-    await updates.setUsageConsent(false);
-    expect(adapter.requests.last.method, 'DELETE');
-    expect(preferences.token, isEmpty);
-    final count = adapter.requests.length;
-    await updates.sendHeartbeat();
-    expect(adapter.requests.length, count);
-  });
-  test('升级保留用户原有关闭选择，不读取设备名称或重新注册', () async {
-    await preferences.setUsageConsent(false);
-    var reads = 0;
-    final adapter = UpdateAdapter(
-      (_) async => throw StateError('no telemetry'),
-    );
-    final updates = service(
-      adapter,
-      deviceInfoProvider: () async {
-        reads++;
-        return {'device_name': '不应读取'};
-      },
-    );
-    await updates.sendHeartbeat();
-    expect(preferences.usageConsent, isFalse);
-    expect(reads, 0);
-    expect(adapter.requests, isEmpty);
-    final reopened = UpdatePreferences(await SharedPreferences.getInstance());
-    expect(reopened.usageConsent, isFalse);
-  });
-  test('设备资料仅允许指定字段，过滤控制字符并限制长度，不发送硬件标识', () async {
-    var reads = 0;
-    final adapter = UpdateAdapter(
-      (options) async => jsonResponse(
-        options.uri.path.endsWith('/register')
-            ? {'token': 'd' * 64}
-            : {'ok': true},
-      ),
-    );
-    final updates = service(
-      adapter,
-      deviceInfoProvider: () async {
-        reads++;
-        return {
-          'device_name': '${'机' * 150}\r\n',
-          'system_version': '系统\x00版本',
-          'system_arch': 'x64',
-          'serial_number': 'MUST-NOT-BE-SENT',
-          'qq_app_id': 'MUST-NOT-BE-SENT',
-        };
-      },
-    );
-    await updates.sendHeartbeat();
-    await updates.sendHeartbeat();
-    expect(reads, 1);
-    final data = adapter.requests.last.data as Map;
-    expect((data['device_name'] as String).runes.length, 128);
-    expect(data['system_version'], '系统版本');
-    expect(jsonEncode(data), isNot(contains('MUST-NOT-BE-SENT')));
-  });
-  test('读取设备资料期间关闭统计，不会发送注册或心跳', () async {
-    final gate = Completer<Map<String, String>>();
-    final adapter = UpdateAdapter((_) async => throw StateError('no request'));
-    final updates = service(adapter, deviceInfoProvider: () => gate.future);
-    final pending = updates.sendHeartbeat();
-    await updates.setUsageConsent(false);
-    gate.complete({'device_name': '不应发送'});
-    await pending;
-    expect(adapter.requests, isEmpty);
-  });
-  test('默认统计说明仅记录展示状态，不会覆盖用户关闭选择', () async {
-    expect(preferences.usageNoticeSeen, isFalse);
-    await preferences.setUsageConsent(false);
-    await preferences.markUsageNoticeSeen();
-    expect(preferences.usageNoticeSeen, isTrue);
-    expect(preferences.usageConsent, isFalse);
-  });
-  test('离线关闭会停止统计，网络恢复仅重试删除而不重新注册', () async {
-    var failing = false;
-    final adapter = UpdateAdapter(
-      (options) async => failing
-          ? jsonResponse({}, 503)
-          : jsonResponse(
-              options.uri.path.endsWith('/register')
-                  ? {'token': 'b' * 64}
-                  : {'ok': true},
-            ),
-    );
-    final updates = service(adapter);
-    await updates.setUsageConsent(true);
-    failing = true;
-    await updates.setUsageConsent(false);
-    expect(preferences.usageConsent, isFalse);
-    expect(preferences.pendingDeletion, isNotEmpty);
-    failing = false;
-    await updates.sendHeartbeat();
-    expect(adapter.requests.last.method, 'DELETE');
-    expect(preferences.pendingDeletion, isEmpty);
-  });
-  test('注册进行中撤回同意不会漏掉删除或发送下一条心跳', () async {
-    final gate = Completer<ResponseBody>();
-    final adapter = UpdateAdapter(
-      (options) async => options.uri.path.endsWith('/register')
-          ? gate.future
-          : jsonResponse({'ok': true}),
-    );
-    final updates = service(adapter);
-    final first = updates.setUsageConsent(true);
-    while (adapter.requests.isEmpty) {
-      await Future<void>.delayed(const Duration(milliseconds: 1));
-    }
-    await updates.setUsageConsent(false);
-    gate.complete(jsonResponse({'token': 'c' * 64}));
-    await first;
-    for (var i = 0; i < 20 && preferences.pendingDeletion.isNotEmpty; i++) {
-      await Future<void>.delayed(const Duration(milliseconds: 2));
-    }
-    expect(
-      adapter.requests.any(
-        (request) => request.uri.path.endsWith('/heartbeat'),
-      ),
-      isFalse,
-    );
-    expect(adapter.requests.last.method, 'DELETE');
-    expect(preferences.pendingDeletion, isEmpty);
-  });
-  test('保存新统计令牌期间关闭，也会清除迟到令牌并删除服务器记录', () async {
-    final delayed = DelayedInstallationPreferences(
-      await SharedPreferences.getInstance(),
-    );
-    preferences = delayed;
-    final adapter = UpdateAdapter(
-      (options) async => jsonResponse(
-        options.uri.path.endsWith('/register')
-            ? {'token': 'e' * 64}
-            : {'ok': true},
-      ),
-    );
-    final updates = service(adapter);
-    final pending = updates.sendHeartbeat();
-    await delayed.saveStarted.future;
-    await updates.setUsageConsent(false);
-    delayed.allowSave.complete();
-    await pending;
-    for (var i = 0; i < 20 && preferences.pendingDeletion.isNotEmpty; i++) {
-      await Future<void>.delayed(const Duration(milliseconds: 2));
-    }
-    expect(preferences.token, isEmpty);
-    expect(preferences.pendingDeletion, isEmpty);
-    expect(
-      adapter.requests.any((r) => r.uri.path.endsWith('/heartbeat')),
-      isFalse,
-    );
-    expect(adapter.requests.last.method, 'DELETE');
-  });
-
   for (final width in [320.0, 390.0, 1280.0]) {
     for (final mode in ['latest', 'error', 'new']) {
       testWidgets('手动更新弹窗 $mode 在 $width 宽显示结果且不会叠加自动提醒', (tester) async {

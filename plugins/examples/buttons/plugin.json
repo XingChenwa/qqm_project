@@ -1,0 +1,22 @@
+{
+  "schema_version": 2,
+  "id": "my_buttons",
+  "name": "Markdown 按钮示例",
+  "version": "1.0.0",
+  "description": "发送 /按钮菜单；演示命令按钮、回调命名空间和回复，需 QQ Markdown/键盘权限。",
+  "runtime": "rules",
+  "permissions": ["message:read", "message:send", "interaction:read"],
+  "rules": [
+    {
+      "match": {"type": "command", "value": "按钮菜单"},
+      "message": {"format": "markdown", "content": "# 插件菜单\n选一个操作：", "buttons": [[
+        {"label": "签到", "data": "/签到"},
+        {"label": "打招呼", "data": "qqm:my_buttons:hello", "callback": true}
+      ]]}
+    },
+    {
+      "match": {"type": "callback", "value": "hello"},
+      "message": {"format": "text", "content": "收到你的按钮点击，{{sender_name}}！"}
+    }
+  ]
+}

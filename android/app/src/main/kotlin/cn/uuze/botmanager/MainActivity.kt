@@ -18,17 +18,6 @@ class MainActivity : FlutterActivity() {
         super.configureFlutterEngine(flutterEngine)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "cn.uuze.botmanager/updates")
             .setMethodCallHandler { call, result ->
-                if (call.method == "deviceInfo") {
-                    // Public model/OS data only: no Android ID, IMEI, serial or accounts.
-                    val model = listOf(Build.MANUFACTURER, Build.MODEL).joinToString(" ").trim()
-                    result.success(mapOf(
-                        "device_name" to Build.MODEL,
-                        "device_model" to model,
-                        "system_version" to "Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})",
-                        "system_arch" to (Build.SUPPORTED_ABIS.firstOrNull() ?: "unknown")
-                    ))
-                    return@setMethodCallHandler
-                }
                 if (call.method != "installApk") {
                     result.notImplemented()
                     return@setMethodCallHandler

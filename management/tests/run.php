@@ -53,32 +53,16 @@ try {
     $unconfigured = new Core(dirname(__DIR__), $directory, array_replace($overrides, ['origin_token' => '', 'proxy_trust_mode' => 'edgeone_token', 'require_origin_token' => true]));
     check($unconfigured->proxyDiagnostics($server)['reason'] === 'origin_token_not_configured', 'Empty secret never authenticates free mode');
     rejects(fn() => $unconfigured->checkOriginToken($server), 403);
-    $fields = ['installation_id' => '11111111-2222-4333-8444-555555555555', 'consent_version' => '1', 'platform' => 'windows', 'version' => '1.3.0', 'build' => 11];
-    rejects(fn() => $core->register(array_replace($fields, ['consent_version' => '']), $core->clientIp($server)), 422);
-    $token = $core->register($fields, $core->clientIp($server))['token'];
-    check(strlen($token) === 64, 'Installation token');
-    check($core->stats()['online'] === 1, 'Online count');
-    $core->heartbeat($fields, $token, $core->clientIp($server)); $core->heartbeat($fields, $token, $core->clientIp($server));
-    check($core->stats()['today'] === 1, 'Daily deduplication');
-    check($core->stats()['devices'][0]['device_name'] === null, 'Legacy client without device data remains supported');
-    $deviceFields = ['device_name' => '测试电脑 🤖', 'device_model' => '测试型号', 'system_version' => 'Windows 11', 'system_arch' => 'x64'];
-    $core->heartbeat(array_replace($fields, $deviceFields), $token, $core->clientIp($server));
-    $device = $core->stats()['devices'][0];
-    foreach ($deviceFields as $name => $value) { check($device[$name] === $value, 'Allowed device field stored: ' . $name); }
-    $core->heartbeat($fields, $token, $core->clientIp($server));
-    check($core->stats()['devices'][0]['device_name'] === $deviceFields['device_name'], 'Legacy heartbeat does not erase newer device metadata');
-    foreach (['device_name' => str_repeat('机', 129), 'device_model' => [], 'system_version' => "bad\r\nvalue", 'system_arch' => 42] as $name => $value) {
-        rejects(fn() => $core->heartbeat(array_replace($fields, [$name => $value]), $token, $core->clientIp($server)), 422);
+    foreach (['register', 'heartbeat', 'forget', 'stats', 'deviceFields'] as $removed) {
+        check(!method_exists($core, $removed), 'Device collection/query method removed: ' . $removed);
     }
-    check(!array_key_exists('serial_number', Core::deviceFields(['serial_number' => 'never-stored'])), 'No arbitrary hardware metadata stored');
-    rejects(fn() => $core->heartbeat($fields, str_repeat('0', 64), $core->clientIp($server)), 401);
-    rejects(fn() => $core->heartbeat(array_replace($fields, ['platform' => 'android']), $token, $core->clientIp($server)), 422);
-    rejects(fn() => $core->register($fields, $core->clientIp($server)), 409);
     $zipPath = $directory . '/fixture.zip'; $zip = new ZipArchive(); $zip->open($zipPath, ZipArchive::CREATE);
     foreach (['qq_bot_manager.exe', 'flutter_windows.dll', 'data/app.so'] as $name) { $zip->addFromString($name, 'synthetic-fixture'); } $zip->close();
     $release = $core->addRelease(['platform' => 'windows', 'version' => '1.3.0', 'build' => 11, 'arch' => 'x64', 'format' => 'zip', 'notes' => '测试发布 🤖'], $zipPath, false);
     check($release['notes'] === '测试发布 🤖', 'utf8mb4 Chinese and emoji');
     check($release['force_update'] === false, 'Force update defaults off');
+    $forcedDraft = $core->addRelease(['platform' => 'windows', 'version' => '1.3.6', 'build' => 17, 'arch' => 'x64', 'format' => 'zip', 'force_update' => '1'], $zipPath, false);
+    check($forcedDraft['force_update'] === true, 'Upload checkbox stores force update');
     check(count($core->releases()) === 0, 'Draft not public');
     $nonce = '11111111-2222-4333-8444-555555555555';
     $empty = $core->signedUpdate('windows', 'x64', $nonce);
@@ -97,6 +81,15 @@ try {
     rejects(fn() => $core->addRelease(['platform' => 'windows', 'version' => '1.3.0', 'build' => 11, 'arch' => 'x64', 'format' => 'zip'], $zipPath, false), 409);
     $badPath = $directory . '/bad.zip'; $zip = new ZipArchive(); $zip->open($badPath, ZipArchive::CREATE); $zip->addFromString('../escape.exe', 'no'); $zip->close();
     rejects(fn() => $core->addRelease(['platform' => 'windows', 'version' => '1.3.0', 'build' => 12, 'arch' => 'x64', 'format' => 'zip'], $badPath, false), 422);
+    $caseZip = $directory . '/case.zip'; $zip = new ZipArchive(); $zip->open($caseZip, ZipArchive::CREATE);
+    foreach (['qq_bot_manager.exe', 'QQ_BOT_MANAGER.EXE', 'flutter_windows.dll', 'data/app.so'] as $name) { $zip->addFromString($name, 'synthetic-fixture'); }
+    $zip->close();
+    rejects(fn() => $core->addRelease(['platform' => 'windows', 'version' => '1.3.0', 'build' => 18, 'arch' => 'x64', 'format' => 'zip'], $caseZip, false), 422);
+    $apkPath = $directory . '/fixture.apk'; $zip = new ZipArchive(); $zip->open($apkPath, ZipArchive::CREATE);
+    foreach (['AndroidManifest.xml', 'classes.dex', 'res/9N.9.png', 'res/9n.9.png'] as $name) { $zip->addFromString($name, 'synthetic-fixture'); }
+    $zip->close();
+    $apk = $core->addRelease(['platform' => 'android', 'version' => '1.3.6', 'build' => 17, 'arch' => 'universal', 'format' => 'apk'], $apkPath, false);
+    check($apk['platform'] === 'android', 'Android APK keeps case-distinct resource names');
     // Synthetic UDIF trailer tests only; no disk image is mounted or executed.
     $dmgPath = $directory . '/fixture.dmg'; file_put_contents($dmgPath, 'fixture-only' . 'koly' . str_repeat("\0", 508));
     $macFields = ['platform' => 'macos', 'version' => '1.3.2', 'build' => 13, 'arch' => 'universal', 'format' => 'dmg'];
@@ -111,10 +104,7 @@ try {
     rejects(fn() => $core->addRelease(array_replace($macFields, ['arch' => 'x64']), $dmgPath, false), 422);
     rejects(fn() => $core->addRelease(array_replace($macFields, ['format' => 'exe']), $dmgPath, false), 422);
     rejects(fn() => $core->addRelease(array_replace($macFields, ['build' => 14]), $badPath, false), 422);
-    $core->query('UPDATE qqm_installations SET ip_updated_at=?', [time() - 8 * 86400]); $core->prune();
-    check($core->stats()['devices'][0]['last_ip'] === null, 'IP retention');
-    $core->forget($token); check($core->stats()['installations'] === 0, 'Delete installation');
-    check((int)$core->query('SELECT count(*) FROM qqm_daily_usage')->fetchColumn() === 0, 'Cascaded daily deletion');
+    $core->prune();
     $core->rateLimit('test-limit', 'fixture', 1, 60);
     rejects(fn() => $core->rateLimit('test-limit', 'fixture', 1, 60), 429);
     $core->query('UPDATE qqm_limits SET bucket_start=0');

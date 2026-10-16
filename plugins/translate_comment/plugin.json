@@ -1,9 +1,9 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "id": "translate_comment",
   "name": "代码注释翻译",
-  "version": "1.0.0",
-  "description": "通过 DeepSeek 翻译代码注释，保留原代码与 Markdown 代码块。",
+  "version": "2.0.0",
+  "description": "显式命令翻译文本或代码注释；只替换识别到的注释片段，限制大小和超时，不自动上传普通代码块。",
   "config": {
     "api_key": "",
     "target_lang": "中文"
@@ -14,6 +14,7 @@
     "network:deepseek"
   ],
   "config_schema": [
+    {"key": "model", "label": "DeepSeek 模型名称", "type": "string", "default": "deepseek-flash"},
     {
       "key": "api_key",
       "label": "DeepSeek API Key",

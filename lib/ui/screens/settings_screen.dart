@@ -30,17 +30,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final TextEditingController _appIdController = TextEditingController();
   final TextEditingController _clientSecretController = TextEditingController();
   final TextEditingController _apiUrlController = TextEditingController();
-  final TextEditingController _autoReplyController = TextEditingController();
-  final TextEditingController _keywordController = TextEditingController();
-  final TextEditingController _replyController = TextEditingController();
   final TextEditingController _markdownTemplateController =
       TextEditingController();
 
   bool _useSandbox = false;
   bool _autoReconnect = true;
   bool _receiveAllGroupMessages = true;
-  bool _autoReplyToAllGroupMessages = false;
-  bool _enableAutoReply = false;
   bool _enableLogging = true;
   bool _closeToTray = false;
   bool _skipCloseConfirmation = false;
@@ -50,8 +45,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   String _credentialTestStatus = '';
   int _reconnectInterval = 5;
   int _tabIndex = 0;
-
-  Map<String, String> _keywordReplies = {};
 
   @override
   void initState() {
@@ -64,9 +57,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _appIdController.dispose();
     _clientSecretController.dispose();
     _apiUrlController.dispose();
-    _autoReplyController.dispose();
-    _keywordController.dispose();
-    _replyController.dispose();
     _markdownTemplateController.dispose();
     super.dispose();
   }
@@ -76,19 +66,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _appIdController.text = config.appId;
     _clientSecretController.text = config.clientSecret;
     _apiUrlController.text = config.apiBaseUrl;
-    _autoReplyController.text = config.defaultAutoReply;
     _markdownTemplateController.text = config.markdownTemplateId;
     _useSandbox = config.useSandbox;
     _autoReconnect = config.autoReconnect;
     _receiveAllGroupMessages = config.receiveAllGroupMessages;
-    _autoReplyToAllGroupMessages = config.autoReplyToAllGroupMessages;
-    _enableAutoReply = config.enableAutoReply;
     _enableLogging = config.enableLogging;
     _closeToTray = config.closeToTray;
     _skipCloseConfirmation = config.skipCloseConfirmation;
     _windowPreferencesDirty = false;
     _reconnectInterval = config.reconnectInterval;
-    _keywordReplies = Map.from(config.keywordReplies);
   }
 
   Future<void> _saveConfig() async {
@@ -113,13 +99,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
       useSandbox: _useSandbox,
       autoReconnect: _autoReconnect,
       receiveAllGroupMessages: _receiveAllGroupMessages,
-      autoReplyToAllGroupMessages: _autoReplyToAllGroupMessages,
+      autoReplyToAllGroupMessages: previous.autoReplyToAllGroupMessages,
       reconnectInterval: _reconnectInterval,
       monitoredGroups: previous.monitoredGroups,
       monitoredFriends: previous.monitoredFriends,
-      enableAutoReply: _enableAutoReply,
-      defaultAutoReply: _autoReplyController.text.trim(),
-      keywordReplies: _keywordReplies,
+      // Legacy fields remain readable/exportable but no longer drive replies.
+      enableAutoReply: previous.enableAutoReply,
+      defaultAutoReply: previous.defaultAutoReply,
+      keywordReplies: previous.keywordReplies,
       enableScheduledTasks: previous.enableScheduledTasks,
       enableLogging: _enableLogging,
       enableOiapiNickname: previous.enableOiapiNickname,
@@ -450,7 +437,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       children: [
                         _tabButton('常规', 0),
                         _tabButton('连接', 1),
-                        _tabButton('自动回复', 2),
                         _tabButton('数据', 3),
                         _tabButton('数据清理', 4),
                         _tabButton('关于', 5),
@@ -516,7 +502,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     return switch (_tabIndex) {
       0 => _generalGrid(bot),
       1 => _connectionsPage(),
-      2 => _autoReplyPage(),
       3 => _dataPage(bot),
       4 => _dangerPage(),
       6 => const UpdatePanel(),
@@ -539,8 +524,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               _credentialsCard(),
               _connectionCard(),
               if (isDesktopPlatform) _windowCard(),
-              _autoReplyCard(),
-              _keywordRulesCard(),
+              _loggingCard(),
               _dataManagementCard(),
               _dataSummaryCard(bot),
               _dangerZoneCard(),
@@ -615,72 +599,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  Widget _autoReplyCard() {
+  Widget _loggingCard() {
     return _card(
-      title: '自动回复',
-      icon: Icons.chat_bubble_outline_rounded,
+      title: '运行日志',
+      icon: Icons.receipt_long_outlined,
       children: [
-        SwitchListTile(
-          contentPadding: EdgeInsets.zero,
-          title: const Text('启用自动回复'),
-          value: _enableAutoReply,
-          onChanged: (value) => setState(() => _enableAutoReply = value),
-        ),
-        TextField(
-          controller: _autoReplyController,
-          maxLines: 3,
-          decoration: const InputDecoration(labelText: '默认回复内容'),
-        ),
-        SwitchListTile(
-          contentPadding: EdgeInsets.zero,
-          title: const Text('普通群消息也触发插件和自动回复'),
-          subtitle: const Text(
-            '默认关闭：全量消息仅处理明确的天气/IP 指令，其他普通聊天只展示。开启后额外执行所有已启用插件和回复规则。',
-          ),
-          value: _autoReplyToAllGroupMessages,
-          onChanged: (value) =>
-              setState(() => _autoReplyToAllGroupMessages = value),
-        ),
         SwitchListTile(
           contentPadding: EdgeInsets.zero,
           title: const Text('启用日志'),
           value: _enableLogging,
           onChanged: (value) => setState(() => _enableLogging = value),
         ),
-      ],
-    );
-  }
-
-  Widget _keywordRulesCard() {
-    return _card(
-      title: '关键词回复',
-      icon: Icons.list_alt_rounded,
-      trailing: OutlinedButton.icon(
-        onPressed: _addKeywordReply,
-        icon: const Icon(Icons.add_rounded),
-        label: const Text('添加规则'),
-      ),
-      children: [
-        Row(
-          children: [
-            Expanded(
-              child: TextField(
-                controller: _keywordController,
-                decoration: const InputDecoration(labelText: '关键词'),
-              ),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              flex: 2,
-              child: TextField(
-                controller: _replyController,
-                decoration: const InputDecoration(labelText: '回复内容'),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 12),
-        _keywordTable(),
       ],
     );
   }
@@ -837,10 +766,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ],
     ),
   );
-  Widget _autoReplyPage() => SingleChildScrollView(
-    padding: const EdgeInsets.all(14),
-    child: _autoReplyCard(),
-  );
   Widget _dataPage(BotClient bot) => SingleChildScrollView(
     padding: const EdgeInsets.all(14),
     child: Column(
@@ -991,64 +916,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ],
       ),
     );
-  }
-
-  Widget _keywordTable() {
-    if (_keywordReplies.isEmpty) {
-      return Text(
-        '暂无关键词规则。',
-        style: TextStyle(color: Theme.of(context).hintColor),
-      );
-    }
-    return Column(
-      children: [
-        for (final entry in _keywordReplies.entries)
-          Container(
-            height: 42,
-            decoration: BoxDecoration(
-              border: Border(
-                bottom: BorderSide(color: Theme.of(context).dividerColor),
-              ),
-            ),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    entry.key,
-                    style: const TextStyle(fontWeight: FontWeight.w700),
-                  ),
-                ),
-                Expanded(
-                  flex: 2,
-                  child: Text(entry.value, overflow: TextOverflow.ellipsis),
-                ),
-                const SizedBox(width: 80, child: Text('完整匹配')),
-                _statusChip('已启用', AppTheme.qqGreen),
-                IconButton(
-                  onPressed: () =>
-                      setState(() => _keywordReplies.remove(entry.key)),
-                  icon: const Icon(
-                    Icons.delete_outline_rounded,
-                    color: AppTheme.qqRed,
-                    size: 18,
-                  ),
-                ),
-              ],
-            ),
-          ),
-      ],
-    );
-  }
-
-  void _addKeywordReply() {
-    final keyword = _keywordController.text.trim();
-    final reply = _replyController.text.trim();
-    if (keyword.isEmpty || reply.isEmpty) return;
-    setState(() {
-      _keywordReplies[keyword] = reply;
-      _keywordController.clear();
-      _replyController.clear();
-    });
   }
 
   Future<void> _confirmClearAll() async {

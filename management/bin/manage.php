@@ -10,7 +10,7 @@ if (PHP_SAPI !== 'cli') { http_response_code(404); exit; }
 $root = dirname(__DIR__); $command = $argv[1] ?? 'help';
 $data = getenv('QQM_DATA_DIR') ?: $root . '/data';
 if ($command === 'help') {
-    echo "QQM 宝塔 MySQL 管理后台\ninstall        首次生成 config.php；填写数据库后再运行，自动生成密钥及建表（可安全重复）\ninit           兼容旧版：生成 data/config.json（只执行一次，不连接数据库）\ndb-init        使用已配置的 MySQL 账号创建本应用数据表\ndb-check       检查配置、MySQL 连接及数据表版本\npublic-key     输出客户端需内置的公开公钥\norigin-token   本机查看 EdgeOne 回源鉴权值（不要发到聊天）\nprune          执行数据保留清理\nimport         从本机文件导入草稿安装包\n"; exit;
+    echo "QQM 宝塔 MySQL 管理后台\ninstall        首次生成 config.php；填写数据库后再运行，自动生成密钥及建表（可安全重复）\ninit           兼容旧版：生成 data/config.json（只执行一次，不连接数据库）\ndb-init        使用已配置的 MySQL 账号创建本应用数据表\ndb-check       检查配置、MySQL 连接及数据表版本\npublic-key     输出客户端需内置的公开公钥\norigin-token   本机查看 EdgeOne 回源鉴权值（不要发到聊天）\nprune          清理限流缓存（不删除历史统计）\nimport         从本机文件导入草稿安装包\n"; exit;
 }
 try {
     if (!in_array($command, ['install', 'init', 'db-init', 'db-check', 'public-key', 'origin-token', 'prune', 'import'], true)) { throw new HttpError(422, '未知命令，运行 help 查看用法。'); }
@@ -37,7 +37,7 @@ try {
             if (!extension_loaded($extension)) { throw new HttpError(503, "密钥已安全保留；还需启用当前 PHP 扩展：{$extension}，然后重试 install。"); }
         }
         $core = new Core($root, null, [], false); $core->initializeSchema();
-        echo "安装完成：MySQL 连接正常，五张 qqm_ 数据表已就绪；现有记录、签名密钥和回源鉴权值保持不变。\n";
+        echo "安装完成：MySQL 连接正常，应用 qqm_ 数据表已就绪；现有记录、签名密钥和回源鉴权值保持不变。\n";
         echo "网站运行目录设为 public，后台地址为 /admin。请在 config.php 填写杂鱼账号凭据，管理员邮箱仅允许 2377130783@qq.com。\n";
         exit;
     }
@@ -51,7 +51,7 @@ try {
     $core = new Core($root, null, [], $command !== 'db-init');
     if ($command === 'db-init') { $core->initializeSchema(); echo "MySQL 数据表已就绪。重复执行不删除数据、不重置密钥。\n"; exit; }
     if ($command === 'db-check') { echo 'MySQL 连接正常，数据表版本 ' . Core::SCHEMA_VERSION . '，服务器：' . $core->db->getAttribute(PDO::ATTR_SERVER_VERSION) . "\n"; exit; }
-    if ($command === 'prune') { $core->prune(); echo "已执行数据保留策略清理。\n"; exit; }
+    if ($command === 'prune') { $core->prune(); echo "已清理限流缓存，历史统计保持不变。\n"; exit; }
     if (count($argv) !== 8) { throw new HttpError(422, '用法：php bin/manage.php import windows x64 1.3.0 11 zip /绝对路径/软件.zip'); }
     $release = $core->addRelease(['platform' => $argv[2], 'arch' => $argv[3], 'version' => $argv[4], 'build' => (int)$argv[5], 'format' => $argv[6]], $argv[7], false);
     echo json_encode($release, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR) . "\n";

@@ -8,12 +8,47 @@ class WeatherPlugin extends BotPlugin {
     : _amap = amapService ?? AmapService();
 
   static const _weatherUsage =
-      '用法：天气 北京 / 查询天气 上海 / /天气 深圳 / /weather 110105。\n只发送“查询天气”或“天气”时使用插件配置中的默认城市；未配置时请带上城市。';
+      '用法：天气 北京 / 查询天气 上海 / /天气 深圳 / /weather 110105。\n天气预报 北京：未来几天天气。城市编码 北京：查询行政区编码。\n只发送“天气”时使用配置中的默认城市；未配置时请带上城市。';
   static const _ipUsage =
       '用法：查ip地址 114.114.114.114 / /ip 114.114.114.114。\n请提供要查询的国内 IPv4 地址；QQ 官方消息不提供发送者 IP，不能通过 QQ 号查询用户 IP。';
 
   @override
   Duration get executionTimeout => const Duration(seconds: 20);
+
+  @override
+  List<PluginCommand> get commands => const [
+    PluginCommand(
+      '天气',
+      '高德实况天气',
+      usage: '天气 城市',
+      aliases: ['weather'],
+      allowBare: true,
+    ),
+    PluginCommand(
+      '天气预报',
+      '高德每日天气预报',
+      usage: '天气预报 城市',
+      aliases: ['forecast'],
+      allowBare: true,
+    ),
+    PluginCommand(
+      '城市编码',
+      '查询行政区编码',
+      usage: '城市编码 城市',
+      aliases: ['adcode'],
+      allowBare: true,
+    ),
+    PluginCommand(
+      'ip',
+      '国内 IPv4 大致归属地',
+      usage: 'ip 114.114.114.114',
+      allowBare: true,
+    ),
+  ];
+
+  @override
+  bool acceptsUnmentioned(PluginMessage message) =>
+      WeatherQuery.parse(message.content) != null;
 
   @override
   Future<void> onEnable() async {}
@@ -36,6 +71,9 @@ class WeatherPlugin extends BotPlugin {
   Future<String?> _answer(WeatherQuery query) async {
     final argument = query.argument;
     final weather = query.isWeather;
+    if (const ['帮助', 'help'].contains(argument.toLowerCase())) {
+      return weather ? _weatherUsage : _ipUsage;
+    }
     final city = argument.isNotEmpty
         ? argument
         : (info.config['default_city']?.toString().trim() ?? '');
@@ -43,6 +81,12 @@ class WeatherPlugin extends BotPlugin {
     if (!weather && argument.isEmpty) return _ipUsage;
     final key = info.config['amap_key']?.toString().trim() ?? '';
     try {
+      if (query.isCityCode) {
+        return '$city 的行政区编码：${await _amap.cityCode(city, key)}\n数据来源：高德地图';
+      }
+      if (query.isForecast) {
+        return _formatForecast(await _amap.forecast(city, key), city);
+      }
       return weather
           ? _formatWeather(await _amap.weather(city, key), city)
           : _formatIp(await _amap.locateIp(argument, key), argument);
@@ -51,6 +95,16 @@ class WeatherPlugin extends BotPlugin {
     } catch (_) {
       return '${weather ? '天气' : 'IP'}查询失败：接口数据异常，请稍后重试。';
     }
+  }
+
+  String _formatForecast(Map<String, dynamic> data, String city) {
+    return [
+      '${amapText(data['city']).isEmpty ? city : amapText(data['city'])} 天气预报',
+      for (final day in (data['casts'] as List).whereType<Map>().take(4))
+        '${_value(day['date'])}：${_value(day['dayweather'])} / ${_value(day['nightweather'])}，${_value(day['nighttemp'])}～${_value(day['daytemp'])}℃',
+      '发布时间：${_value(data['reporttime'])}',
+      '数据来源：高德地图，预报仅供参考',
+    ].join('\n');
   }
 
   String _formatWeather(Map<String, dynamic> data, String requestedCity) {

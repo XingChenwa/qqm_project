@@ -4,7 +4,6 @@ import 'dart:io';
 
 import '../../models/plugin.dart';
 import '../../models/plugin_manifest.dart';
-import '../../utils/helpers.dart';
 
 class ManifestPlugin extends BotPlugin {
   final PluginManifest definition;
@@ -26,31 +25,111 @@ class ManifestPlugin extends BotPlugin {
   Future<void> onDisable() async {}
 
   @override
-  Future<String?> handleMessage(PluginMessage message) async {
+  List<PluginCommand> get commands => [
+    for (final rule in definition.rules)
+      if (rule.trigger.type == 'command')
+        PluginCommand(rule.trigger.value, info.description),
+  ];
+
+  @override
+  bool acceptsUnmentioned(PluginMessage message) =>
+      definition.data['listen_all'] == true ||
+      definition.rules.any(
+        (rule) =>
+            rule.trigger.type == 'command' && rule.trigger.matches(message),
+      );
+
+  bool _allowed(PluginRule rule, PluginMessage message) =>
+      rule.permission == 'all' ||
+      message.senderRole == 'operator' ||
+      message.senderRole == 'owner' ||
+      rule.permission == 'admin' && message.senderRole == 'admin';
+
+  @override
+  Future<PluginReply?> execute(PluginMessage message) async {
     final rule = definition.rules
-        .where((r) => r.trigger.matches(message))
+        .where((rule) => rule.trigger.matches(message))
         .firstOrNull;
     if (rule == null) return null;
-    if (definition.runtime == 'http') return _callService(message, rule);
+    if (!_allowed(rule, message)) {
+      return const PluginReply('此命令仅限群主或管理员使用。', format: 'text');
+    }
+    if (definition.runtime == 'http') return _callServiceReply(message, rule);
+    if (rule.message == null) {
+      return PluginReply(
+        _render(rule.reply, message, rule),
+        format: message.eventType == 'interaction' ? 'text' : 'auto',
+      );
+    }
+    String render(String value) => _render(value, message, rule);
+    final raw = rule.message!.toMap();
+    dynamic substitute(dynamic value) => value is String
+        ? render(value)
+        : value is List
+        ? value.map(substitute).toList()
+        : value is Map
+        ? value.map((k, v) => MapEntry(k.toString(), substitute(v)))
+        : value;
+    return _checkReply(
+      PluginReply.fromMap(Map<String, dynamic>.from(substitute(raw) as Map)),
+    );
+  }
+
+  PluginReply _checkReply(PluginReply reply) {
+    if (reply.format == 'media' &&
+        (!info.permissions.contains('message:media') ||
+            !(definition.data['media_hosts'] as List? ?? []).contains(
+              Uri.parse(reply.mediaUrl).host,
+            ))) {
+      throw const PluginManifestException('媒体回复未声明对应域名或 message:media 权限。');
+    }
+    if (reply.buttons
+        .expand((row) => row)
+        .any(
+          (b) =>
+              b.callback &&
+              (!info.permissions.contains('interaction:read') ||
+                  !b.data.startsWith('qqm:${info.id}:')),
+        )) {
+      throw const PluginManifestException(
+        '回调按钮需要 interaction:read 权限及本插件命名空间。',
+      );
+    }
+    return reply;
+  }
+
+  String _render(String text, PluginMessage message, PluginRule rule) {
     final variables = <String, String>{
       'content': message.content,
-      'args': rule.trigger.arguments(message.content),
+      'args': message.eventType == 'interaction'
+          ? message.callbackData.split(':').skip(3).join(':')
+          : rule.trigger.arguments(message.content),
       'sender_name': message.senderName,
       'sender_id': message.senderId,
       'session_id': message.sessionId,
-      'now': DateTime.now().toLocal().toIso8601String(),
+      'sender_role': message.senderRole,
+      'now': DateTime.now()
+          .toUtc()
+          .add(const Duration(hours: 8))
+          .toIso8601String()
+          .replaceFirst('Z', '+08:00'),
       for (final field in definition.fields)
         if (field.type != 'secret')
           'config.${field.key}': info.config[field.key]?.toString() ?? '',
     };
-    final reply = rule.reply.replaceAllMapped(
+    final result = text.replaceAllMapped(
       RegExp(r'\{\{\s*([a-zA-Z0-9_.]+)\s*\}\}'),
       (match) => variables[match.group(1)] ?? '',
     );
-    if (reply.length > 16000) {
+    if (result.length > 16000) {
       throw const PluginManifestException('插件回复超过 16000 字符。');
     }
-    return reply;
+    return result;
+  }
+
+  @override
+  Future<String?> handleMessage(PluginMessage message) async {
+    return (await execute(message))?.content;
   }
 
   @override
@@ -63,6 +142,7 @@ class ManifestPlugin extends BotPlugin {
       sessionId: '',
       senderId: '',
       senderName: '操作员',
+      senderRole: 'operator',
       content: '/$command${args.isEmpty ? '' : ' ${args.join(' ')}'}',
       messageType: 0,
       isGroup: false,
@@ -70,7 +150,10 @@ class ManifestPlugin extends BotPlugin {
     ),
   );
 
-  Future<String?> _callService(PluginMessage message, PluginRule rule) async {
+  Future<PluginReply?> _callServiceReply(
+    PluginMessage message,
+    PluginRule rule,
+  ) async {
     final settings = definition.http;
     final timeout = Duration(
       milliseconds: settings['timeout_ms'] as int? ?? 8000,
@@ -99,7 +182,11 @@ class ManifestPlugin extends BotPlugin {
           jsonEncode({
             'schema_version': 1,
             'plugin_id': info.id,
-            'event': command == null ? 'message' : 'command',
+            'event': message.eventType == 'interaction'
+                ? 'interaction'
+                : command == null
+                ? 'message'
+                : 'command',
             'command': command?.command,
             'args': command?.args ?? <String>[],
             'text': rule.trigger.arguments(message.content),
@@ -129,6 +216,13 @@ class ManifestPlugin extends BotPlugin {
           bytes.addAll(chunk);
         }
         final decoded = jsonDecode(utf8.decode(bytes));
+        if (decoded is Map &&
+            decoded['message'] is Map &&
+            !decoded.containsKey('reply')) {
+          return _checkReply(
+            PluginReply.fromMap(Map<String, dynamic>.from(decoded['message'])),
+          );
+        }
         if (decoded is! Map ||
             !decoded.containsKey('reply') ||
             decoded['reply'] != null && decoded['reply'] is! String) {
@@ -140,7 +234,12 @@ class ManifestPlugin extends BotPlugin {
         if (reply != null && reply.length > 16000) {
           throw const PluginManifestException('插件回复超过 16000 字符。');
         }
-        return reply;
+        return reply == null
+            ? null
+            : PluginReply(
+                reply,
+                format: message.eventType == 'interaction' ? 'text' : 'auto',
+              );
       })().timeout(timeout);
     } on PluginManifestException {
       rethrow;

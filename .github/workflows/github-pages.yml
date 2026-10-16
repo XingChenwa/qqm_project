@@ -1,0 +1,43 @@
+name: GitHub 下载首页
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'site/**'
+      - 'tool/github_release*.mjs'
+      - '.github/workflows/github-pages.yml'
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: github-pages-publish
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - run: node --test tool/tests/github_release.test.mjs
+      - name: 使用最近已完整发布的签名版本生成首页
+        run: node tool/github_release.mjs pages
+        env:
+          GH_TOKEN: ${{ github.token }}
+          UPDATE_PUBLIC_KEY: ${{ vars.UPDATE_PUBLIC_KEY || 'EmpeSLtZms6Uz7D61o6E3gQzBytIPqsNU+dSq47M9ko=' }}
+      - uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5
+      - uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b # v4
+        with:
+          path: build/github-pages
+      - id: deployment
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4

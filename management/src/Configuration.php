@@ -14,7 +14,7 @@ final class Configuration
             'admin_email' => '2377130783@qq.com', 'uuze_client_id' => '', 'uuze_client_secret' => '',
             'signing_secret' => '', 'origin_token' => '', 'require_origin_token' => false,
             'proxy_trust_mode' => 'cidr_and_token', 'trusted_proxy_cidrs' => [], 'client_ip_header' => 'EO-Connecting-IP',
-            'ip_retention_days' => 7, 'device_retention_days' => 90, 'max_upload_bytes' => 1073741824,
+            'max_upload_bytes' => 1073741824,
         ];
     }
 

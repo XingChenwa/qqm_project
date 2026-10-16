@@ -1,9 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:qq_bot_manager/core/message_handler.dart';
 import 'package:qq_bot_manager/core/plugin_manager.dart';
 import 'package:qq_bot_manager/models/config.dart';
 import 'package:qq_bot_manager/models/plugin.dart';
-import 'package:qq_bot_manager/utils/helpers.dart';
 
 import 'support/fakes.dart';
 
@@ -31,7 +29,7 @@ void main() {
     expect(parseSlashCommand(code)?.args.single, contains('\n    print'));
   });
 
-  test('关键词按界面声明完整匹配，未匹配时才使用默认自动回复', () {
+  test('旧关键词和默认回复配置保留但不会进入插件回复链路', () async {
     final storage = MemoryStorage(
       config: BotConfig(
         enableAutoReply: true,
@@ -39,11 +37,21 @@ void main() {
         defaultAutoReply: '默认回复',
       ),
     );
-    final handler = MessageHandler(storage);
-    expect(handler.processMessage(incoming('a', content: '你好')), '关键词回复');
-    expect(handler.processMessage(incoming('b', content: '请说你好')), '默认回复');
-    storage.config.enableAutoReply = false;
-    handler.refreshConfig();
-    expect(handler.processMessage(incoming('c', content: '你好')), isNull);
+    final manager = PluginManager(storage);
+    addTearDown(manager.dispose);
+    await manager.init();
+    final responses = await manager.processMessage(
+      PluginMessage(
+        messageId: 'normal',
+        sessionId: 'group',
+        senderId: 'user',
+        senderName: '用户',
+        content: '请说你好',
+        messageType: 0,
+        isGroup: true,
+        timestamp: DateTime.now(),
+      ),
+    );
+    expect(responses, isEmpty);
   });
 }

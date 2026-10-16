@@ -84,7 +84,11 @@ flutter:
     - plugins/weather_plugin/plugin.json
     - plugins/dice_plugin/plugin.json
     - plugins/translate_comment/plugin.json
+    - plugins/daily_club/plugin.json
+    - plugins/group_games/plugin.json
     - plugins/examples/hello_json/plugin.json
     - plugins/examples/hello_yaml/plugin.yaml
     - plugins/examples/http_echo/plugin.json
+    - plugins/examples/buttons/plugin.json
+    - plugins/examples/media/plugin.json
     - docs/plugin-development.md

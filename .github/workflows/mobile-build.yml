@@ -1,6 +1,8 @@
 name: 客户端安装包
 
 on:
+  release:
+    types: [published]
   workflow_dispatch:
     inputs:
       platform:
@@ -16,11 +18,27 @@ permissions:
 env:
   FLUTTER_VERSION: '3.44.3'
   UPDATE_PUBLIC_KEY: ${{ vars.UPDATE_PUBLIC_KEY || 'EmpeSLtZms6Uz7D61o6E3gQzBytIPqsNU+dSq47M9ko=' }}
-  UPDATE_BASE_URL: ${{ vars.UPDATE_BASE_URL || 'https://botmanager.uuze.cn' }}
+  UPDATE_BASE_URL: ${{ vars.UPDATE_BASE_URL || 'https://xingchenwa.github.io/qqm_project' }}
 
 jobs:
+  preflight:
+    if: github.event_name != 'release' || !github.event.release.prerelease
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - run: node --test tool/tests/github_release.test.mjs
+      - name: 检查标签、构建号和更新密钥
+        run: node tool/github_release.mjs preflight
+        env:
+          GH_TOKEN: ${{ github.token }}
+          UPDATE_SIGNING_PRIVATE_KEY: ${{ secrets.UPDATE_SIGNING_PRIVATE_KEY }}
+
   android:
-    if: inputs.platform == 'all' || inputs.platform == 'android'
+    needs: preflight
+    if: github.event_name == 'release' || inputs.platform == 'all' || inputs.platform == 'android'
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
@@ -68,7 +86,8 @@ jobs:
           retention-days: 7
 
   macos:
-    if: inputs.platform == 'all' || inputs.platform == 'macos'
+    needs: preflight
+    if: github.event_name == 'release' || inputs.platform == 'all' || inputs.platform == 'macos'
     runs-on: macos-15
     timeout-minutes: 45
     steps:
@@ -98,7 +117,8 @@ jobs:
           retention-days: 7
 
   ios:
-    if: inputs.platform == 'all' || inputs.platform == 'ios'
+    needs: preflight
+    if: github.event_name == 'release' || inputs.platform == 'all' || inputs.platform == 'ios'
     runs-on: macos-15
     timeout-minutes: 45
     steps:
@@ -126,7 +146,8 @@ jobs:
           retention-days: 7
 
   windows:
-    if: inputs.platform == 'all' || inputs.platform == 'windows'
+    needs: preflight
+    if: github.event_name == 'release' || inputs.platform == 'all' || inputs.platform == 'windows'
     runs-on: windows-2022
     timeout-minutes: 60
     steps:
@@ -164,3 +185,36 @@ jobs:
             dist/qqbotmanager-windows-*-build-info.json
           if-no-files-found: error
           retention-days: 7
+
+  publish:
+    needs: [preflight, android, ios, macos, windows]
+    if: github.event_name == 'release'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    concurrency:
+      group: github-pages-publish
+      cancel-in-progress: false
+    permissions:
+      actions: read
+      contents: write
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: 四端校验、签名并上传 GitHub Release
+        run: node tool/github_release.mjs publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          UPDATE_SIGNING_PRIVATE_KEY: ${{ secrets.UPDATE_SIGNING_PRIVATE_KEY }}
+      - uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5
+      - uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b # v4
+        with:
+          path: build/github-pages
+      - name: 发布下载首页与更新清单
+        id: deployment
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4

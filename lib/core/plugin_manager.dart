@@ -16,6 +16,9 @@ class PluginManager extends ChangeNotifier {
   final StorageService _storage;
   final List<BotPlugin> _plugins = [];
   final Map<String, String> _errors = {};
+  final Map<String, PluginStore> _stores = {};
+  final Map<String, int> _active = {};
+  final Map<String, DateTime> _cooldowns = {};
   bool _disposed = false;
 
   PluginManager(this._storage);
@@ -24,6 +27,40 @@ class PluginManager extends ChangeNotifier {
   int get enabledCount => _plugins.where((p) => p.info.isEnabled).length;
   String? errorFor(String id) => _errors[id];
   bool isBundled(String id) => BuiltInPluginRegistry.factories.containsKey(id);
+
+  String commandHelp() {
+    final lines = <String>['插件命令菜单（支持 / 或 # 前缀）'];
+    for (final plugin in _plugins.where((p) => p.info.isEnabled)) {
+      if (plugin.commands.isEmpty) continue;
+      lines.add('\n【${plugin.info.name}】');
+      for (final command in plugin.commands) {
+        lines.add(
+          '/${command.usage.isEmpty ? command.name : command.usage} — ${command.description}',
+        );
+      }
+    }
+    lines.add('\n群内免 @ 需要平台已开启“接收所有消息”；普通聊天不会兜底回复。');
+    return lines.join('\n');
+  }
+
+  void _bind(BotPlugin plugin) {
+    plugin.host = PluginHost(
+      help: commandHelp,
+      store: () {
+        final scope = jsonEncode([
+          _storage.getBotConfig().appId,
+          plugin.info.id,
+        ]);
+        return _stores.putIfAbsent(
+          scope,
+          () => PluginStore(
+            () => _storage.readPluginData(scope),
+            (value) => _storage.writePluginData(scope, value),
+          ),
+        );
+      },
+    );
+  }
 
   Future<void> init() async {
     for (final plugin in _plugins) {
@@ -52,6 +89,7 @@ class PluginManager extends ChangeNotifier {
         throw PluginManifestException('内置 Dart 插件 ${info.id} 尚未注册工厂。');
       }
       _plugins.add(plugin);
+      _bind(plugin);
       if (info.isEnabled) await _enablePluginSafely(plugin);
     }
     for (final saved in savedConfigs.values.where((p) => !isBundled(p.id))) {
@@ -64,6 +102,7 @@ class PluginManager extends ChangeNotifier {
         final info = definition.toInfo(saved: saved);
         final plugin = ManifestPlugin(info, definition);
         _plugins.add(plugin);
+        _bind(plugin);
         if (info.isEnabled) await _enablePluginSafely(plugin);
       } catch (_) {
         _log.warning('已跳过无效的第三方插件配置：${saved.id}');
@@ -109,7 +148,9 @@ class PluginManager extends ChangeNotifier {
       }
       _plugins.remove(previous);
     }
-    _plugins.add(ManifestPlugin(info, definition));
+    final installed = ManifestPlugin(info, definition);
+    _bind(installed);
+    _plugins.add(installed);
     _errors.remove(info.id);
     notifyListeners();
     return info;
@@ -122,6 +163,25 @@ class PluginManager extends ChangeNotifier {
       jsonEncode(plugin.info.manifest),
       allowBuiltin: true,
     ).exportDefinition();
+  }
+
+  Future<String> exportPluginData(String id) async {
+    final plugin = _findPlugin(id);
+    if (plugin == null) throw const PluginManifestException('插件不存在。');
+    return const JsonEncoder.withIndent('  ').convert({
+      'schema_version': 1,
+      'plugin_id': id,
+      'data': await plugin.host!.store.snapshot(),
+    });
+  }
+
+  Future<void> clearPluginData(String id) async {
+    final plugin = _findPlugin(id);
+    if (plugin == null) throw const PluginManifestException('插件不存在。');
+    if (plugin.info.isEnabled || (_active[id] ?? 0) != 0) {
+      throw const PluginManifestException('请先停用插件，等待当前任务结束后再清理。');
+    }
+    await plugin.host!.store.clear();
   }
 
   Future<void> _enablePluginSafely(BotPlugin plugin) async {
@@ -220,44 +280,95 @@ class PluginManager extends ChangeNotifier {
     String? onlyPluginId,
   }) async {
     final responses = <PluginResponse>[];
+    final appId = _storage.getBotConfig().appId;
 
-    for (final plugin
-        in _plugins
-            .where(
-              (p) =>
-                  p.info.isEnabled &&
-                  (onlyPluginId == null || p.info.id == onlyPluginId),
-            )
-            .toList()) {
+    final candidates = _plugins
+        .where(
+          (p) =>
+              p.info.isEnabled &&
+              (onlyPluginId == null || p.info.id == onlyPluginId),
+        )
+        .toList();
+    candidates.sort((a, b) {
+      final priority = ((a.info.manifest['priority'] as int?) ?? 100).compareTo(
+        (b.info.manifest['priority'] as int?) ?? 100,
+      );
+      return priority != 0
+          ? priority
+          : _plugins.indexOf(a).compareTo(_plugins.indexOf(b));
+    });
+    for (final plugin in candidates) {
       // 等待前一个插件期间可能发生停用或卸载，执行前再检查一次。
-      if (_disposed || !plugin.info.isEnabled || !_plugins.contains(plugin)) {
+      if (_disposed ||
+          _storage.getBotConfig().appId != appId ||
+          !plugin.info.isEnabled ||
+          !_plugins.contains(plugin)) {
         continue;
       }
+      if (message.isFullGroupMessage && !plugin.acceptsUnmentioned(message)) {
+        continue;
+      }
+      if (message.eventType == 'interaction' &&
+          !message.callbackData.startsWith('qqm:${plugin.info.id}:')) {
+        continue;
+      }
+      if ((_active[plugin.info.id] ?? 0) >= 4) continue;
+      final cooldownKey = jsonEncode([
+        plugin.info.id,
+        message.sessionId,
+        message.senderId,
+      ]);
+      final cooldown = plugin.info.manifest['cooldown_ms'] as int? ?? 0;
+      final last = _cooldowns[cooldownKey];
+      if (cooldown > 0 &&
+          last != null &&
+          DateTime.now().difference(last).inMilliseconds < cooldown) {
+        continue;
+      }
+      _active[plugin.info.id] = (_active[plugin.info.id] ?? 0) + 1;
       try {
         final result = await plugin
-            .handleMessage(message)
+            .execute(message)
             .timeout(plugin.executionTimeout);
-        if (_disposed || !plugin.info.isEnabled || !_plugins.contains(plugin)) {
+        if (_disposed ||
+            _storage.getBotConfig().appId != appId ||
+            !plugin.info.isEnabled ||
+            !_plugins.contains(plugin)) {
           continue;
         }
         _errors.remove(plugin.info.id);
-        if (result == null || result.trim().isEmpty) continue;
+        if (result == null) continue;
+        if (result.format == 'auto' && result.content.trim().isEmpty) continue;
+        if (result.format != 'auto') PluginReply.fromMap(result.toMap());
+        if (cooldown > 0) {
+          if (_cooldowns.length >= 2048) {
+            _cooldowns.remove(_cooldowns.keys.first);
+          }
+          _cooldowns[cooldownKey] = DateTime.now();
+        }
 
         responses.add(
           PluginResponse(
             pluginId: plugin.info.id,
             pluginName: plugin.info.name,
-            content: result.trim(),
+            content: result.content.trim(),
+            reply: result,
           ),
         );
+        // One matched plugin owns the response, preserving passive reply quotas.
+        break;
       } on TimeoutException {
         _errors[plugin.info.id] = '插件执行超时。';
         _log.warning('Plugin ${plugin.info.name} timed out on message');
       } catch (e) {
         _errors[plugin.info.id] = e is PluginManifestException
             ? e.message
+            : e is FormatException
+            ? e.message
             : '插件运行异常，请检查配置。';
         _log.warning('插件 ${plugin.info.name}：${_errors[plugin.info.id]}');
+      } finally {
+        _active[plugin.info.id] = (_active[plugin.info.id] ?? 1) - 1;
       }
     }
 
@@ -269,50 +380,33 @@ class PluginManager extends ChangeNotifier {
     String command,
     List<String> args,
     PluginMessage? context,
+  ) async => (await processCommandReply(command, args, context))?.content;
+
+  Future<PluginResponse?> processCommandReply(
+    String command,
+    List<String> args,
+    PluginMessage? context,
   ) async {
     final normalized = command
         .trim()
-        .replaceFirst(RegExp(r'^/+'), '')
+        .replaceFirst(RegExp(r'^[/#]+'), '')
         .toLowerCase();
     if (normalized.isEmpty) return null;
 
-    for (final plugin in _plugins.where((p) => p.info.isEnabled).toList()) {
-      if (_disposed || !plugin.info.isEnabled || !_plugins.contains(plugin)) {
-        continue;
-      }
-      try {
-        final result = await plugin
-            .handleMessage(
-              PluginMessage(
-                messageId: context?.messageId ?? '',
-                sessionId: context?.sessionId ?? '',
-                senderId: context?.senderId ?? '',
-                senderName: context?.senderName ?? '操作员',
-                content:
-                    '/$normalized${args.isEmpty ? '' : ' ${args.join(' ')}'}',
-                messageType: context?.messageType ?? 0,
-                isGroup: context?.isGroup ?? false,
-                timestamp: context?.timestamp ?? DateTime.now(),
-              ),
-            )
-            .timeout(plugin.executionTimeout);
-        if (_disposed || !plugin.info.isEnabled || !_plugins.contains(plugin)) {
-          continue;
-        }
-        if (result != null && result.trim().isNotEmpty) return result.trim();
-      } on TimeoutException {
-        _log.warning(
-          'Plugin ${plugin.info.name} timed out on command /$normalized',
-        );
-      } catch (e) {
-        _errors[plugin.info.id] = e is PluginManifestException
-            ? e.message
-            : '插件命令执行失败，请检查配置。';
-        _log.warning('插件 ${plugin.info.name}：${_errors[plugin.info.id]}');
-      }
-    }
-
-    return null;
+    final results = await processMessage(
+      PluginMessage(
+        messageId: context?.messageId ?? '',
+        sessionId: context?.sessionId ?? '',
+        senderId: context?.senderId ?? '',
+        senderName: context?.senderName ?? '操作员',
+        content: '/$normalized${args.isEmpty ? '' : ' ${args.join(' ')}'}',
+        messageType: context?.messageType ?? 0,
+        isGroup: context?.isGroup ?? false,
+        timestamp: context?.timestamp ?? DateTime.now(),
+        senderRole: context?.senderRole ?? 'operator',
+      ),
+    );
+    return results.firstOrNull;
   }
 
   Future<void> tick() async {
@@ -358,10 +452,12 @@ class PluginResponse {
   final String pluginId;
   final String pluginName;
   final String content;
+  final PluginReply? reply;
 
   const PluginResponse({
     required this.pluginId,
     required this.pluginName,
     required this.content,
+    this.reply,
   });
 }

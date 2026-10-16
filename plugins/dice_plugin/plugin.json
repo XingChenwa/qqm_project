@@ -1,15 +1,17 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "id": "dice_plugin",
-  "name": "骰子插件",
-  "version": "1.0.0",
-  "description": "支持 /dice、/roll 2d6 和骰子表达式。",
-  "config": {},
+  "name": "随机游乐场",
+  "version": "2.0.0",
+  "description": "骰子与修正值、硬币、选择转盘、随机排序、范围随机数和猜拳。",
   "permissions": [
     "message:read",
     "message:send"
   ],
-  "config_schema": [],
+  "config_schema": [
+    {"key": "max_dice", "label": "骰子数量上限（1–100）", "type": "integer", "default": 100},
+    {"key": "max_sides", "label": "骰子面数上限（2–1000）", "type": "integer", "default": 1000}
+  ],
   "author": "QQ 机器人管理器",
   "runtime": "builtin",
   "entrypoint": "lib/dice_plugin/plugin.dart"

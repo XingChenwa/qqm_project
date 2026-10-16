@@ -1,10 +1,20 @@
 import '../src/commands.dart';
 
-/// 群聊免 @ 的窄范围白名单，与天气插件共用，避免放开所有自动回复。
+/// 仅匹配明确查询指令，不把日常聊天误判成天气请求。
 class WeatherQuery {
   final bool isWeather;
   final String argument;
-  const WeatherQuery(this.isWeather, this.argument);
+  final bool isForecast;
+  final bool isCityCode;
+  const WeatherQuery(
+    this.isWeather,
+    this.argument, {
+    this.isForecast = false,
+    this.isCityCode = false,
+  });
+
+  static const forecastCommands = {'天气预报', '预报', 'forecast'};
+  static const cityCommands = {'城市编码', 'adcode'};
 
   static const weatherCommands = {
     'weather',
@@ -25,13 +35,19 @@ class WeatherQuery {
     'ip地址查询',
   };
   static final _plain = RegExp(
-    '^(${[...weatherCommands, ...ipCommands].map(RegExp.escape).join('|')})'
+    '^(${[...forecastCommands, ...cityCommands, ...weatherCommands, ...ipCommands].map(RegExp.escape).join('|')})'
     r'(?:[ \t:：]+([^\r\n]*))?$',
     caseSensitive: false,
   );
 
   static WeatherQuery? fromCommand(String command, String argument) {
     final normalized = command.trim().toLowerCase();
+    if (forecastCommands.contains(normalized)) {
+      return WeatherQuery(true, argument.trim(), isForecast: true);
+    }
+    if (cityCommands.contains(normalized)) {
+      return WeatherQuery(true, argument.trim(), isCityCode: true);
+    }
     if (weatherCommands.contains(normalized)) {
       return WeatherQuery(true, argument.trim());
     }

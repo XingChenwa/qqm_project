@@ -3,7 +3,8 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:qq_bot_manager/core/bot_client.dart';
-import 'package:qq_bot_manager/core/message_handler.dart';
+import 'package:qq_bot_manager/core/plugin_manager.dart';
+import 'package:qq_bot_manager/models/plugin.dart';
 import 'package:qq_bot_manager/models/config.dart';
 import 'package:qq_bot_manager/models/message.dart';
 import 'package:qq_bot_manager/models/received_message.dart';
@@ -149,7 +150,8 @@ void main() {
     );
     await until(() => bot.messages.length == 3);
     expect(bot.fullGroupMessageCount, 3);
-    expect(autoReplies, 0);
+    // Delivery to the plugin dispatcher is not itself a QQ reply.
+    expect(autoReplies, 3);
     expect(bot.messages.first.senderId, 'member-openid');
     expect(bot.messages.first.senderRole, 'admin');
     expect(bot.messages[1].imageUrl, 'https://example.com/photo.jpg');
@@ -192,13 +194,13 @@ void main() {
     gateway.events.add(normalized(raw));
     await Future<void>.delayed(Duration.zero);
     expect(bot.messages, hasLength(1));
-    expect(dispatched, isEmpty);
+    expect(dispatched.single.isFullGroupMessage, isTrue);
     gateway.events.add(normalized(raw, eventType: 'GROUP_AT_MESSAGE_CREATE'));
     gateway.events.add(normalized(raw, eventType: 'GROUP_AT_MESSAGE_CREATE'));
     gateway.events.add(normalized(raw));
     await Future<void>.delayed(Duration.zero);
     expect(bot.messages, hasLength(1));
-    expect(dispatched.single.extra?['eventType'], 'GROUP_AT_MESSAGE_CREATE');
+    expect(dispatched, hasLength(1));
     bot.config.autoReplyToAllGroupMessages = true;
     final second = groupEvent('second');
     gateway.events.add(normalized(second));
@@ -243,22 +245,29 @@ void main() {
     expect(api.calls.last['msgId'], 'at-message');
   });
 
-  test('全量消息默认不命中自动回复规则，显式开启后生效且跳过机器人', () async {
+  test('旧自动回复开关不再参与全量消息回复，普通聊天不会兜底', () async {
     final config = validConfig()
       ..enableAutoReply = true
       ..defaultAutoReply = '收到';
     final storage = MemoryStorage(config: config);
-    final handler = MessageHandler(storage);
-    final message = received(groupEvent('full'));
-    expect(handler.processMessage(message), isNull);
+    final manager = PluginManager(storage);
+    addTearDown(manager.dispose);
+    await manager.init();
+    PluginMessage message() => PluginMessage(
+      messageId: 'full',
+      sessionId: 'g',
+      senderId: 'u',
+      senderName: '用户',
+      content: '大家早上好呀',
+      messageType: 0,
+      isGroup: true,
+      isFullGroupMessage: true,
+      timestamp: DateTime.now(),
+    );
+    expect(await manager.processMessage(message()), isEmpty);
     config.autoReplyToAllGroupMessages = true;
     await storage.saveBotConfig(config);
-    handler.refreshConfig();
-    expect(handler.processMessage(message), '收到');
-    expect(
-      handler.processMessage(received(groupEvent('bot', bot: true))),
-      isNull,
-    );
+    expect(await manager.processMessage(message()), isEmpty);
   });
 
   test('多种附件、卡片和递归元素完整解析，@ 用户别名在嵌套消息中也生效', () {

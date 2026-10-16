@@ -1,5 +1,6 @@
 import 'package:hive/hive.dart';
 import 'commands.dart';
+import 'runtime.dart';
 
 class PluginInfo {
   final String id;
@@ -59,6 +60,20 @@ class PluginInfo {
 abstract class BotPlugin {
   Duration get executionTimeout => const Duration(seconds: 10);
   final PluginInfo info;
+  PluginHost? host;
+  List<PluginCommand> get commands => const [];
+
+  /// Full-group delivery is not permission to react to every ordinary sentence.
+  bool acceptsUnmentioned(PluginMessage message) =>
+      parseSlashCommand(message.content) != null;
+
+  Future<PluginReply?> execute(PluginMessage message) async {
+    if (message.eventType == 'interaction') return onInteraction(message);
+    final result = await handleMessage(message);
+    return result == null || result.trim().isEmpty ? null : PluginReply(result);
+  }
+
+  Future<PluginReply?> onInteraction(PluginMessage message) async => null;
 
   BotPlugin(this.info);
 
@@ -101,6 +116,11 @@ class PluginMessage {
   final int messageType;
   final bool isGroup;
   final DateTime timestamp;
+  final String senderRole;
+  final bool isFullGroupMessage;
+  final String eventType;
+  final String callbackData;
+  final List<Map<String, dynamic>> attachments;
 
   PluginMessage({
     required this.messageId,
@@ -111,6 +131,11 @@ class PluginMessage {
     required this.messageType,
     required this.isGroup,
     required this.timestamp,
+    this.senderRole = '',
+    this.isFullGroupMessage = false,
+    this.eventType = 'message',
+    this.callbackData = '',
+    this.attachments = const [],
   });
 
   Map<String, dynamic> toMap() => {
@@ -122,6 +147,11 @@ class PluginMessage {
     'message_type': messageType,
     'is_group': isGroup,
     'timestamp': timestamp.toUtc().toIso8601String(),
+    'sender_role': senderRole,
+    'is_full_group_message': isFullGroupMessage,
+    'event_type': eventType,
+    if (callbackData.isNotEmpty) 'callback_data': callbackData,
+    if (attachments.isNotEmpty) 'attachments': attachments,
   };
 }
 

@@ -14,20 +14,16 @@ try {
     check($core->db->getAttribute(PDO::ATTR_DRIVER_NAME) === 'mysql', 'MySQL driver');
     check(!$core->db->getAttribute(PDO::ATTR_EMULATE_PREPARES), 'Native prepared statements');
     check((int)$core->query('SELECT MAX(version) FROM qqm_schema_migrations')->fetchColumn() === Core::SCHEMA_VERSION, 'Current schema version');
-    // Simulate the deployed v1 table, with an existing installation that must survive.
-    $id = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee'; $now = time();
-    $core->query('INSERT INTO qqm_installations(id,token_hash,platform,version,build,first_seen,last_seen,ip_updated_at) VALUES(?,?,?,?,?,?,?,?)', [$id, str_repeat('a', 64), 'windows', '1.3.0', 11, $now, $now, $now]);
-    foreach (['device_name','device_model','system_version','system_arch'] as $column) { $core->db->exec('ALTER TABLE qqm_installations DROP COLUMN ' . $column); }
-    $core->query('DELETE FROM qqm_schema_migrations WHERE version=2');
-    rejects(fn() => new Core(dirname(__DIR__), $path, ['database' => $database]));
-    $core->initializeSchema(); $core->initializeSchema();
-    $retained = $core->query('SELECT * FROM qqm_installations WHERE id=?', [$id])->fetch();
-    check($retained['version'] === '1.3.0' && $retained['build'] === 11, 'v1 migration preserves existing installation');
-    check(array_key_exists('device_name', $retained) && $retained['device_name'] === null, 'v2 nullable device columns added');
-    check((int)$core->query('SELECT COUNT(*) FROM qqm_schema_migrations WHERE version=2')->fetchColumn() === 1, 'Migration is idempotent');
+    // Fresh installs have no telemetry tables. Legacy history is never dropped or pruned.
+    check((int)$core->query("SELECT count(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME IN ('qqm_installations','qqm_daily_usage')")->fetchColumn() === 0, 'Fresh install does not collect devices');
     $tables = $core->query("SELECT ENGINE,TABLE_COLLATION FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME LIKE 'qqm_%'")->fetchAll();
-    check(count($tables) === 5, 'Five application tables');
+    check(count($tables) === 3, 'Three non-telemetry application tables');
     foreach ($tables as $table) { check($table['ENGINE'] === 'InnoDB' && $table['TABLE_COLLATION'] === 'utf8mb4_unicode_ci', 'InnoDB utf8mb4'); }
+    $core->db->exec("CREATE TABLE qqm_installations (id INT PRIMARY KEY, legacy_data VARCHAR(64)) ENGINE=InnoDB");
+    $core->db->exec("CREATE TABLE qqm_daily_usage (id INT PRIMARY KEY, legacy_data VARCHAR(64)) ENGINE=InnoDB");
+    foreach (['qqm_installations','qqm_daily_usage'] as $table) { $core->query("INSERT INTO $table VALUES (1, ?)", ['history-must-remain']); }
+    $core->initializeSchema(); $core->prune();
+    foreach (['qqm_installations','qqm_daily_usage'] as $table) { check($core->query("SELECT legacy_data FROM $table WHERE id=1")->fetchColumn() === 'history-must-remain', 'Legacy history retained'); }
     rejects(fn() => new Core(dirname(__DIR__), $path, ['database' => array_replace($database, ['name' => 'unsafe;dbname=another'])]));
     rejects(fn() => new Core(dirname(__DIR__), $path, ['database' => array_replace($database, ['port' => 0])]));
     rejects(fn() => new Core(dirname(__DIR__), $path, ['database' => null]));

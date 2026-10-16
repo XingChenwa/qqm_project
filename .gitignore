@@ -39,6 +39,7 @@ migrate_working_dir/
 *.pfx
 *.mobileprovision
 *.p8
+*.ed25519.key
 *.jks
 *.keystore
 /android/key.properties

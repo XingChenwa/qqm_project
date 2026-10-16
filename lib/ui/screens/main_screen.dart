@@ -5,8 +5,7 @@ import 'package:provider/provider.dart';
 
 import '../../core/bot_client.dart';
 import '../../core/plugin_manager.dart';
-import '../../core/message_handler.dart';
-import '../../services/storage_service.dart';
+import '../../models/outgoing_message.dart';
 import '../../models/message.dart';
 import '../../models/plugin.dart';
 import '../../utils/helpers.dart';
@@ -128,11 +127,10 @@ class _MainScreenState extends State<MainScreen> {
     _selectedSession = client.sessions.first;
   }
 
-  Future<void> _processWithPlugins(MessageModel message) async {
-    if (!context.read<BotClient>().shouldAutoRespondTo(message)) return;
-    final weatherOnly =
-        message.isFullGroupMessage &&
-        !context.read<BotClient>().config.autoReplyToAllGroupMessages;
+  Future<bool> _processWithPlugins(MessageModel message) async {
+    if (!mounted || !context.read<BotClient>().shouldAutoRespondTo(message)) {
+      return false;
+    }
     final rawContent =
         message.extra?['rawContent']?.toString() ?? message.content;
     final content = message.extra?['eventType'] == 'GROUP_AT_MESSAGE_CREATE'
@@ -147,35 +145,102 @@ class _MainScreenState extends State<MainScreen> {
       messageType: message.messageType,
       isGroup: message.extra?['isGroup'] == true,
       timestamp: message.timestamp,
+      // Do not elevate a command using an older cached profile role.
+      senderRole: message.receivedBody.authorRole.isNotEmpty
+          ? message.receivedBody.authorRole
+          : message.extra?['senderRole']?.toString() ?? '',
+      isFullGroupMessage: message.isFullGroupMessage,
+      eventType: message.extra?['pluginEventId'] != null
+          ? 'interaction'
+          : 'message',
+      callbackData: message.extra?['callbackData']?.toString() ?? '',
+      attachments: [
+        for (final a in message.receivedBody.attachments)
+          {
+            'url': a.url,
+            'filename': a.filename,
+            'content_type': a.contentType,
+            'width': a.width,
+            'height': a.height,
+            'size': a.size,
+          },
+      ],
     );
 
     final responses = await context.read<PluginManager>().processMessage(
       pluginMessage,
-      onlyPluginId: weatherOnly ? 'weather_plugin' : null,
     );
-    if (!mounted) return;
+    if (!mounted) return false;
 
     final bot = context.read<BotClient>();
     for (final response in responses) {
-      final sent = await _sendPluginResponse(bot, message, response.content);
+      final sent = await _sendPluginResponse(
+        bot,
+        message,
+        response.content,
+        reply: response.reply,
+        pluginId: response.pluginId,
+      );
       bot.onLog?.call(
         '[${_clockText(DateTime.now())}] 插件 ${response.pluginName} ${sent ? '回复已发送到 QQ' : '回复发送失败: ${bot.lastSendError}'}',
       );
     }
-    if (responses.isEmpty && mounted && !weatherOnly) {
-      final reply = MessageHandler(
-        context.read<StorageService>(),
-      ).processMessage(message.copyWith(content: content));
-      if (reply != null) await _sendPluginResponse(bot, message, reply);
-    }
+    return responses.isNotEmpty;
   }
 
   Future<bool> _sendPluginResponse(
     BotClient bot,
     MessageModel source,
-    String content,
-  ) {
+    String content, {
+    PluginReply? reply,
+    String pluginId = '',
+  }) {
     final isGroup = source.extra?['isGroup'] == true;
+    if (reply != null && reply.format != 'auto') {
+      for (final button in reply.buttons.expand((row) => row)) {
+        if (button.callback && !button.data.startsWith('qqm:$pluginId:')) {
+          bot.onLog?.call('插件按钮回调必须使用所属插件的命名空间。');
+          return Future.value(false);
+        }
+      }
+      final eventId = source.extra?['pluginEventId']?.toString() ?? '';
+      return bot.sendConfiguredMessage(
+        source.sessionId,
+        OutgoingMessage(
+          type: reply.format == 'media'
+              ? 7
+              : reply.format == 'markdown'
+              ? 2
+              : 0,
+          content: reply.content,
+          mediaSource: reply.mediaUrl,
+          mediaFileType: reply.mediaType,
+          options: MessageSendOptions(
+            replyMode: eventId.isEmpty ? ReplyMode.automatic : ReplyMode.event,
+            eventId: eventId,
+            quoteSelectedMessage: false,
+            keyboard: reply.buttons.isEmpty
+                ? null
+                : MessageKeyboard(
+                    rows: [
+                      for (var i = 0; i < reply.buttons.length; i++)
+                        [
+                          for (var j = 0; j < reply.buttons[i].length; j++)
+                            MessageButton(
+                              id: 'plugin_${i}_$j',
+                              label: reply.buttons[i][j].label,
+                              data: reply.buttons[i][j].data,
+                              actionType: reply.buttons[i][j].callback ? 1 : 2,
+                            ),
+                        ],
+                    ],
+                  ),
+          ),
+        ),
+        isGroup: isGroup,
+        replyTo: source,
+      );
+    }
     return containsMarkdown(content)
         ? bot.sendMarkdownMessage(
             source.sessionId,
@@ -1509,7 +1574,10 @@ class _MainScreenState extends State<MainScreen> {
         replyTo: _replyToMessage,
       ),
       onSlashCommand: (command, args) async {
-        final result = await context.read<PluginManager>().processCommand(
+        final replyAtStart = _replyToMessage;
+        final botAtStart = context.read<BotClient>();
+        final appIdAtStart = botAtStart.config.appId;
+        final result = await context.read<PluginManager>().processCommandReply(
           command,
           args,
           PluginMessage(
@@ -1517,30 +1585,36 @@ class _MainScreenState extends State<MainScreen> {
             sessionId: session.id,
             senderId: '',
             senderName: '操作员',
+            senderRole: 'operator',
             content: '',
             messageType: 0,
             isGroup: session.sessionType == 1,
             timestamp: DateTime.now(),
           ),
         );
-        if (!mounted) return false;
+        if (!mounted || botAtStart.config.appId != appIdAtStart) return false;
         if (result == null) {
           throw const FormatException('未找到可用命令，请检查插件是否启用');
         }
-        final bot = context.read<BotClient>();
-        return containsMarkdown(result)
-            ? bot.sendMarkdownMessage(
-                session.id,
-                result,
-                isGroup: session.sessionType == 1,
-                replyTo: _replyToMessage,
-              )
-            : bot.sendTextMessage(
-                session.id,
-                result,
-                isGroup: session.sessionType == 1,
-                replyTo: _replyToMessage,
-              );
+        final source =
+            (replyAtStart?.sessionId == session.id ? replyAtStart : null) ??
+            MessageModel(
+              id: '',
+              sessionId: session.id,
+              senderId: '',
+              senderName: '操作员',
+              content: '',
+              messageType: 0,
+              timestamp: DateTime.now(),
+              extra: {'isGroup': session.sessionType == 1},
+            );
+        return _sendPluginResponse(
+          botAtStart,
+          source,
+          result.content,
+          reply: result.reply,
+          pluginId: result.pluginId,
+        );
       },
     );
   }

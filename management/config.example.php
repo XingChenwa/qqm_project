@@ -27,7 +27,5 @@ return [
     'proxy_trust_mode' => 'cidr_and_token',
     'trusted_proxy_cidrs' => [], // 严格模式填当前实际回源网段；免费版模式可留空，禁止填 /0。
     'client_ip_header' => 'EO-Connecting-IP',
-    'ip_retention_days' => 7,
-    'device_retention_days' => 90,
     'max_upload_bytes' => 1073741824,
 ];

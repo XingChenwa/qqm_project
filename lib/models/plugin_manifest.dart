@@ -2,7 +2,6 @@ import 'dart:convert';
 
 import 'package:yaml/yaml.dart';
 
-import '../utils/helpers.dart';
 import 'plugin.dart';
 
 class PluginManifestException implements Exception {
@@ -49,6 +48,9 @@ class PluginTrigger {
     final actual = caseSensitive ? text : text.toLowerCase();
     final expected = caseSensitive ? value : value.toLowerCase();
     return switch (type) {
+      'callback' =>
+        message.eventType == 'interaction' &&
+            message.callbackData.split(':').skip(2).firstOrNull == value,
       'command' => parseSlashCommand(text)?.command == value.toLowerCase(),
       'exact' => actual == expected,
       'prefix' => actual.startsWith(expected),
@@ -68,10 +70,17 @@ class PluginTrigger {
 class PluginRule {
   final PluginTrigger trigger;
   final String reply;
-  const PluginRule(this.trigger, this.reply);
+  final PluginReply? message;
+  final String permission;
+  const PluginRule(
+    this.trigger,
+    this.reply, {
+    this.message,
+    this.permission = 'all',
+  });
 }
 
-/// v1 清单是数据，不 eval、不启动进程，也不把导入的 Dart 当脚本执行。
+/// v1/v2 清单是数据，不 eval、不启动进程，也不把导入的 Dart 当脚本执行。
 class PluginManifest {
   static const maxBytes = 256 * 1024;
   final Map<String, dynamic> data;
@@ -154,16 +163,33 @@ class PluginManifest {
       'config_schema',
       'rules',
       'http',
+      'listen_all',
+      'priority',
+      'cooldown_ms',
+      'media_hosts',
     };
     if (data.keys.any((key) => !knownFields.contains(key))) {
-      invalid('清单包含未知字段，请对照 v1 协议检查拼写。');
+      invalid('清单包含未知字段，请对照 v2 协议检查拼写。');
     }
     if (data[r'$schema'] != null &&
         (data[r'$schema'] is! String ||
             (data[r'$schema'] as String).length > 512)) {
       invalid(r'$schema 必须是有效文本。');
     }
-    if (data['schema_version'] != 1) invalid('不支持的 schema_version，请使用 1。');
+    if (![1, 2].contains(data['schema_version'])) {
+      invalid('不支持的 schema_version，请使用 1 或 2。');
+    }
+    if (data['listen_all'] != null && data['listen_all'] is! bool ||
+        data['priority'] != null &&
+            (data['priority'] is! int ||
+                data['priority'] < 0 ||
+                data['priority'] > 1000) ||
+        data['cooldown_ms'] != null &&
+            (data['cooldown_ms'] is! int ||
+                data['cooldown_ms'] < 0 ||
+                data['cooldown_ms'] > 60000)) {
+      invalid('监听选项、优先级或冷却时间无效。');
+    }
     if (data['id'] is! String ||
         !RegExp(r'^[a-z][a-z0-9_]{2,63}$').hasMatch(data['id'])) {
       invalid('插件 ID 需为 3–64 位小写字母、数字和下划线，且以字母开头。');
@@ -199,6 +225,9 @@ class PluginManifest {
     final allowed = {
       'message:read',
       'message:send',
+      'message:media',
+      'interaction:read',
+      'events:group-all',
       if (runtime == 'http') 'network:http',
       if (allowBuiltin && runtime == 'builtin') ...[
         'network:amap',
@@ -211,6 +240,23 @@ class PluginManifest {
     }
     if (runtime == 'http' && !permissions.contains('network:http')) {
       invalid('HTTP 插件必须声明 network:http。');
+    }
+    if (data['listen_all'] == true &&
+        !permissions.contains('events:group-all')) {
+      invalid('监听未 @ 的普通聊天需要 events:group-all 权限。');
+    }
+    final mediaHosts = data['media_hosts'] ?? [];
+    if (mediaHosts is! List ||
+        mediaHosts.length > 8 ||
+        mediaHosts.any(
+          (host) =>
+              host is! String ||
+              !RegExp(r'^[a-zA-Z0-9][a-zA-Z0-9.-]{1,252}$').hasMatch(host) ||
+              host.toLowerCase() == 'localhost' ||
+              host.contains('..') ||
+              RegExp(r'^\d+\.\d+\.\d+\.\d+$').hasMatch(host),
+        )) {
+      invalid('media_hosts 最多声明 8 个媒体域名，不能使用 IP 或本机地址。');
     }
     final rawFields = data['config_schema'] ?? [];
     if (rawFields is! List || rawFields.length > 32) invalid('配置项最多为 32 个。');
@@ -276,7 +322,9 @@ class PluginManifest {
         invalid('每条规则需要 match。');
       }
       final match = raw['match'] as Map<String, dynamic>;
-      if (raw.keys.any((key) => !['match', 'reply'].contains(key)) ||
+      if (raw.keys.any(
+            (key) => !['match', 'reply', 'message', 'permission'].contains(key),
+          ) ||
           match.keys.any(
             (key) =>
                 !['type', 'value', 'scope', 'case_sensitive'].contains(key),
@@ -285,13 +333,19 @@ class PluginManifest {
       }
       final type = match['type'];
       final value = match['value'];
-      if (!['command', 'exact', 'prefix', 'contains'].contains(type) ||
+      if (![
+            'command',
+            'exact',
+            'prefix',
+            'contains',
+            'callback',
+          ].contains(type) ||
           value is! String ||
           value.trim().isEmpty ||
           value.length > 256) {
         invalid('规则匹配类型或文本无效。');
       }
-      if (type == 'command' && RegExp(r'[\s/]').hasMatch(value)) {
+      if (type == 'command' && RegExp(r'[\s/#]').hasMatch(value)) {
         invalid('command 名称不要带 / 或空格。');
       }
       final scope = match['scope'] ?? 'all';
@@ -301,16 +355,42 @@ class PluginManifest {
       if (match['case_sensitive'] != null && match['case_sensitive'] is! bool) {
         invalid('case_sensitive 必须是布尔值。');
       }
+      if (raw.containsKey('reply') && raw.containsKey('message')) {
+        invalid('reply 与 message 不能同时填写。');
+      }
+      final permission = raw['permission'] ?? 'all';
+      if (!['all', 'admin', 'owner'].contains(permission)) {
+        invalid('规则权限只能为 all、admin、owner。');
+      }
+      if (type == 'callback' && !permissions.contains('interaction:read')) {
+        invalid('回调规则需要 interaction:read。');
+      }
+      PluginReply? structured;
+      if (raw['message'] != null) {
+        if (raw['message'] is! Map<String, dynamic>) invalid('message 必须为对象。');
+        try {
+          structured = PluginReply.fromMap(raw['message']);
+        } on FormatException catch (error) {
+          invalid(error.message);
+        }
+        if (structured.format == 'media' &&
+            (!permissions.contains('message:media') ||
+                !mediaHosts.contains(Uri.parse(structured.mediaUrl).host))) {
+          invalid('媒体消息需要 message:media 权限与匹配的 media_hosts 域名。');
+        }
+      }
       final reply = raw['reply'] ?? '';
       if (reply is! String ||
           reply.length > 16000 ||
-          runtime == 'rules' && reply.trim().isEmpty) {
+          runtime == 'rules' && reply.trim().isEmpty && structured == null) {
         invalid('规则插件的 reply 必须为 1–16000 字符文本。');
       }
       rules.add(
         PluginRule(
           PluginTrigger(type, value, scope, match['case_sensitive'] == true),
           reply,
+          message: structured,
+          permission: permission,
         ),
       );
     }

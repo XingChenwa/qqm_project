@@ -104,7 +104,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(bot.config.autoReplyToAllGroupMessages, isFalse);
     gateway.events.add(fullEvent('ordinary', '你好'));
-    gateway.events.add(fullEvent('help', '/help'));
+    gateway.events.add(fullEvent('help', '帮助我看看天气怎么样'));
     await tester.pumpAndSettle();
     expect(api.calls, isEmpty);
     // “hello”也会命中基础助手，窄范围路由必须确保只处理天气插件。
@@ -207,7 +207,9 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      for (final label in ['常规', '连接', '自动回复', '数据', '数据清理', '关于']) {
+      expect(find.text('自动回复'), findsNothing);
+      expect(find.text('关键词回复'), findsNothing);
+      for (final label in ['常规', '连接', '数据', '数据清理', '关于']) {
         await tester.ensureVisible(find.text(label));
         await tester.tap(find.text(label));
         await tester.pumpAndSettle();

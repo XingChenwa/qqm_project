@@ -14,10 +14,10 @@
 
 ## 没有 Mac：用 Windows 操作 GitHub 云端构建
 
-仓库内已提供 `.github/workflows/mobile-build.yml`，**只允许手动触发**，不会在每次推送时自动花费运行额度。没有添加上传到 App Store 或发布 Release 的步骤，也不会把机器人密钥、高德 Key 或安卓私钥打进源码。安卓私钥只放在 GitHub Actions 密钥中。运行可能消耗 GitHub Actions 额度，按你账号的权限与计费规则执行。
+仓库提供 `.github/workflows/mobile-build.yml`：手动运行只构建测试包；发布正式 Release 则自动构建四端、上传安装包及签名清单，并部署 GitHub Pages。不会上传 App Store，也不会把机器人密钥、高德 Key、安卓私钥或更新私钥打进源码。云端运行可能消耗 Actions 额度。首次配置见 [GitHub 发布指南](github-release.md)。
 
 1. 将本次源码改动提交并推送到自己的 GitHub 仓库，确保工作流已在默认分支。
-2. 在仓库的 **Actions → 移动端与 macOS 安装包 → Run workflow** 中选择 `all`、`android`、`ios` 或 `macos`。
+2. 在仓库的 **Actions → 客户端安装包 → Run workflow** 中选择 `all`、`android`、`ios` 或 `macos`。
 3. 等待对应任务成功。在运行页面下方的 **Artifacts** 下载产物 ZIP，并解压：
    - `android-release-apk`：里面是 `app-release.apk`。云端每次使用同一把上传证书。以前用 debug 证书安装的版本签名不同，不能直接覆盖，需先导出配置再卸载旧版。
    - `ios-unsigned-ipa`：里面是 `qq_bot_manager-unsigned.ipa`。云端先实际编译 iPhone 真机 arm64 应用，再打包为 IPA；不是模拟器包，也不是直接把源码改后缀。
@@ -34,9 +34,9 @@ GitHub 返回的外层 ZIP 是下载容器，不是安装包。一定要先解�
 
 ## 版本更新服务
 
-`1.3.0+11` 开始提供更新服务。`1.3.1+12` 每次启动发现更高构建号都会弹出提醒，“稍后”只影响本次运行；没有新版时不反复弹窗。移动工作流默认内置已核对的服务器公开更新公钥，可用仓库变量 `UPDATE_PUBLIC_KEY` 覆盖；客户端不会从网站下载新公钥自行信任。未内置公钥的其他构建仍安全关闭更新和统计。
+`1.3.0+11` 开始提供更新服务。`1.3.1+12` 每次启动发现更高构建号都会弹出提醒，“稍后”只影响本次运行；没有新版时不反复弹窗。移动工作流默认内置已核对的服务器公开更新公钥，可用仓库变量 `UPDATE_PUBLIC_KEY` 覆盖；客户端不会从网站下载新公钥自行信任。未内置公钥的其他构建安全关闭自动更新。
 
-本版首次安装默认开启使用统计，首次弹窗说明后开始登记；以前明确关闭的用户保持关闭。上报随机安装 ID、设备名称／型号、系统版本、架构、软件版本，服务器记录来源 IP 和心跳。Android 读取公开型号信息，不读取序列号、Android ID 或账号；iOS 使用系统允许的设备名称，可能只得到通用“iPhone/iPad”，不申请额外识别权限。可在“设置 → 更新 → 隐私与使用统计”关闭并请求删除，关闭不影响聊天和更新。完整步骤、保留期限、Android 固定签名及 iOS 导出限制见 [更新和 EdgeOne 配置](update-and-edgeone.md)。管理员 OAuth Secret 和更新签名私钥不能打进安装包。
+设备统计已整套移除，客户端不再读取设备名称/型号，也不发送统计注册或心跳。更新默认读取 GitHub Pages 的签名静态清单，安装包来自 GitHub Releases；旧版需要手动安装一次迁移版。设置与限制见 [GitHub 发布指南](github-release.md)。更新签名私钥只存 Actions Secret，不能打入安装包。
 
 ## 全能签安装
 

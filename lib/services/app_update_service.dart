@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:ffi' show Abi;
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -29,7 +28,7 @@ enum UpdatePhase {
 class AppUpdateService extends ChangeNotifier {
   static const defaultServer = String.fromEnvironment(
     'UPDATE_BASE_URL',
-    defaultValue: 'https://botmanager.uuze.cn',
+    defaultValue: 'https://xingchenwa.github.io/qqm_project',
   );
   static const defaultKey = String.fromEnvironment('UPDATE_PUBLIC_KEY');
   static const _native = MethodChannel('cn.uuze.botmanager/updates');
@@ -40,14 +39,12 @@ class AppUpdateService extends ChangeNotifier {
   final int currentBuild;
   final String currentVersion;
   final Future<Directory> Function() _supportDirectory;
-  final Future<Map<String, String>> Function() _deviceInfoProvider;
-  Future<Map<String, String>>? _deviceInfo;
-  Timer? _updateTimer, _usageTimer;
+  Timer? _updateTimer;
   CancelToken? _downloadCancel;
-  bool _disposed = false, _started = false, _usageBusy = false;
+  bool _disposed = false, _started = false;
   AppRelease? release;
   UpdatePhase phase = UpdatePhase.idle;
-  String error = '', usageStatus = '';
+  String error = '';
   double progress = 0;
   File? downloadedFile;
   int dismissedBuild = 0;
@@ -62,7 +59,6 @@ class AppUpdateService extends ChangeNotifier {
     this.currentBuild = AppConstants.appBuild,
     this.currentVersion = AppConstants.appVersion,
     Future<Directory> Function()? supportDirectory,
-    Future<Map<String, String>> Function()? deviceInfoProvider,
   }) : _http =
            http ??
            Dio(
@@ -91,21 +87,29 @@ class AppUpdateService extends ChangeNotifier {
                : Platform.isIOS
                ? 'arm64'
                : 'universal'),
-       _supportDirectory = supportDirectory ?? getApplicationSupportDirectory,
-       _deviceInfoProvider = deviceInfoProvider ?? _readDeviceInfo;
+       _supportDirectory = supportDirectory ?? getApplicationSupportDirectory;
 
   bool get configured {
     try {
       return server.scheme == 'https' &&
           server.host.isNotEmpty &&
           server.userInfo.isEmpty &&
-          server.path.replaceAll('/', '').isEmpty &&
+          (usesGitHubPages || server.path.replaceAll('/', '').isEmpty) &&
+          !server.hasQuery &&
+          !server.hasFragment &&
           base64Decode(publicKey).length == 32 &&
           platform != 'unsupported';
     } catch (_) {
       return false;
     }
   }
+
+  bool get usesGitHubPages =>
+      server.scheme == 'https' &&
+      server.host == 'xingchenwa.github.io' &&
+      server.port == 443 &&
+      server.userInfo.isEmpty &&
+      {'/qqm_project', '/qqm_project/'}.contains(server.path);
 
   bool get busy => {
     UpdatePhase.checking,
@@ -122,14 +126,9 @@ class AppUpdateService extends ChangeNotifier {
     _started = true;
     if (!configured) return;
     unawaited(check());
-    unawaited(sendHeartbeat());
     _updateTimer = Timer.periodic(
       const Duration(minutes: 5),
       (_) => unawaited(check()),
-    );
-    _usageTimer = Timer.periodic(
-      const Duration(minutes: 1),
-      (_) => unawaited(sendHeartbeat()),
     );
   }
 
@@ -138,19 +137,13 @@ class AppUpdateService extends ChangeNotifier {
 
   Future<Map<String, dynamic>> _json(
     String path, {
-    String method = 'GET',
     Map<String, String>? query,
-    Map<String, dynamic>? data,
-    String? token,
   }) async {
-    final response = await _http.requestUri<ResponseBody>(
+    final response = await _http.getUri<ResponseBody>(
       _url(path, query),
-      data: data,
       options: Options(
-        method: method,
         responseType: ResponseType.stream,
         followRedirects: false,
-        headers: token == null ? {} : {'Authorization': 'Bearer $token'},
         receiveTimeout: const Duration(seconds: 10),
         validateStatus: (status) =>
             status != null && status >= 200 && status < 300,
@@ -178,18 +171,31 @@ class AppUpdateService extends ChangeNotifier {
     _changed();
     try {
       final nonce = const Uuid().v4();
-      final envelope = await _json(
-        '/api/v1/update',
-        query: {'platform': platform, 'arch': arch, 'nonce': nonce},
-      );
-      final found = await AppRelease.verifyEnvelope(
-        envelope,
-        publicKey: publicKey,
-        nonce: nonce,
-        platform: platform,
-        arch: arch,
-        server: server,
-      );
+      final envelope = usesGitHubPages
+          ? await _json('/qqm_project/updates/stable.json')
+          : await _json(
+              '/api/v1/update',
+              query: {'platform': platform, 'arch': arch, 'nonce': nonce},
+            );
+      final found = usesGitHubPages
+          ? await AppRelease.verifyGitHubEnvelope(
+              envelope,
+              publicKey: publicKey,
+              platform: platform,
+              arch: arch,
+              minimumBuild: preferences.highestGitHubBuild,
+            )
+          : await AppRelease.verifyEnvelope(
+              envelope,
+              publicKey: publicKey,
+              nonce: nonce,
+              platform: platform,
+              arch: arch,
+              server: server,
+            );
+      if (usesGitHubPages && found != null) {
+        await preferences.rememberGitHubBuild(found.build);
+      }
       if (_disposed) return;
       if (found == null || found.build <= currentBuild) {
         release = null;
@@ -218,7 +224,7 @@ class AppUpdateService extends ChangeNotifier {
           : UpdatePhase.failed;
       error = exception is FormatException
           ? exception.message
-          : '检查更新失败，请检查网站部署、网络和系统时间后重试';
+          : '检查更新失败，请检查网络、版本发布状态和系统时间后重试';
       _changed();
     }
   }
@@ -271,32 +277,33 @@ class AppUpdateService extends ChangeNotifier {
       final target = await _target(selected);
       if (!await validFile(target, selected)) {
         part = File('${target.path}.part');
-        await _http
-            .downloadUri(
-              selected.url,
-              part.path,
-              cancelToken: cancel,
-              options: Options(
-                followRedirects: false,
-                receiveTimeout: const Duration(seconds: 30),
-                validateStatus: (status) => status == 200,
-              ),
-              onReceiveProgress: (received, _) {
-                if (received > selected.size) {
-                  cancel.cancel('size limit');
-                  return;
-                }
-                progress = received / selected.size;
-                _changed();
-              },
-            )
-            .timeout(
-              const Duration(minutes: 15),
-              onTimeout: () {
-                cancel.cancel('timeout');
-                throw TimeoutException('下载超时');
-              },
-            );
+        final transfer = usesGitHubPages
+            ? _downloadGitHub(selected, part, cancel)
+            : _http.downloadUri(
+                selected.url,
+                part.path,
+                cancelToken: cancel,
+                options: Options(
+                  followRedirects: false,
+                  receiveTimeout: const Duration(seconds: 30),
+                  validateStatus: (status) => status == 200,
+                ),
+                onReceiveProgress: (received, _) {
+                  if (received > selected.size) {
+                    cancel.cancel('size limit');
+                    return;
+                  }
+                  progress = received / selected.size;
+                  _changed();
+                },
+              );
+        await transfer.timeout(
+          const Duration(minutes: 15),
+          onTimeout: () {
+            cancel.cancel('timeout');
+            throw TimeoutException('下载超时');
+          },
+        );
         if (!await validFile(part, selected)) {
           throw const FormatException('安装包大小或 SHA-256 校验失败，已阻止安装');
         }
@@ -327,6 +334,72 @@ class AppUpdateService extends ChangeNotifier {
         _downloadCancel = null;
       }
     }
+  }
+
+  Future<void> _downloadGitHub(
+    AppRelease selected,
+    File part,
+    CancelToken cancel,
+  ) async {
+    var url = selected.url;
+    if (!AppRelease.isGitHubAsset(url, tag: 'v${selected.version}')) {
+      throw const FormatException('安装包不是受信任的 GitHub Release 资源');
+    }
+    for (var hop = 0; hop < 6; hop++) {
+      final response = await _http.getUri<ResponseBody>(
+        url,
+        cancelToken: cancel,
+        options: Options(
+          responseType: ResponseType.stream,
+          followRedirects: false,
+          receiveTimeout: const Duration(seconds: 30),
+          validateStatus: (status) =>
+              status == 200 || {301, 302, 303, 307, 308}.contains(status),
+        ),
+      );
+      final body = response.data;
+      if (body == null) throw const FormatException('安装包响应为空');
+      if (response.statusCode != 200) {
+        await body.stream.listen((_) {}).cancel();
+        final location = response.headers.value('location');
+        if (location == null) throw const FormatException('安装包跳转无效');
+        final next = url.resolve(location);
+        final allowed =
+            AppRelease.isGitHubAsset(next, tag: 'v${selected.version}') ||
+            (next.scheme == 'https' &&
+                next.port == 443 &&
+                next.userInfo.isEmpty &&
+                !next.hasFragment &&
+                {
+                  'release-assets.githubusercontent.com',
+                  'objects.githubusercontent.com',
+                }.contains(next.host));
+        if (!allowed) throw const FormatException('安装包跳转到不受信任的地址，已阻止下载');
+        url = next;
+        continue;
+      }
+      final sink = part.openWrite();
+      var received = 0;
+      try {
+        await for (final chunk in body.stream.timeout(
+          const Duration(seconds: 30),
+        )) {
+          if (cancel.isCancelled) throw const FormatException('安装包下载已取消');
+          received += chunk.length;
+          if (received > selected.size) {
+            throw const FormatException('安装包超过清单大小');
+          }
+          sink.add(chunk);
+          await sink.flush();
+          progress = received / selected.size;
+          _changed();
+        }
+      } finally {
+        await sink.close();
+      }
+      return;
+    }
+    throw const FormatException('安装包跳转次数过多');
   }
 
   Future<void> install({Future<void> Function()? exitForUpdate}) async {
@@ -469,162 +542,10 @@ class AppUpdateService extends ChangeNotifier {
     }
   }
 
-  static const deviceFieldLimits = {
-    'device_name': 128,
-    'device_model': 128,
-    'system_version': 255,
-    'system_arch': 64,
-  };
-
-  static Future<Map<String, String>> _readDeviceInfo() async {
-    final result = <String, String>{
-      'system_version': Platform.operatingSystemVersion,
-      'system_arch': Abi.current().toString(),
-    };
-    if (Platform.isAndroid || Platform.isIOS) {
-      try {
-        final mobile = await _native.invokeMapMethod<String, String>(
-          'deviceInfo',
-        );
-        if (mobile != null) result.addAll(mobile);
-      } on PlatformException {
-        // Basic statistics still work when a platform cannot supply a name.
-      } on MissingPluginException {
-        // Older native shells do not implement deviceInfo.
-      }
-    } else {
-      try {
-        result['device_name'] = Platform.localHostname;
-      } on OSError {
-        // Do not request elevated permissions just to obtain a computer name.
-      }
-    }
-    return result;
-  }
-
-  Future<Map<String, String>> _safeDeviceInfo() async {
-    try {
-      final supplied = await _deviceInfoProvider();
-      return {
-        for (final entry in deviceFieldLimits.entries)
-          if (supplied[entry.key] case final String value)
-            entry.key: String.fromCharCodes(
-              value
-                  .replaceAll(RegExp(r'[\x00-\x1f\x7f-\x9f]'), '')
-                  .trim()
-                  .runes
-                  .take(entry.value),
-            ),
-      };
-    } catch (_) {
-      return {};
-    }
-  }
-
-  Future<Map<String, dynamic>> _usageFields() async => {
-    'platform': platform,
-    'version': currentVersion,
-    'build': currentBuild,
-    ...await (_deviceInfo ??= _safeDeviceInfo()),
-  };
-
-  Future<void> setUsageConsent(bool value) async {
-    // Persist opt-out before any network work; an in-flight heartbeat cannot re-enable it.
-    await preferences.setUsageConsent(value);
-    if (!value) {
-      final token = preferences.token;
-      if (token.isNotEmpty) await preferences.setPendingDeletion(token);
-      await preferences.clearInstallation();
-    }
-    _changed();
-    await sendHeartbeat();
-  }
-
-  Future<void> sendHeartbeat() async {
-    if (!configured || _disposed || _usageBusy) return;
-    _usageBusy = true;
-    var attemptedDeletion = false;
-    try {
-      if (preferences.pendingDeletion.isNotEmpty) {
-        attemptedDeletion = true;
-        try {
-          await _json(
-            '/api/v1/telemetry/installation',
-            method: 'DELETE',
-            token: preferences.pendingDeletion,
-          );
-        } on DioException catch (error) {
-          if (error.response?.statusCode != 401) rethrow;
-        }
-        await preferences.setPendingDeletion('');
-      }
-      if (preferences.usageConsent != true) {
-        usageStatus = '使用统计未开启';
-        return;
-      }
-      final fields = await _usageFields();
-      // Opt-out may happen while the native device-info call is in flight.
-      if (!preferences.usageConsent || _disposed) return;
-      if (preferences.token.isEmpty) {
-        final id = const Uuid().v4();
-        final result = await _json(
-          '/api/v1/telemetry/register',
-          method: 'POST',
-          data: {...fields, 'installation_id': id, 'consent_version': '2'},
-        );
-        final token = result['token'];
-        if (token is! String || !RegExp(r'^[a-f0-9]{64}$').hasMatch(token)) {
-          throw const FormatException('统计令牌格式无效');
-        }
-        if (preferences.usageConsent != true || _disposed) {
-          await preferences.setPendingDeletion(token);
-          return;
-        }
-        await preferences.setInstallation(id, token);
-        if (!preferences.usageConsent || _disposed) {
-          await preferences.setPendingDeletion(token);
-          await preferences.clearInstallation();
-          return;
-        }
-      }
-      if (preferences.usageConsent == true) {
-        await _json(
-          '/api/v1/telemetry/heartbeat',
-          method: 'POST',
-          data: fields,
-          token: preferences.token,
-        );
-        usageStatus = preferences.usageConsent == true
-            ? '已上报设备名称／型号、系统与软件版本'
-            : '已停止上报，正在删除旧统计';
-      }
-    } on DioException catch (exception) {
-      if (exception.response?.statusCode == 401 &&
-          preferences.usageConsent == true) {
-        await preferences.clearInstallation();
-      }
-      usageStatus = preferences.usageConsent == true
-          ? '统计暂不可用，不影响聊天与更新'
-          : '已停止上报；删除请求将在网络恢复后重试';
-    } catch (_) {
-      usageStatus = '统计暂不可用，不影响聊天与更新';
-    } finally {
-      _usageBusy = false;
-      _changed();
-      if (!_disposed &&
-          !attemptedDeletion &&
-          preferences.usageConsent != true &&
-          preferences.pendingDeletion.isNotEmpty) {
-        unawaited(sendHeartbeat());
-      }
-    }
-  }
-
   @override
   void dispose() {
     _disposed = true;
     _updateTimer?.cancel();
-    _usageTimer?.cancel();
     _downloadCancel?.cancel('disposed');
     _http.close(force: true);
     super.dispose();

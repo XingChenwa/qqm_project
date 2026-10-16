@@ -1,11 +1,17 @@
+import 'dart:convert';
 import 'dart:io';
 
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../core/plugin_manager.dart';
+import '../../core/plugins/manifest_plugin.dart';
+import '../../models/plugin.dart';
 import '../../models/plugin_manifest.dart';
 import '../../services/plugin_workspace.dart';
 import 'app_dialogs.dart';
+import 'plugin_import_dialog.dart';
 
 class PluginWorkshop extends StatefulWidget {
   final PluginManager manager;
@@ -17,403 +23,719 @@ class PluginWorkshop extends StatefulWidget {
     required this.root,
     this.initialId,
   });
-
   @override
   State<PluginWorkshop> createState() => _PluginWorkshopState();
 }
 
 class _PluginWorkshopState extends State<PluginWorkshop> {
   late final PluginWorkspace _workspace = PluginWorkspace(widget.root);
-  List<String> _projects = [];
-  List<String> _files = [];
-  String? _project;
-  String? _file;
   final _editor = TextEditingController();
-  final _id = TextEditingController();
-  final _name = TextEditingController();
-  final _description = TextEditingController(text: '用命令回复消息');
-  final _trigger = TextEditingController();
-  final _reply = TextEditingController();
-  String _matchType = 'command';
-  String _scope = 'all';
-  String? _error;
-  bool _busy = false;
+  List<String> _projects = [], _files = [], _folders = [];
+  String _folder = '';
+  String? _project, _file, _error;
+  String _saved = '';
+  bool _busy = true;
+  bool _showFiles = false;
+  int _revision = 0;
+  bool get _dirty => _file != null && _editor.text != _saved;
 
   @override
   void initState() {
     super.initState();
-    _reload(select: widget.initialId);
+    _editor.addListener(_changed);
+    _guard(() => _reload(select: widget.initialId));
+  }
+
+  void _changed() {
+    if (mounted) setState(() {});
   }
 
   @override
   void dispose() {
+    _revision++;
     _editor.dispose();
-    _id.dispose();
-    _name.dispose();
-    _description.dispose();
-    _trigger.dispose();
-    _reply.dispose();
     super.dispose();
   }
 
+  Future<void> _guard(Future<void> Function() action) async {
+    if (mounted) {
+      setState(() {
+        _busy = true;
+        _error = null;
+      });
+    }
+    try {
+      await action();
+    } catch (e) {
+      if (mounted) {
+        setState(
+          () => _error = e is PluginManifestException
+              ? e.message
+              : '文件操作失败，请检查权限、编码与磁盘空间。',
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<bool> _leave() async {
+    if (!_dirty) return true;
+    final choice = await showDialog<String>(
+      context: context,
+      builder: (dialog) => AlertDialog(
+        title: const Text('文件尚未保存'),
+        content: const Text('离开前如何处理当前草稿？'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialog, 'cancel'),
+            child: const Text('继续编辑'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(dialog, 'discard'),
+            child: const Text('放弃草稿'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialog, 'save'),
+            child: const Text('保存后继续'),
+          ),
+        ],
+      ),
+    );
+    if (choice == 'discard') return true;
+    return choice == 'save' && await _save();
+  }
+
   Future<void> _reload({String? select}) async {
-    await _workspace.ensureRoot();
     final projects = await _workspace.projects();
     if (!mounted) return;
     setState(() => _projects = projects);
-    final chosen = select != null && projects.contains(select)
-        ? select
-        : _project;
-    if (chosen != null) await _openProject(chosen);
+    if (projects.isEmpty) {
+      setState(() => _showFiles = true);
+    }
+    final chosen =
+        select ?? _project ?? (projects.isEmpty ? null : projects.first);
+    if (chosen != null && projects.contains(chosen)) await _loadProject(chosen);
   }
 
-  Future<void> _openProject(String id) async {
+  Future<void> _loadProject(String id, {String? select}) async {
+    final token = ++_revision;
     final files = await _workspace.files(id);
-    final name = files.contains('plugin.json')
+    final folders = await _workspace.folders(id);
+    final name = select != null && files.contains(select)
+        ? select
+        : files.contains('plugin.json')
         ? 'plugin.json'
-        : files.isEmpty
-        ? null
-        : files.first;
+        : files.firstOrNull;
     final content = name == null ? '' : await _workspace.read(id, name);
-    if (!mounted) return;
+    if (!mounted || token != _revision) return;
     setState(() {
+      if (_project != id || !folders.contains(_folder)) _folder = '';
       _project = id;
       _files = files;
+      _folders = folders;
       _file = name;
-      _editor.text = content;
-      _error = null;
-    });
-  }
-
-  Future<void> _openFile(String name) async {
-    final content = await _workspace.read(_project!, name);
-    if (!mounted) return;
-    setState(() {
-      _file = name;
+      _saved = content;
       _editor.text = content;
     });
   }
 
-  Future<void> _save() async {
-    final project = _project;
-    final file = _file;
-    if (project == null || file == null) return;
-    setState(() => _busy = true);
-    try {
-      await _workspace.write(project, file, _editor.text);
-      if (mounted) AppDialogs.show(context, '已保存 $file');
-    } on PluginManifestException catch (error) {
-      if (mounted) setState(() => _error = error.message);
-    } finally {
-      if (mounted) setState(() => _busy = false);
+  Future<void> _selectProject(String id) async {
+    if (_busy || id == _project || !await _leave()) return;
+    await _guard(() => _loadProject(id));
+  }
+
+  Future<void> _selectFile(String name) async {
+    if (_busy) return;
+    if (name == _file) {
+      setState(() => _showFiles = false);
+      return;
     }
+    if (!await _leave()) return;
+    await _guard(() async {
+      final token = ++_revision;
+      final project = _project!;
+      final content = await _workspace.read(project, name);
+      if (!mounted || token != _revision) return;
+      setState(() {
+        _file = name;
+        _saved = content;
+        _editor.text = content;
+        _showFiles = false;
+      });
+    });
+  }
+
+  Future<bool> _save() async {
+    final project = _project, file = _file;
+    if (project == null || file == null) return false;
+    final content = _editor.text;
+    var saved = false;
+    await _guard(() async {
+      await _workspace.write(project, file, content, expected: _saved);
+      if (mounted) setState(() => _saved = content);
+      saved = true;
+    });
+    return saved;
   }
 
   Future<void> _install() async {
-    final project = _project;
-    if (project == null) return;
-    await _save();
-    final manifestName = _files.contains('plugin.json')
-        ? 'plugin.json'
-        : _files.contains('plugin.yaml')
-        ? 'plugin.yaml'
-        : _file;
-    if (manifestName == null) return;
-    setState(() => _busy = true);
-    try {
-      final source = manifestName == _file
-          ? _editor.text
-          : await _workspace.read(project, manifestName);
-      await widget.manager.installPlugin(source, replaceExisting: true);
-      if (mounted) {
-        AppDialogs.show(context, '插件已安装并停用，确认规则后可启用。');
+    if (_dirty && !await _save()) return;
+    await _guard(() async {
+      final name = _files.contains('plugin.json')
+          ? 'plugin.json'
+          : _files.contains('plugin.yaml')
+          ? 'plugin.yaml'
+          : _files.contains('plugin.yml')
+          ? 'plugin.yml'
+          : null;
+      if (name == null) {
+        throw const PluginManifestException(
+          '项目根目录需要 plugin.json 或 plugin.yaml。',
+        );
       }
-    } on PluginManifestException catch (error) {
-      if (mounted) setState(() => _error = error.message);
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
+      final source = await _workspace.read(_project!, name);
+      PluginManifest.parse(
+        source,
+      ); // Builtin manifests cannot masquerade as editable scripts.
+      if (!mounted) return;
+      final installed = await showDialog<bool>(
+        context: context,
+        builder: (_) =>
+            PluginImportDialog(manager: widget.manager, initialSource: source),
+      );
+      if (mounted && installed == true) {
+        AppDialogs.show(context, '已安装并停用，请检查配置后手动启用。');
+      }
+    });
+  }
+
+  Future<String?> _ask(String title, String initial, String hint) async {
+    final result = await showDialog<String>(
+      context: context,
+      builder: (_) =>
+          _WorkspaceNameDialog(title: title, initial: initial, hint: hint),
+    );
+    return result == null || result.isEmpty ? null : result;
   }
 
   Future<void> _create() async {
-    setState(() => _busy = true);
-    try {
+    if (!await _leave() || !mounted) return;
+    final id = await _ask('新建插件项目', 'my_hello', '小写字母、数字、下划线，不能覆盖已有项目');
+    if (id == null) return;
+    await _guard(() async {
       final source = PluginWorkspace.rulesManifest(
-        id: _id.text.trim(),
-        name: _name.text.trim(),
-        description: _description.text.trim(),
+        id: id,
+        name: '我的命令插件',
+        description: '可以编辑规则、消息格式和权限',
         commands: [
           PluginCommandDraft(
-            type: _matchType,
-            value: _trigger.text,
-            reply: _reply.text,
-            scope: _scope,
+            value: 'hello',
+            reply: '你好，{{sender_name}}！\n你说的是：{{args}}',
           ),
         ],
       );
-      final id = _id.text.trim();
-      await _workspace.write(id, 'plugin.json', source);
+      await _workspace.createProject(id);
+      await _workspace.write(id, 'plugin.json', source, createOnly: true);
       await _workspace.write(
         id,
         'readme.md',
-        '# ${_name.text.trim()}\n\n在群聊中 @ 机器人后发送命令。命令插件与云崽的 rule 一样，一条触发对应一条回复。\n',
+        '# 我的命令插件\n\n发送 /hello 内容 或 #hello 内容。\n\nJSON/YAML 规则可以直接安装；JS/Python 文件仅编辑，不会在手机内执行。复杂逻辑使用 HTTP 服务插件；Dart 内置插件需要重新编译。\n',
+        createOnly: true,
       );
-      _id.clear();
-      _name.clear();
-      _trigger.clear();
-      _reply.clear();
       await _reload(select: id);
-    } on PluginManifestException catch (error) {
-      if (mounted) setState(() => _error = error.message);
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
+      if (mounted) setState(() => _showFiles = false);
+    });
   }
 
-  Future<void> _addFile() async {
-    final project = _project;
-    if (project == null) return;
-    final name = await showDialog<String>(
-      context: context,
-      builder: (dialog) {
-        final controller = TextEditingController(text: 'notes.md');
-        return AlertDialog(
-          title: const Text('新建文本文件'),
-          content: TextField(
-            controller: controller,
-            decoration: const InputDecoration(hintText: '例如 replies.md'),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialog),
-              child: const Text('取消'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(dialog, controller.text.trim()),
-              child: const Text('创建'),
-            ),
-          ],
-        );
-      },
+  Future<void> _newFile({bool folder = false}) async {
+    if (!await _leave() || !mounted) return;
+    final name = await _ask(
+      folder ? '新建文件夹' : '新建文本文件',
+      '${_folder.isEmpty ? '' : '$_folder/'}${folder ? 'assets' : 'notes.md'}',
+      '支持相对路径，例如 docs/readme.md',
     );
-    if (name == null || name.isEmpty) return;
-    try {
-      await _workspace.write(project, name, '');
-      await _openProject(project);
-      await _openFile(name);
-    } on PluginManifestException catch (error) {
-      if (mounted) setState(() => _error = error.message);
-    }
+    if (name == null) return;
+    await _guard(() async {
+      if (folder) {
+        await _workspace.createFolder(_project!, name);
+      } else {
+        await _workspace.write(_project!, name, '', createOnly: true);
+      }
+      await _loadProject(_project!, select: folder ? _file : name);
+      if (folder && mounted) setState(() => _folder = name);
+      if (!folder && mounted) setState(() => _showFiles = false);
+    });
+  }
+
+  Future<void> _rename() async {
+    if (!await _leave() || !mounted) return;
+    final name = await _ask('重命名 / 移动文件', _file!, '支持 docs/readme.md；不会覆盖同名文件');
+    if (name == null || name == _file) return;
+    await _guard(() async {
+      await _workspace.renameFile(_project!, _file!, name);
+      await _loadProject(_project!, select: name);
+    });
+  }
+
+  Future<void> _delete() async {
+    final sure = await showDialog<bool>(
+      context: context,
+      builder: (dialog) => AlertDialog(
+        title: const Text('移入本地历史？'),
+        content: Text('${_file!}\n未保存的草稿将被放弃。磁盘文件会保留在历史中，可以恢复。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialog, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialog, true),
+            child: const Text('移入历史'),
+          ),
+        ],
+      ),
+    );
+    if (sure != true) return;
+    await _guard(() async {
+      await _workspace.deleteFile(_project!, _file!);
+      await _loadProject(_project!);
+    });
+  }
+
+  Future<void> _history() async {
+    await _guard(() async {
+      final entries = (await _workspace.history())
+          .where((name) => name.contains('__${_project!}__'))
+          .toList();
+      if (!mounted) return;
+      final archived = await showDialog<String>(
+        context: context,
+        builder: (dialog) => SimpleDialog(
+          title: const Text('本地历史（恢复为新文件）'),
+          children: entries.isEmpty
+              ? [
+                  const Padding(
+                    padding: EdgeInsets.all(20),
+                    child: Text('暂无历史。保存和移除文件都会保留一份。'),
+                  ),
+                ]
+              : [
+                  for (final name in entries.take(100))
+                    SimpleDialogOption(
+                      onPressed: () => Navigator.pop(dialog, name),
+                      child: Text(name),
+                    ),
+                ],
+        ),
+      );
+      if (archived == null || !mounted) return;
+      if (!await _leave() || !mounted) return;
+      final name = await _ask('恢复为新文件', 'restored.txt', '同名文件不会被覆盖');
+      if (name == null) return;
+      await _workspace.restore(archived, _project!, name);
+      await _loadProject(_project!, select: name);
+    });
+  }
+
+  Future<void> _importFile() async {
+    if (!await _leave()) return;
+    await _guard(() async {
+      final picked = await FilePicker.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: [
+          'json',
+          'yaml',
+          'yml',
+          'md',
+          'txt',
+          'js',
+          'mjs',
+          'py',
+          'dart',
+        ],
+        withData: true,
+      );
+      if (picked == null || !mounted) return;
+      final file = picked.files.single;
+      if (file.size > PluginWorkspace.maxBytes) {
+        throw const PluginManifestException('导入文件不能超过 256 KB。');
+      }
+      final bytes =
+          file.bytes ??
+          (file.path == null ? null : await File(file.path!).readAsBytes());
+      if (bytes == null || bytes.length > PluginWorkspace.maxBytes) {
+        throw const PluginManifestException('文件无法读取或超过 256 KB。');
+      }
+      final name = await _ask('导入到项目', file.name, '相对路径；不会覆盖已有文件');
+      if (name == null) return;
+      await _workspace.write(
+        _project!,
+        name,
+        utf8.decode(bytes),
+        createOnly: true,
+      );
+      await _loadProject(_project!, select: name);
+    });
+  }
+
+  Future<void> _exportFile() async {
+    await _guard(() async {
+      await FilePicker.saveFile(
+        fileName: _file!.split('/').last,
+        bytes: utf8.encode(_editor.text),
+      );
+    });
+  }
+
+  Future<void> _preview() async {
+    await _guard(() async {
+      final definition = PluginManifest.parse(_editor.text, allowBuiltin: true);
+      if (definition.runtime != 'rules') {
+        throw const PluginManifestException(
+          '只支持本地规则试运行；HTTP 服务和内置 Dart 插件不会在预览中执行或联网。',
+        );
+      }
+      if (!mounted) return;
+      final text = await _ask('本地试运行（不发送 QQ）', '/hello 测试', '测试命令');
+      if (text == null) return;
+      final plugin = ManifestPlugin(definition.toInfo(), definition);
+      final result = await plugin.execute(
+        PluginMessage(
+          messageId: 'test',
+          sessionId: 'test-group',
+          senderId: 'test-member',
+          senderName: '测试用户',
+          content: text,
+          messageType: 0,
+          isGroup: true,
+          timestamp: DateTime.now(),
+        ),
+      );
+      if (mounted) {
+        await showDialog<void>(
+          context: context,
+          builder: (dialog) => AlertDialog(
+            title: const Text('本地试运行结果'),
+            content: SingleChildScrollView(
+              child: SelectableText(
+                result == null
+                    ? '没有规则匹配。'
+                    : const JsonEncoder.withIndent(
+                        '  ',
+                      ).convert(result.toMap()),
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialog),
+                child: const Text('关闭'),
+              ),
+            ],
+          ),
+        );
+      }
+    });
   }
 
   @override
   Widget build(BuildContext context) {
     final wide = MediaQuery.sizeOf(context).width >= 800;
-    final files = Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
+    final explorer = ListView(
+      key: const ValueKey('plugin-explorer'),
       children: [
-        Text('插件文件', style: Theme.of(context).textTheme.titleSmall),
+        Text('项目', style: Theme.of(context).textTheme.titleSmall),
         const SizedBox(height: 8),
-        Wrap(
-          spacing: 6,
-          children: [
-            for (final name in _projects)
-              ChoiceChip(
-                label: Text(name),
-                selected: _project == name,
-                onSelected: (_) => _openProject(name),
+        DropdownButtonFormField<String>(
+          initialValue: _projects.contains(_project) ? _project : null,
+          isExpanded: true,
+          items: [
+            for (final id in _projects)
+              DropdownMenuItem(
+                value: id,
+                child: Text(id, overflow: TextOverflow.ellipsis),
               ),
           ],
+          onChanged: _busy
+              ? null
+              : (id) {
+                  if (id != null) _selectProject(id);
+                },
         ),
         const SizedBox(height: 8),
-        if (_project != null)
+        OutlinedButton.icon(
+          onPressed: _busy ? null : _create,
+          icon: const Icon(Icons.create_new_folder_outlined),
+          label: const Text('新建插件项目'),
+        ),
+        if (_project != null) ...[
+          const Divider(),
           Wrap(
-            spacing: 6,
+            spacing: 4,
             children: [
-              for (final name in _files)
-                ChoiceChip(
-                  label: Text(name),
-                  selected: _file == name,
-                  onSelected: (_) => _openFile(name),
-                ),
-              ActionChip(label: const Text('新建文件'), onPressed: _addFile),
-              if (_file != null)
-                ActionChip(
-                  label: const Text('删除当前文件'),
-                  onPressed: () async {
-                    await _workspace.deleteFile(_project!, _file!);
-                    await _openProject(_project!);
-                  },
-                ),
+              TextButton(
+                onPressed: _busy ? null : _newFile,
+                child: const Text('新建文件'),
+              ),
+              TextButton(
+                onPressed: _busy ? null : () => _newFile(folder: true),
+                child: const Text('新建文件夹'),
+              ),
+              TextButton(
+                onPressed: _busy ? null : _importFile,
+                child: const Text('导入文件'),
+              ),
+              TextButton(
+                onPressed: _busy ? null : _history,
+                child: const Text('本地历史'),
+              ),
             ],
           ),
-      ],
-    );
-    final creator = Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Text('新建命令插件', style: Theme.of(context).textTheme.titleSmall),
-        const SizedBox(height: 8),
-        TextField(
-          controller: _id,
-          decoration: const InputDecoration(labelText: '插件 ID，如 my_hello'),
-        ),
-        TextField(
-          controller: _name,
-          decoration: const InputDecoration(labelText: '显示名称'),
-        ),
-        TextField(
-          controller: _description,
-          decoration: const InputDecoration(labelText: '说明'),
-        ),
-        DropdownButtonFormField<String>(
-          initialValue: _matchType,
-          decoration: const InputDecoration(labelText: '触发方式'),
-          items: const [
-            DropdownMenuItem(value: 'command', child: Text('命令 /hello')),
-            DropdownMenuItem(value: 'exact', child: Text('整句完全相同')),
-            DropdownMenuItem(value: 'prefix', child: Text('以前缀开头')),
-            DropdownMenuItem(value: 'contains', child: Text('包含关键词')),
-          ],
-          onChanged: (value) => setState(() => _matchType = value ?? 'command'),
-        ),
-        TextField(
-          controller: _trigger,
-          decoration: const InputDecoration(
-            labelText: '触发内容',
-            hintText: '命令不要带空格和斜杠，例如 hello',
+          ListTile(
+            dense: true,
+            leading: const Icon(Icons.folder_open_outlined, size: 18),
+            title: const Text('项目根目录'),
+            selected: _folder.isEmpty,
+            onTap: _busy ? null : () => setState(() => _folder = ''),
           ),
-        ),
-        TextField(
-          controller: _reply,
-          minLines: 2,
-          maxLines: 4,
-          decoration: const InputDecoration(
-            labelText: '回复',
-            hintText: '可用 {{sender_name}} 和 {{args}}',
-          ),
-        ),
-        DropdownButtonFormField<String>(
-          initialValue: _scope,
-          decoration: const InputDecoration(labelText: '会话范围'),
-          items: const [
-            DropdownMenuItem(value: 'all', child: Text('群聊和单聊')),
-            DropdownMenuItem(value: 'group', child: Text('仅群聊')),
-            DropdownMenuItem(value: 'private', child: Text('仅单聊')),
-          ],
-          onChanged: (value) => setState(() => _scope = value ?? 'all'),
-        ),
-        const SizedBox(height: 8),
-        FilledButton(
-          onPressed: _busy ? null : _create,
-          child: const Text('生成清单和说明文件'),
-        ),
+          for (final folder in _folders)
+            ListTile(
+              dense: true,
+              leading: const Icon(Icons.folder_outlined, size: 18),
+              title: Text('$folder/'),
+              selected: _folder == folder,
+              onTap: _busy ? null : () => setState(() => _folder = folder),
+            ),
+          for (final name in _files)
+            ListTile(
+              dense: true,
+              selected: _file == name,
+              leading: const Icon(Icons.description_outlined, size: 18),
+              title: Text(name, maxLines: 2, overflow: TextOverflow.ellipsis),
+              onTap: _busy ? null : () => _selectFile(name),
+            ),
+        ],
       ],
     );
     final editor = Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text(
-          _file == null ? '选择一个文件开始编辑' : '正在编辑 $_file',
-          style: Theme.of(context).textTheme.titleSmall,
+        Wrap(
+          alignment: WrapAlignment.spaceBetween,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            Text('${_file ?? '选择文件开始编辑'}${_dirty ? ' · 未保存' : ''}'),
+            if (_file != null)
+              Wrap(
+                children: [
+                  IconButton(
+                    tooltip: '复制全部代码',
+                    onPressed: () async {
+                      await Clipboard.setData(
+                        ClipboardData(text: _editor.text),
+                      );
+                      if (context.mounted) AppDialogs.show(context, '代码已复制。');
+                    },
+                    icon: const Icon(Icons.copy, size: 18),
+                  ),
+                  IconButton(
+                    tooltip: '导出当前文件',
+                    onPressed: _busy ? null : _exportFile,
+                    icon: const Icon(Icons.download, size: 18),
+                  ),
+                  IconButton(
+                    tooltip: '重命名或移动文件',
+                    onPressed: _busy ? null : _rename,
+                    icon: const Icon(Icons.drive_file_rename_outline, size: 18),
+                  ),
+                  IconButton(
+                    tooltip: '移入本地历史',
+                    onPressed: _busy ? null : _delete,
+                    icon: const Icon(Icons.delete_outline, size: 18),
+                  ),
+                ],
+              ),
+          ],
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: 6),
         Expanded(
           child: TextField(
+            key: const ValueKey('plugin-file-editor'),
             controller: _editor,
+            readOnly: _busy || _file == null,
             expands: true,
             maxLines: null,
             minLines: null,
-            style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
+            keyboardType: TextInputType.multiline,
+            autocorrect: false,
+            enableSuggestions: false,
+            style: const TextStyle(
+              fontFamily: 'monospace',
+              fontFamilyFallback: ['Microsoft YaHei'],
+              fontSize: 13,
+            ),
             decoration: const InputDecoration(
-              alignLabelWithHint: true,
               border: OutlineInputBorder(),
+              hintText: '支持 JSON/YAML 规则和源码文本；脚本不会被直接执行。',
             ),
           ),
         ),
+        Text(
+          '${_editor.text.split('\n').length} 行 · ${utf8.encode(_editor.text).length} 字节 / 256 KB',
+          style: Theme.of(context).textTheme.bodySmall,
+        ),
       ],
     );
-    return Dialog(
-      insetPadding: const EdgeInsets.all(16),
-      child: SizedBox(
-        width: 980,
-        height: MediaQuery.sizeOf(context).height * .86,
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      '插件工作台',
-                      style: Theme.of(context).textTheme.titleLarge,
-                    ),
-                  ),
-                  IconButton(
-                    tooltip: '关闭工作台',
-                    onPressed: () => Navigator.pop(context),
-                    icon: const Icon(Icons.close),
-                  ),
-                ],
-              ),
-              const Text('像云崽写一条命令一条回复。文件保存在本机工作区，安装后仍可回来改。'),
-              if (_error != null)
-                Padding(
-                  padding: const EdgeInsets.only(top: 8),
-                  child: Text(
-                    _error!,
-                    style: TextStyle(
-                      color: Theme.of(context).colorScheme.error,
-                    ),
-                  ),
-                ),
-              const SizedBox(height: 12),
-              Expanded(
-                child: wide
-                    ? Row(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          SizedBox(
-                            width: 320,
-                            child: ListView(
-                              children: [files, const Divider(), creator],
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(child: editor),
-                        ],
-                      )
-                    : ListView(
-                        children: [
-                          files,
-                          const Divider(),
-                          creator,
-                          const SizedBox(height: 12),
-                          SizedBox(height: 280, child: editor),
-                        ],
+    return PopScope(
+      canPop: !_dirty && !_busy,
+      onPopInvokedWithResult: (didPop, _) async {
+        if (!didPop && !_busy && await _leave() && context.mounted) {
+          Navigator.pop(context);
+        }
+      },
+      child: Dialog(
+        insetPadding: const EdgeInsets.all(12),
+        child: SizedBox(
+          width: 1080,
+          height: MediaQuery.sizeOf(context).height * .9,
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        '插件文件管理器',
+                        style: Theme.of(context).textTheme.titleLarge,
                       ),
-              ),
-              const SizedBox(height: 12),
-              Wrap(
-                alignment: WrapAlignment.end,
-                spacing: 8,
-                children: [
-                  OutlinedButton(
-                    onPressed: _busy || _file == null ? null : _save,
-                    child: const Text('保存文件'),
+                    ),
+                    IconButton(
+                      tooltip: '关闭工作台',
+                      onPressed: _busy
+                          ? null
+                          : () async {
+                              if (await _leave() && context.mounted) {
+                                Navigator.pop(context);
+                              }
+                            },
+                      icon: const Icon(Icons.close),
+                    ),
+                  ],
+                ),
+                const Text('规则即装即用；复杂玩法接 HTTP 服务。修改已安装插件后，需重新安装、检查配置并启用。'),
+                if (_busy && ModalRoute.of(context)?.isCurrent == true)
+                  const LinearProgressIndicator(),
+                if (_error != null)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 6),
+                    child: SelectableText(
+                      _error!,
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.error,
+                      ),
+                    ),
                   ),
-                  FilledButton(
-                    onPressed: _busy || _project == null ? null : _install,
-                    child: const Text('安装到插件中心'),
-                  ),
-                ],
-              ),
-            ],
+                const SizedBox(height: 10),
+                Expanded(
+                  child: wide
+                      ? Row(
+                          children: [
+                            SizedBox(width: 270, child: explorer),
+                            const VerticalDivider(),
+                            Expanded(child: editor),
+                          ],
+                        )
+                      : Column(
+                          children: [
+                            SegmentedButton<bool>(
+                              segments: const [
+                                ButtonSegment(
+                                  value: true,
+                                  label: Text('文件'),
+                                  icon: Icon(Icons.folder_outlined),
+                                ),
+                                ButtonSegment(
+                                  value: false,
+                                  label: Text('编辑器'),
+                                  icon: Icon(Icons.code),
+                                ),
+                              ],
+                              selected: {_showFiles},
+                              onSelectionChanged: (value) =>
+                                  setState(() => _showFiles = value.single),
+                            ),
+                            const SizedBox(height: 8),
+                            Expanded(child: _showFiles ? explorer : editor),
+                          ],
+                        ),
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  alignment: WrapAlignment.end,
+                  spacing: 8,
+                  runSpacing: 6,
+                  children: [
+                    OutlinedButton(
+                      onPressed: _busy || _file == null ? null : _preview,
+                      child: const Text('校验 / 试运行'),
+                    ),
+                    OutlinedButton(
+                      onPressed: _busy || !_dirty ? null : _save,
+                      child: const Text('保存文件'),
+                    ),
+                    FilledButton(
+                      onPressed: _busy || _project == null ? null : _install,
+                      child: const Text('安装到插件中心'),
+                    ),
+                  ],
+                ),
+              ],
+            ),
           ),
         ),
       ),
     );
   }
+}
+
+class _WorkspaceNameDialog extends StatefulWidget {
+  final String title, initial, hint;
+  const _WorkspaceNameDialog({
+    required this.title,
+    required this.initial,
+    required this.hint,
+  });
+  @override
+  State<_WorkspaceNameDialog> createState() => _WorkspaceNameDialogState();
+}
+
+class _WorkspaceNameDialogState extends State<_WorkspaceNameDialog> {
+  late final _input = TextEditingController(text: widget.initial);
+  @override
+  void dispose() {
+    _input.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: Text(widget.title),
+    content: TextField(
+      controller: _input,
+      autofocus: true,
+      decoration: InputDecoration(hintText: widget.hint),
+    ),
+    actions: [
+      TextButton(
+        onPressed: () => Navigator.pop(context),
+        child: const Text('取消'),
+      ),
+      FilledButton(
+        onPressed: () => Navigator.pop(context, _input.text.trim()),
+        child: const Text('确定'),
+      ),
+    ],
+  );
 }

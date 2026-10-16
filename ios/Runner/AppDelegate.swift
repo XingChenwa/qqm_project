@@ -27,16 +27,6 @@ final class QQMUpdates: NSObject, FlutterPlugin {
   }
 
   func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
-    if call.method == "deviceInfo" {
-      let device = UIDevice.current
-      // Newer iOS may return a generic name. Never request identifying entitlements.
-      result([
-        "device_name": device.name,
-        "device_model": device.model,
-        "system_version": "\(device.systemName) \(device.systemVersion)"
-      ])
-      return
-    }
     guard call.method == "shareIpa" else { result(FlutterMethodNotImplemented); return }
     guard let arguments = call.arguments as? [String: Any], let path = arguments["path"] as? String,
           let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {

@@ -1,0 +1,14 @@
+{
+  "schema_version": 2,
+  "id": "daily_club",
+  "name": "每日小会馆",
+  "version": "2.0.0",
+  "description": "签到、积分、会话排行榜、每日运势与抽签；按机器人和会话隔离，本地保存，仅供娱乐。",
+  "author": "QQ 机器人管理器",
+  "runtime": "builtin",
+  "entrypoint": "lib/daily_club/plugin.dart",
+  "permissions": ["message:read", "message:send"],
+  "config_schema": [
+    {"key": "daily_points", "label": "每日签到积分（1–100）", "type": "integer", "default": 10}
+  ]
+}

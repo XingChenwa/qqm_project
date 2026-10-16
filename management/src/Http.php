@@ -34,9 +34,7 @@ function serve(Core $core, AccountLogin $account): bool
         }
         if ($path === '/api/v1/releases' && $method === 'GET') { respond(['releases' => $core->releases(), 'preview' => $core->config['environment'] === 'development']); }
         if ($path === '/api/v1/update' && $method === 'GET') { respond($core->signedUpdate((string)($_GET['platform'] ?? ''), (string)($_GET['arch'] ?? ''), (string)($_GET['nonce'] ?? ''))); }
-        if ($path === '/api/v1/telemetry/register' && $method === 'POST') { respond($core->register(body(), $ip), 201); }
-        if ($path === '/api/v1/telemetry/heartbeat' && $method === 'POST') { $core->heartbeat(body(), bearer(), $ip); respond(['ok' => true]); }
-        if ($path === '/api/v1/telemetry/installation' && $method === 'DELETE') { $core->forget(bearer()); respond(['ok' => true]); }
+        if (str_starts_with($path, '/api/v1/telemetry/')) { throw new HttpError(410, '设备统计已移除，不再接收或查询设备资料'); }
         if (preg_match('~^/packages/([a-f0-9]{64})/([a-zA-Z0-9.-]+)$~D', $path, $match) && in_array($method, ['GET', 'HEAD'], true)) {
             $row = $core->query('SELECT * FROM qqm_releases WHERE sha256=? AND filename=? AND published=1', [$match[1], $match[2]])->fetch();
             $file = $core->dataDir . '/packages/' . $match[1] . '/' . $match[2];
@@ -93,7 +91,7 @@ function serve(Core $core, AccountLogin $account): bool
             if (!$authenticated) { throw new HttpError(401, '请使用杂鱼账号登录管理后台'); }
             if ($path === '/api/admin/logout' && $method === 'POST') { $_SESSION = []; session_destroy(); respond(['ok' => true]); }
             session_write_close();
-            if ($path === '/api/admin/stats' && $method === 'GET') { respond($core->stats()); }
+            if ($path === '/api/admin/stats' || str_starts_with($path, '/api/admin/devices/')) { throw new HttpError(410, '设备统计已移除；已有历史记录未被删除'); }
             if ($path === '/api/admin/releases' && $method === 'GET') { respond(['releases' => $core->releases(false)]); }
             if ($path === '/api/admin/releases' && $method === 'POST') {
                 $upload = $_FILES['package'] ?? null;
@@ -113,9 +111,6 @@ function serve(Core $core, AccountLogin $account): bool
                 }
                 if (!$touched) { throw new HttpError(422, '需要发布状态或强制更新开关'); }
                 respond(['ok' => true]);
-            }
-            if (preg_match('~^/api/admin/devices/([a-f0-9-]{36})$~D', $path, $match) && $method === 'DELETE') {
-                $core->query('DELETE FROM qqm_installations WHERE id=?', [$match[1]]); respond(['ok' => true]);
             }
             if ($path === '/api/admin/proxy' && $method === 'GET') {
                 respond($core->proxyDiagnostics($_SERVER));

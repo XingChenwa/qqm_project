@@ -17,7 +17,6 @@ final class HttpError extends RuntimeException
 final class Core
 {
     public const SCHEMA_VERSION = 3;
-    private const DEVICE_COLUMNS = ['device_name' => 128, 'device_model' => 128, 'system_version' => 255, 'system_arch' => 64];
     public readonly PDO $db;
     public readonly array $config;
     public readonly string $dataDir;
@@ -80,10 +79,6 @@ final class Core
             }
             if ((int)$this->query('SELECT MAX(version) FROM qqm_schema_migrations')->fetchColumn() > self::SCHEMA_VERSION) {
                 throw new HttpError(503, '数据库结构比当前代码新，请部署匹配版本，不要降级或重建数据表。');
-            }
-            $existing = array_column($this->query('SHOW COLUMNS FROM qqm_installations')->fetchAll(), 'Field');
-            foreach (self::DEVICE_COLUMNS as $name => $length) {
-                if (!in_array($name, $existing, true)) { $this->db->exec("ALTER TABLE qqm_installations ADD COLUMN `{$name}` VARCHAR({$length}) NULL"); }
             }
             $releaseColumns = array_column($this->query('SHOW COLUMNS FROM qqm_releases')->fetchAll(), 'Field');
             if (!in_array('force_update', $releaseColumns, true)) {
@@ -201,81 +196,10 @@ final class Core
         return [$platform, $version, $build];
     }
 
-    public function register(array $body, array $ip): array
-    {
-        [$platform, $version, $build] = self::clientFields($body);
-        $device = self::deviceFields($body);
-        $id = $body['installation_id'] ?? '';
-        if (!in_array($body['consent_version'] ?? '', ['1', '2'], true) || !is_string($id) || !preg_match('/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/D', $id)) { throw new HttpError(422, '需有效统计协议版本和随机安装 ID'); }
-        $this->rateLimit('registration', $ip['ip'] ?? 'unknown', 60, 3600);
-        $token = bin2hex(random_bytes(32)); $now = time();
-        if ($this->query('SELECT 1 FROM qqm_installations WHERE id=?', [$id])->fetchColumn()) { throw new HttpError(409, '安装 ID 已注册，请使用原令牌或新的随机 ID'); }
-        $this->query('INSERT INTO qqm_installations(id,token_hash,platform,version,build,first_seen,last_seen,last_ip,ip_source,ip_updated_at,device_name,device_model,system_version,system_arch) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)', [$id, hash('sha256', $token), $platform, $version, $build, $now, $now, $ip['ip'], $ip['source'], $now, ...array_values($device)]);
-        // Fixed metadata allowlist only; no QQ identifiers, messages or persistent hardware IDs.
-        $this->touchDay($id);
-        return ['token' => $token];
-    }
-
-    private function touchDay(string $id): void
-    {
-        $day = (new \DateTimeImmutable('now', new \DateTimeZone('Asia/Shanghai')))->format('Y-m-d');
-        $this->query('INSERT INTO qqm_daily_usage(day,installation_id) VALUES(?,?) ON DUPLICATE KEY UPDATE installation_id=installation_id', [$day, $id]);
-    }
-
-    public static function deviceFields(array $body): array
-    {
-        $result = [];
-        foreach (self::DEVICE_COLUMNS as $name => $length) {
-            $value = $body[$name] ?? null;
-            if ($value !== null && (!is_string($value) || preg_match('/^.{0,' . $length . '}$/usD', $value) !== 1
-                || preg_match('/[\x00-\x1f\x7f-\x9f]/u', $value))) { throw new HttpError(422, '设备资料字段无效或过长：' . $name); }
-            $result[$name] = $value === null || trim($value) === '' ? null : trim($value);
-        }
-        return $result;
-    }
-
-    public function installation(string $token): array
-    {
-        if (!preg_match('/^[a-f0-9]{64}$/D', $token)) { throw new HttpError(401, '安装令牌无效'); }
-        $row = $this->query('SELECT * FROM qqm_installations WHERE token_hash=?', [hash('sha256', $token)])->fetch();
-        if (!$row) { throw new HttpError(401, '安装令牌无效'); } return $row;
-    }
-
-    public function heartbeat(array $body, string $token, array $ip): void
-    {
-        [$platform, $version, $build] = self::clientFields($body); $row = $this->installation($token);
-        $device = self::deviceFields($body);
-        if ($row['platform'] !== $platform) { throw new HttpError(422, '安装平台不匹配'); }
-        $this->rateLimit('heartbeat', $row['id'], 15, 60);
-        $this->query('UPDATE qqm_installations SET version=?,build=?,last_seen=?,last_ip=?,ip_source=?,ip_updated_at=?,device_name=COALESCE(?,device_name),device_model=COALESCE(?,device_model),system_version=COALESCE(?,system_version),system_arch=COALESCE(?,system_arch) WHERE id=?', [$version, $build, time(), $ip['ip'], $ip['source'], time(), ...array_values($device), $row['id']]);
-        $this->touchDay($row['id']);
-    }
-
-    public function forget(string $token): void
-    {
-        $row = $this->installation($token); $this->query('DELETE FROM qqm_installations WHERE id=?', [$row['id']]);
-    }
-
     public function prune(): void
     {
-        $this->query('UPDATE qqm_installations SET last_ip=NULL,ip_source=NULL WHERE ip_updated_at < ?', [time() - max(1, (int)$this->config['ip_retention_days']) * 86400]);
-        $this->query('DELETE FROM qqm_installations WHERE last_seen < ?', [time() - max(7, (int)$this->config['device_retention_days']) * 86400]);
-        $this->query('DELETE FROM qqm_daily_usage WHERE day < ?', [gmdate('Y-m-d', time() - 90 * 86400)]);
+        // Device telemetry is retired. Existing historical tables are not read, changed or deleted.
         $this->query('DELETE FROM qqm_limits WHERE bucket_start < ?', [time() - 86400]);
-    }
-
-    public function stats(): array
-    {
-        $this->prune(); $today = (new \DateTimeImmutable('now', new \DateTimeZone('Asia/Shanghai')))->format('Y-m-d');
-        return [
-            'online' => (int)$this->query('SELECT count(*) FROM qqm_installations WHERE last_seen>=?', [time() - 300])->fetchColumn(),
-            'today' => (int)$this->query('SELECT count(*) FROM qqm_daily_usage WHERE day=?', [$today])->fetchColumn(),
-            'installations' => (int)$this->query('SELECT count(*) FROM qqm_installations')->fetchColumn(),
-            'versions' => $this->query('SELECT platform,version,build,count(*) AS count FROM qqm_installations GROUP BY platform,version,build ORDER BY count DESC')->fetchAll(),
-            'trend' => $this->query('SELECT day,count(*) AS count FROM qqm_daily_usage WHERE day>=? GROUP BY day ORDER BY day', [gmdate('Y-m-d', time() - 13 * 86400)])->fetchAll(),
-            'devices' => $this->query('SELECT id,platform,version,build,first_seen,last_seen,last_ip,ip_source,device_name,device_model,system_version,system_arch FROM qqm_installations ORDER BY last_seen DESC LIMIT 200')->fetchAll(),
-            'definitions' => '统计已开启使用统计并成功上报的安装；在线=近5分钟有心跳。安装数不等于真实人数，重装可能形成新 ID；显示最近200条设备详情。',
-        ];
     }
 
     public function releases(bool $publishedOnly = true): array
@@ -311,6 +235,7 @@ final class Core
         if ($size < 1 || $size > (int)$this->config['max_upload_bytes']) { throw new HttpError(422, '安装包为空或超过上传限制'); }
         $notes = $fields['notes'] ?? '';
         if (!is_string($notes) || strlen($notes) > 12000) { throw new HttpError(422, '更新说明过长'); }
+        $force = filter_var($fields['force_update'] ?? false, FILTER_VALIDATE_BOOLEAN);
         if ($format === 'dmg') {
             // UDIF trailer; uploads are opaque and are never mounted/executed by PHP.
             if ($size < 512 || file_get_contents($temporaryFile, false, null, $size - 512, 4) !== 'koly') { throw new HttpError(422, '不是有效的 macOS DMG 镜像'); }
@@ -325,8 +250,10 @@ final class Core
                     if ($name === '' || preg_match('~(^/|:|(^|/)\.\.?(/|$)|[\x00-\x1f])~', $name)) { throw new HttpError(422, '安装包存在不安全路径'); }
                     $zip->getExternalAttributesIndex($i, $opsys, $attributes);
                     if ($opsys === 3 && (($attributes >> 16) & 0170000) === 0120000) { throw new HttpError(422, '安装包不允许符号链接'); }
-                    if (isset($names[strtolower($name)])) { throw new HttpError(422, '安装包有重复文件'); }
-                    $names[strtolower($name)] = true; $expanded += $stat['size'];
+                    // Android resource names are case-sensitive. aapt emits pairs such as res/9N.9.png and res/9n.9.png.
+                    $duplicateKey = $platform === 'android' ? $name : strtolower($name);
+                    if (isset($names[$duplicateKey])) { throw new HttpError(422, '安装包有重复文件'); }
+                    $names[$duplicateKey] = true; $expanded += $stat['size'];
                     if ($expanded > 2147483648) { throw new HttpError(422, '解压后体积过大'); }
                 }
                 $required = $platform === 'windows' ? ['qq_bot_manager.exe', 'flutter_windows.dll', 'data/app.so'] : ($platform === 'android' ? ['AndroidManifest.xml', 'classes.dex'] : ['Payload/Runner.app/Info.plist', 'Payload/Runner.app/Runner']);
@@ -344,7 +271,7 @@ final class Core
             chmod($destination, 0600);
         }
         try {
-            $this->query('INSERT INTO qqm_releases(id,platform,arch,version,build,`format`,filename,sha256,size,notes,published,force_update,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,0,0,?)', [$id, $platform, $arch, $version, $build, $format, $filename, $hash, $size, $notes, time()]);
+            $this->query('INSERT INTO qqm_releases(id,platform,arch,version,build,`format`,filename,sha256,size,notes,published,force_update,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,0,?,?)', [$id, $platform, $arch, $version, $build, $format, $filename, $hash, $size, $notes, $force ? 1 : 0, time()]);
         } catch (\PDOException $error) { if ($error->getCode() === '23000') { throw new HttpError(409, '该平台/架构的构建号已经存在'); } throw $error; }
         return $this->publicRelease($this->query('SELECT * FROM qqm_releases WHERE id=?', [$id])->fetch());
     }

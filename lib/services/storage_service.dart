@@ -10,6 +10,7 @@ class StorageService {
   late Box<String> _sessionsBox;
   late Box<String> _emojisBox;
   late Box<String> _pluginsBox;
+  late Box<String> _pluginDataBox;
   late SharedPreferences _prefs;
 
   Future<void> init() async {
@@ -17,6 +18,7 @@ class StorageService {
     _sessionsBox = await Hive.openBox<String>('sessions');
     _emojisBox = await Hive.openBox<String>('emojis');
     _pluginsBox = await Hive.openBox<String>('plugins');
+    _pluginDataBox = await Hive.openBox<String>('plugin_data');
     _prefs = await SharedPreferences.getInstance();
 
     // 只迁移一次旧版的默认关闭状态，后续用户主动关闭不再被重置。
@@ -176,6 +178,16 @@ class StorageService {
     await _pluginsBox.clear();
   }
 
+  Future<Map<String, dynamic>> readPluginData(String scope) async {
+    final value = _pluginDataBox.get(scope);
+    return value == null
+        ? {}
+        : Map<String, dynamic>.from(jsonDecode(value) as Map);
+  }
+
+  Future<void> writePluginData(String scope, Map<String, dynamic> value) =>
+      _pluginDataBox.put(scope, jsonEncode(value));
+
   // --- Export / Import ---
   String exportConfig() {
     final data = {
@@ -211,6 +223,7 @@ class StorageService {
       _sessionsBox.flush(),
       _emojisBox.flush(),
       _pluginsBox.flush(),
+      _pluginDataBox.flush(),
     ]);
   }
 
@@ -219,6 +232,7 @@ class StorageService {
     await _sessionsBox.clear();
     await _emojisBox.clear();
     await _pluginsBox.clear();
+    await _pluginDataBox.clear();
     await _prefs.clear();
   }
 }

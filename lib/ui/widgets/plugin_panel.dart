@@ -67,22 +67,41 @@ class _PluginPanelState extends State<PluginPanel> {
   }
 
   Future<void> _workshop({String? id, String? source}) async {
-    final directory = Directory(
-      p.join((await getApplicationSupportDirectory()).path, 'plugin_workspace'),
-    );
-    await directory.create(recursive: true);
-    if (id != null && source != null) {
-      await PluginWorkspace(directory).write(id, 'plugin.json', source);
+    try {
+      final directory = Directory(
+        p.join(
+          (await getApplicationSupportDirectory()).path,
+          'plugin_workspace',
+        ),
+      );
+      final workspace = PluginWorkspace(directory);
+      await workspace.ensureRoot();
+      if (id != null && source != null) {
+        if (!(await workspace.files(id)).contains('plugin.json')) {
+          await workspace.write(id, 'plugin.json', source, createOnly: true);
+        }
+      }
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => PluginWorkshop(
+          manager: context.read<PluginManager>(),
+          root: directory,
+          initialId: id,
+        ),
+      );
+    } catch (error) {
+      if (mounted) {
+        AppDialogs.show(
+          context,
+          error is PluginManifestException
+              ? error.message
+              : '无法打开插件文件管理器，请检查目录权限和磁盘空间。',
+          error: true,
+        );
+      }
     }
-    if (!mounted) return;
-    await showDialog<void>(
-      context: context,
-      builder: (_) => PluginWorkshop(
-        manager: context.read<PluginManager>(),
-        root: directory,
-        initialId: id,
-      ),
-    );
   }
 
   @override
@@ -417,10 +436,49 @@ class _PluginCard extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 6),
-                IconButton(
-                  tooltip: '查看和复制插件清单',
-                  onPressed: () => _viewManifest(context),
-                  icon: const Icon(Icons.data_object, size: 19),
+                PopupMenuButton<String>(
+                  tooltip: '插件命令、清单与数据',
+                  icon: const Icon(Icons.more_horiz, size: 19),
+                  onSelected: (action) async {
+                    if (action == 'manifest') {
+                      _viewManifest(context);
+                      return;
+                    }
+                    if (action == 'commands') {
+                      await showDialog<void>(
+                        context: context,
+                        builder: (dialog) => AlertDialog(
+                          title: Text('${info.name} · 命令'),
+                          content: SingleChildScrollView(
+                            child: SelectableText(
+                              manager.plugins
+                                  .firstWhere((p) => p.info.id == info.id)
+                                  .commands
+                                  .map(
+                                    (c) =>
+                                        '/${c.usage.isEmpty ? c.name : c.usage} — ${c.description}',
+                                  )
+                                  .join('\n'),
+                            ),
+                          ),
+                          actions: [
+                            TextButton(
+                              onPressed: () => Navigator.pop(dialog),
+                              child: const Text('关闭'),
+                            ),
+                          ],
+                        ),
+                      );
+                      return;
+                    }
+                    await _data(context, clear: action == 'clear');
+                  },
+                  itemBuilder: (_) => const [
+                    PopupMenuItem(value: 'commands', child: Text('查看命令')),
+                    PopupMenuItem(value: 'manifest', child: Text('查看和复制插件清单')),
+                    PopupMenuItem(value: 'data', child: Text('导出本地玩法数据')),
+                    PopupMenuItem(value: 'clear', child: Text('清空本地玩法数据')),
+                  ],
                 ),
                 if (!bundled)
                   IconButton(
@@ -454,8 +512,71 @@ class _PluginCard extends StatelessWidget {
     'dice_plugin' => Icons.casino_outlined,
     'translate_comment' => Icons.translate_rounded,
     'example_plugin' => Icons.waving_hand_outlined,
+    'daily_club' => Icons.auto_awesome_outlined,
+    'group_games' => Icons.sports_esports_outlined,
     _ => runtime == 'http' ? Icons.hub_outlined : Icons.extension_outlined,
   };
+
+  Future<void> _data(BuildContext context, {required bool clear}) async {
+    try {
+      if (clear) {
+        final confirmed = await showDialog<bool>(
+          context: context,
+          builder: (dialog) => AlertDialog(
+            title: const Text('清空此插件的玩法数据？'),
+            content: const Text(
+              '仅清除当前机器人下此插件的积分、游戏与投票记录，不删除配置或密钥。请先停用插件并导出备份；此操作无法撤销。',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialog, false),
+                child: const Text('取消'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(dialog, true),
+                child: const Text('确认清空'),
+              ),
+            ],
+          ),
+        );
+        if (confirmed != true) return;
+        await manager.clearPluginData(info.id);
+        if (context.mounted) AppDialogs.show(context, '已清空此机器人下的插件玩法数据，配置仍保留。');
+      } else {
+        final source = await manager.exportPluginData(info.id);
+        if (!context.mounted) return;
+        await showDialog<void>(
+          context: context,
+          builder: (dialog) => AlertDialog(
+            title: const Text('本地玩法数据（包含参与者 OpenID）'),
+            content: SizedBox(
+              width: 620,
+              height: MediaQuery.sizeOf(context).height * .5,
+              child: SingleChildScrollView(child: SelectableText(source)),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialog),
+                child: const Text('关闭'),
+              ),
+              TextButton(
+                onPressed: () => Clipboard.setData(ClipboardData(text: source)),
+                child: const Text('复制 JSON'),
+              ),
+            ],
+          ),
+        );
+      }
+    } catch (e) {
+      if (context.mounted) {
+        AppDialogs.show(
+          context,
+          e is PluginManifestException ? e.message : '插件数据操作失败。',
+          error: true,
+        );
+      }
+    }
+  }
 
   Future<void> _configure(BuildContext context) async {
     try {

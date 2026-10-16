@@ -20,13 +20,15 @@ class CodeReplyPlugins extends PluginManager {
   Future<List<PluginResponse>> processMessage(
     PluginMessage message, {
     String? onlyPluginId,
-  }) async => [
-    const PluginResponse(
-      pluginId: 'test',
-      pluginName: '代码测试',
-      content: '```python\n# 中文注释\n    print("你好")\n```',
-    ),
-  ];
+  }) async => message.content == '未开启全量自动回复时只展示'
+      ? []
+      : [
+          const PluginResponse(
+            pluginId: 'test',
+            pluginName: '代码测试',
+            content: '```python\n# 中文注释\n    print("你好")\n```',
+          ),
+        ];
 }
 
 void main() {

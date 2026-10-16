@@ -78,11 +78,15 @@ void main() {
     expect(wrapper, contains('gradle-8.13-bin.zip'));
   });
 
-  test('移动构建工作流只手动触发，安卓使用固定签名正式包且不需要 Apple 私钥', () {
+  test('构建支持正式 Release 与手动入口，安卓固定签名且不需要 Apple 私钥', () {
     final workflow =
         loadYaml(File('.github/workflows/mobile-build.yml').readAsStringSync())
             as YamlMap;
-    expect((workflow['on'] as YamlMap).keys.toList(), ['workflow_dispatch']);
+    expect((workflow['on'] as YamlMap).keys.toList(), [
+      'release',
+      'workflow_dispatch',
+    ]);
+    expect(workflow['on']['release']['types'], ['published']);
     expect(workflow['permissions']['contents'], 'read');
     expect(workflow['jobs']['android']['runs-on'], 'ubuntu-24.04');
     expect(workflow['jobs']['ios']['runs-on'], 'macos-15');

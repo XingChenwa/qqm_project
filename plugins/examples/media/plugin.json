@@ -1,0 +1,14 @@
+{
+  "schema_version": 2,
+  "id": "my_media",
+  "name": "媒体回复示例",
+  "version": "1.0.0",
+  "description": "发送 /示例图片；安装前请把媒体域名和 URL 改为自己的可访问 HTTPS 图片。",
+  "runtime": "rules",
+  "permissions": ["message:read", "message:send", "message:media"],
+  "media_hosts": ["cdn.example.com"],
+  "rules": [{
+    "match": {"type": "command", "value": "示例图片"},
+    "message": {"format": "media", "content": "示例图片", "media_url": "https://cdn.example.com/pic.png", "media_type": 1}
+  }]
+}

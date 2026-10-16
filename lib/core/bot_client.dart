@@ -11,7 +11,6 @@ import '../services/profile_request_queue.dart';
 import '../services/oiapi_service.dart';
 import '../utils/profile_helpers.dart';
 import '../utils/helpers.dart';
-import '../utils/weather_commands.dart';
 
 enum ConnectStep { idle, gettingToken, gettingGateway, connecting, done }
 
@@ -38,7 +37,9 @@ class BotClient extends ChangeNotifier {
   final Map<String, int> _replySequences = {};
   final Map<String, ({String id, DateTime at, String type})> _replyEvents = {};
   final Set<String> _acknowledgedInteractions = {};
+  final Set<String> _dispatchedInteractions = {};
   final Set<String> _autoDispatchedMessageIds = {};
+  final Map<String, Future<void>> _pendingPluginDispatches = {};
   int _fullGroupMessageCount = 0;
   Future<String?>? _tokenRequest;
   Timer? _tokenRefreshTimer;
@@ -118,14 +119,7 @@ class BotClient extends ChangeNotifier {
   int get heartbeatIntervalMs => _heartbeatIntervalMs;
   int get fullGroupMessageCount => _fullGroupMessageCount;
   bool shouldAutoRespondTo(MessageModel message) =>
-      !message.isBotAuthor &&
-      !message.isRecalled &&
-      (!message.isFullGroupMessage ||
-          _config.autoReplyToAllGroupMessages ||
-          WeatherQuery.parse(
-                message.extra?['rawContent']?.toString() ?? message.content,
-              ) !=
-              null);
+      !message.isBotAuthor && !message.isRecalled;
   String get botDisplayName => _botName.isNotEmpty ? _botName : '未获取机器人资料';
 
   /// Get a valid access token, refreshing if expired.
@@ -363,6 +357,7 @@ class BotClient extends ChangeNotifier {
           _acknowledgedInteractions.remove(_acknowledgedInteractions.first);
         }
         unawaited(_acknowledgeInteraction(interactionId, data));
+        _dispatchPluginInteraction(interactionId, data);
       }
     }
     if (eventType == 'GROUP_AT_MESSAGE_CREATE' ||
@@ -381,6 +376,52 @@ class BotClient extends ChangeNotifier {
             DateTime.now().difference(event.at) < const Duration(minutes: 5)
         ? event.id
         : '';
+  }
+
+  void _dispatchPluginInteraction(String id, Map<String, dynamic> data) {
+    final body = data['data'];
+    if (body is! Map || body['resolved'] is! Map) return;
+    final resolved = body['resolved'] as Map;
+    final callback = resolved['button_data']?.toString() ?? '';
+    if (!callback.startsWith('qqm:') || callback.length > 512) return;
+    if (data['application_id'] != null &&
+        data['application_id'].toString() != _config.appId) {
+      return;
+    }
+    final group = data['group_openid']?.toString() ?? '';
+    final user = data['user_openid']?.toString() ?? '';
+    final actor = group.isNotEmpty
+        ? data['group_member_openid']?.toString() ?? ''
+        : user;
+    final session = group.isNotEmpty ? group : user;
+    if (session.isEmpty || actor.isEmpty) return;
+    if (!_dispatchedInteractions.add(id)) return;
+    if (_dispatchedInteractions.length > 1000) {
+      _dispatchedInteractions.remove(_dispatchedInteractions.first);
+    }
+    final outerId = data['_eventId']?.toString() ?? '';
+    final replyEventId = outerId.isEmpty ? id : outerId;
+    _replyEvents[session] = (
+      id: replyEventId,
+      at: DateTime.now(),
+      type: 'INTERACTION_CREATE',
+    );
+    _dispatchForAutoResponse(
+      MessageModel(
+        id: id,
+        sessionId: session,
+        senderId: actor,
+        senderName: 'QQ 用户',
+        content: '',
+        messageType: 0,
+        timestamp: DateTime.now(),
+        extra: {
+          'isGroup': group.isNotEmpty,
+          'pluginEventId': replyEventId,
+          'callbackData': callback,
+        },
+      ),
+    );
   }
 
   Future<void> _acknowledgeInteraction(
@@ -1062,12 +1103,39 @@ class BotClient extends ChangeNotifier {
   }
 
   void _dispatchForAutoResponse(MessageModel message) {
-    if (onMessageReceived == null ||
-        !shouldAutoRespondTo(message) ||
-        !_autoDispatchedMessageIds.add(message.id)) {
+    if (onMessageReceived == null || !shouldAutoRespondTo(message)) {
       return;
     }
-    onMessageReceived?.call(message);
+    final previous =
+        _pendingPluginDispatches[message.id] ?? Future<void>.value();
+    final appId = _config.appId;
+    late final Future<void> pending;
+    pending = previous
+        .then((_) async {
+          if (_disposed ||
+              _config.appId != appId ||
+              _autoDispatchedMessageIds.contains(message.id)) {
+            return;
+          }
+          // The host returns false when a full-group event did not match a plugin.
+          // A later @ delivery of the same message can then run a mention-only rule.
+          final handled = await onMessageReceived?.call(message);
+          if (handled != false) {
+            if (_autoDispatchedMessageIds.length >= 4000) {
+              _autoDispatchedMessageIds.remove(_autoDispatchedMessageIds.first);
+            }
+            _autoDispatchedMessageIds.add(message.id);
+          }
+        })
+        .catchError((Object _) {
+          _addLog('插件消息处理失败，请查看插件中心状态。');
+        })
+        .whenComplete(() {
+          if (identical(_pendingPluginDispatches[message.id], pending)) {
+            _pendingPluginDispatches.remove(message.id);
+          }
+        });
+    _pendingPluginDispatches[message.id] = pending;
   }
 
   Future<void> _handleRecallEvent(Map<String, dynamic> data) async {
@@ -1766,6 +1834,8 @@ class BotClient extends ChangeNotifier {
     _replySequences.clear();
     _replyEvents.clear();
     _acknowledgedInteractions.clear();
+    _dispatchedInteractions.clear();
+    _pendingPluginDispatches.clear();
     _autoDispatchedMessageIds.clear();
     _fullGroupMessageCount = 0;
     _loadConfig();

@@ -1,6 +1,6 @@
 param(
   [Parameter(Mandatory=$true)][string]$UpdatePublicKey,
-  [string]$UpdateBaseUrl = 'https://botmanager.uuze.cn',
+  [string]$UpdateBaseUrl = 'https://xingchenwa.github.io/qqm_project',
   [string]$Flutter = 'flutter',
   [switch]$Installer,
   [string]$Iscc = 'ISCC.exe'
@@ -10,7 +10,7 @@ $workspace = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $key = [Convert]::FromBase64String($UpdatePublicKey)
 if ($key.Length -ne 32) { throw 'UPDATE_PUBLIC_KEY must be a 32-byte Ed25519 public key in base64, NOT the private key.' }
 $uri = [Uri]$UpdateBaseUrl
-if ($uri.Scheme -ne 'https' -or -not $uri.Host -or $uri.UserInfo -or $uri.AbsolutePath -ne '/' -or $uri.Query -or $uri.Fragment) { throw 'UpdateBaseUrl must be an HTTPS origin.' }
+if ($uri.Scheme -ne 'https' -or -not $uri.Host -or $uri.UserInfo -or $uri.Query -or $uri.Fragment -or ($uri.AbsolutePath -ne '/' -and $UpdateBaseUrl.TrimEnd('/') -ne 'https://xingchenwa.github.io/qqm_project')) { throw 'UpdateBaseUrl must be the GitHub Pages project URL or a legacy HTTPS origin.' }
 if ($Installer -and -not (Get-Command $Iscc -ErrorAction SilentlyContinue)) { throw 'Install Inno Setup 6.5+ or supply -Iscc with its compiler path.' }
 if ($Installer) {
   $compilerDirectory = Split-Path -Parent (Get-Command $Iscc).Source
@@ -52,7 +52,7 @@ try {
   $licenseDirectory = Join-Path $stage 'licenses'
   $null = New-Item -ItemType Directory -Path $licenseDirectory
   Copy-Item -LiteralPath (Join-Path $workspace 'scripts\licenses\inno-chinese-MIT.txt') -Destination $licenseDirectory
-  $metadata = [ordered]@{schema=1;package_id='cn.uuze.botmanager';platform='windows';arch='x64';version=$version;build=[int]$buildNumber;entrypoint='lib/main.dart';update_server=$uri.GetLeftPart([UriPartial]::Authority);update_public_key=$UpdatePublicKey;crt_version=(Get-Item -LiteralPath (Join-Path $stage 'msvcp140.dll')).VersionInfo.FileVersion}
+  $metadata = [ordered]@{schema=1;package_id='cn.uuze.botmanager';platform='windows';arch='x64';version=$version;build=[int]$buildNumber;entrypoint='lib/main.dart';update_server=$UpdateBaseUrl.TrimEnd('/');update_public_key=$UpdatePublicKey;crt_version=(Get-Item -LiteralPath (Join-Path $stage 'msvcp140.dll')).VersionInfo.FileVersion}
   [IO.File]::WriteAllText((Join-Path $stage 'release-info.json'),($metadata | ConvertTo-Json),[Text.UTF8Encoding]::new($false))
   $null = New-Item -ItemType Directory -Path $dist -Force
   Compress-Archive -Path (Join-Path $stage '*') -DestinationPath $output

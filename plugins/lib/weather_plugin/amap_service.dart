@@ -42,6 +42,29 @@ class AmapService {
     return _get('/v3/ip', key, {'ip': ip});
   }
 
+  Future<String> cityCode(String city, String key) async {
+    _requireKey(key);
+    return _resolveCity(city.trim(), key);
+  }
+
+  Future<Map<String, dynamic>> forecast(String city, String key) async {
+    _requireKey(key);
+    final code = await _resolveCity(city.trim(), key);
+    final data = await _get('/v3/weather/weatherInfo', key, {
+      'city': code,
+      'extensions': 'all',
+    });
+    final values = data['forecasts'];
+    if (values is! List ||
+        values.isEmpty ||
+        values.first is! Map ||
+        (values.first as Map)['casts'] is! List ||
+        ((values.first as Map)['casts'] as List).isEmpty) {
+      throw const AmapException('该地区暂无天气预报，请尝试附近城市。');
+    }
+    return Map<String, dynamic>.from(values.first as Map);
+  }
+
   Future<String> _resolveCity(String city, String key) async {
     if (city.isEmpty || city.length > 60 || city.contains('\n')) {
       throw const AmapException('请填写城市/区县名称或六位行政区编码，例如：天气 北京。');
@@ -116,37 +139,47 @@ class AmapService {
   ) async {
     final cancel = CancelToken();
     try {
-      final response = await _dio
-          .get<dynamic>(
-            '$_baseUrl$path',
-            queryParameters: {
-              'key': key.trim(),
-              'output': 'JSON',
-              ...parameters,
-            },
-            cancelToken: cancel,
-            options: Options(
-              responseType: ResponseType.json,
-              receiveTimeout: _requestTimeout,
-              sendTimeout: _requestTimeout,
-              followRedirects: false,
-              validateStatus: (_) => true,
-            ),
-          )
-          .timeout(
+      final raw =
+          await (() async {
+            final response = await _dio.get<ResponseBody>(
+              '$_baseUrl$path',
+              queryParameters: {
+                'key': key.trim(),
+                'output': 'JSON',
+                ...parameters,
+              },
+              cancelToken: cancel,
+              options: Options(
+                responseType: ResponseType.stream,
+                receiveTimeout: _requestTimeout,
+                sendTimeout: _requestTimeout,
+                followRedirects: false,
+                validateStatus: (_) => true,
+              ),
+            );
+            if ((response.statusCode ?? 0) < 200 ||
+                (response.statusCode ?? 0) >= 300) {
+              throw AmapException(
+                '高德接口 HTTP ${response.statusCode ?? 0}，请稍后再试。',
+              );
+            }
+            final body = response.data;
+            if (body == null) throw const AmapException('高德接口返回为空。');
+            final bytes = <int>[];
+            await for (final chunk in body.stream) {
+              if (bytes.length + chunk.length > 131072) {
+                throw const AmapException('高德响应超过 128 KB，已停止读取。');
+              }
+              bytes.addAll(chunk);
+            }
+            return jsonDecode(utf8.decode(bytes));
+          })().timeout(
             _requestTimeout,
             onTimeout: () {
               cancel.cancel('请求超时');
               throw const AmapException('高德接口响应超时，请稍后再试。');
             },
           );
-      if ((response.statusCode ?? 0) < 200 ||
-          (response.statusCode ?? 0) >= 300) {
-        throw AmapException('高德接口 HTTP ${response.statusCode ?? 0}，请稍后再试。');
-      }
-      final raw = response.data is String
-          ? jsonDecode(response.data as String)
-          : response.data;
       if (raw is! Map) throw const AmapException('高德接口返回格式异常，请稍后再试。');
       final data = Map<String, dynamic>.from(raw);
       final code = amapText(data['infocode']);
@@ -169,6 +202,8 @@ class AmapService {
       throw const AmapException('无法连接高德接口，请检查网络后重试。');
     } on FormatException {
       throw const AmapException('高德接口返回格式异常，请稍后再试。');
+    } finally {
+      cancel.cancel('请求完成');
     }
   }
 

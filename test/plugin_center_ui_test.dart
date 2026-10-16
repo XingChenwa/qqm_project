@@ -124,12 +124,12 @@ void main() {
           .onPressed,
       isNull,
     );
-    expect(manager.plugins, hasLength(4));
+    expect(manager.plugins, hasLength(6));
     await tester.tap(find.byKey(const ValueKey('plugin-import-consent')));
     await tester.pumpAndSettle();
     await tester.tap(find.text('确认导入'));
     await tester.pumpAndSettle();
-    expect(manager.plugins, hasLength(5));
+    expect(manager.plugins, hasLength(7));
     expect(manager.plugins.last.info.isEnabled, false);
     await tester.tap(find.text('知道了'));
     await tester.pumpAndSettle();
@@ -159,7 +159,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.widgetWithText(FilledButton, '卸载'));
     await tester.pumpAndSettle();
-    expect(manager.plugins, hasLength(4));
+    expect(manager.plugins, hasLength(6));
     expect(storage.storedPlugins.containsKey('custom_hello'), false);
     expect(tester.takeException(), isNull);
   });
@@ -206,7 +206,7 @@ void main() {
           .text,
       contains('custom_hello'),
     );
-    expect(manager.plugins, hasLength(4));
+    expect(manager.plugins, hasLength(6));
     await tester.tap(find.byTooltip('关闭插件导入'));
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);

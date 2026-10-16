@@ -14,6 +14,16 @@ class MemoryStorage extends StorageService {
   final storedMessages = <String, MessageModel>{};
   final storedSessions = <String, ChatSession>{};
   final storedPlugins = <String, PluginInfo>{};
+  final pluginData = <String, Map<String, dynamic>>{};
+
+  @override
+  Future<Map<String, dynamic>> readPluginData(String scope) async =>
+      pluginData[scope] ?? {};
+
+  @override
+  Future<void> writePluginData(String scope, Map<String, dynamic> value) async {
+    pluginData[scope] = value;
+  }
 
   MemoryStorage({BotConfig? config}) : config = config ?? BotConfig() {
     TestWidgetsFlutterBinding.ensureInitialized();

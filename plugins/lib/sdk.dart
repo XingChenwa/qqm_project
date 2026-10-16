@@ -3,3 +3,4 @@ library;
 
 export 'src/plugin.dart';
 export 'src/commands.dart';
+export 'src/runtime.dart';

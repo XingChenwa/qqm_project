@@ -1,8 +1,8 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "id": "example_plugin",
   "name": "基础助手",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "问候、命令帮助、ping 与时间查询。",
   "config": {},
   "permissions": [

@@ -10,6 +10,8 @@ class PluginDeveloperDialog extends StatefulWidget {
     'plugins/examples/hello_json/plugin.json',
     'plugins/examples/hello_yaml/plugin.yaml',
     'plugins/examples/http_echo/plugin.json',
+    'plugins/examples/buttons/plugin.json',
+    'plugins/examples/media/plugin.json',
   ];
   const PluginDeveloperDialog({super.key, required this.contents});
   @override
@@ -21,7 +23,7 @@ class _PluginDeveloperDialogState extends State<PluginDeveloperDialog> {
   String get _content => widget.contents[_tab];
   @override
   Widget build(BuildContext context) => DefaultTabController(
-    length: 4,
+    length: PluginDeveloperDialog.assetPaths.length,
     child: AlertDialog(
       insetPadding: const EdgeInsets.all(12),
       title: Row(
@@ -50,6 +52,8 @@ class _PluginDeveloperDialogState extends State<PluginDeveloperDialog> {
                 Tab(text: 'JSON 示例'),
                 Tab(text: 'YAML 示例'),
                 Tab(text: 'HTTP 示例'),
+                Tab(text: '按钮示例'),
+                Tab(text: '媒体示例'),
               ],
             ),
             const SizedBox(height: 12),

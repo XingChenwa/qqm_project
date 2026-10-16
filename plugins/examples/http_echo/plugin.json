@@ -1,5 +1,6 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
+  "priority": 90,
   "id": "custom_http_echo",
   "name": "HTTP 复读示例",
   "version": "1.0.0",
