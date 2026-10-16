@@ -76,4 +76,11 @@ test('静态首页有原项目链接、Star、插件和四平台下载，无管�
   assert.ok(!html.includes('/admin') && !html.includes('使用统计'));
   assert.ok(!js.includes('/api/') && !js.includes('innerHTML'));
   assert.ok(!html.includes('src="/assets/') && !html.includes('href="/assets/'));
+  assert.match(html, /src="assets\/client-chat\.png"/);
+  assert.match(html, /href="plugins\.html/);
+  assert.ok(!html.includes('界面示意') && !html.includes('class="demo-chat"'));
+  const guide = await readFile(join(process.env.WEBSITE_DIRECTORY, 'plugins.html'), 'utf8');
+  assert.equal((guide.match(/<h2 id="section-/g) ?? []).length, 9);
+  assert.ok(guide.includes('HTTP 插件') && guide.includes('Dart SDK'));
+  assert.ok(!guide.includes('href="../'));
 });

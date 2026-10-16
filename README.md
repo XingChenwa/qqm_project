@@ -7,7 +7,7 @@
 
 **Windows · macOS · Android · iOS**
 
-[项目首页](https://xingchenwa.github.io/qqm_project/) · [下载客户端](https://github.com/XingChenwa/qqm_project/releases) · [插件开发文档](docs/plugin-development.md) · [问题反馈](https://github.com/XingChenwa/qqm_project/issues)
+[项目首页](https://xingchenwa.github.io/qqm_project/) · [下载客户端](https://github.com/XingChenwa/qqm_project/releases) · [插件开发文档](https://xingchenwa.github.io/qqm_project/plugins.html) · [问题反馈](https://github.com/XingChenwa/qqm_project/issues)
 
 如果喜欢这个项目，欢迎点个 **Star** ✦
 
@@ -44,7 +44,7 @@
 
 你也可以编写自己的插件，按需添加命令和玩法：
 
-[插件开发文档](docs/plugin-development.md) · [插件示例](plugins/examples/) · [Dart 插件 SDK](plugins/README.md)
+[在线开发手册](https://xingchenwa.github.io/qqm_project/plugins.html) · [Markdown 版文档](docs/plugin-development.md) · [插件示例](plugins/examples/) · [Dart 插件 SDK](plugins/README.md)
 
 ## 使用提示
 

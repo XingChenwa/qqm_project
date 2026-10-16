@@ -25,6 +25,13 @@ jobs:
           ref: docs
           path: build/website
           persist-credentials: true
+      - name: 校验插件文档渲染器
+        run: |
+          npm --prefix tool/site_docs ci --ignore-scripts --no-audit --no-fund
+          npm --prefix tool/site_docs test
+          node tool/site_docs/render.mjs --check
+        env:
+          WEBSITE_DIRECTORY: build/website
       - run: node --test tool/tests/github_release.test.mjs tool/tests/github_site_sync.test.mjs
         env:
           WEBSITE_DIRECTORY: build/website

@@ -1,0 +1,11 @@
+{
+  "name": "qqm-site-docs",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "generate": "node render.mjs",
+    "test": "node --test render.test.mjs"
+  },
+  "engines": {"node": ">=20"},
+  "dependencies": {"marked": "17.0.5"}
+}

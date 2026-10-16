@@ -43,9 +43,7 @@ migrate_working_dir/
 *.jks
 *.keystore
 /android/key.properties
-/management/data/*
-!/management/data/.gitignore
-/management/config.php
+**/node_modules/
 
 # Symbolication related
 app.*.symbols
