@@ -3,77 +3,94 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="QQ机器人管理器：基于 QQ 官方开放平台的跨平台中文工具。管理会话、编辑 Markdown、开发 JSON/YAML 与 HTTP 插件，支持 Windows、macOS、Android 和 iOS。">
+  <meta name="description" content="QQ机器人管理器：基于 QQ 官方开放平台的跨平台中文客户端。查看真实应用演示，下载 Windows、macOS、Android、iOS 客户端，阅读完整插件开发手册。">
   <meta name="theme-color" content="#f5f8ff">
-  <title>QQ机器人管理器 · 让想法成为机器人的新玩法</title>
+  <title>QQ机器人管理器 · 消息与玩法，都在一个工作台</title>
   <link rel="icon" href="assets/logo.png">
   <link rel="stylesheet" href="assets/site.css">
   <script src="assets/site.js" defer></script>
+  <script src="assets/demo.js" defer></script>
+  <script src="assets/docs.js" defer></script>
 </head>
 <body>
 <a class="skip-link" href="#main">跳到主要内容</a>
 <header class="site-header wrap">
   <a class="brand" href="./" aria-label="QQ机器人管理器首页"><img src="assets/logo.png" width="38" height="38" alt=""><span>QQ机器人管理器<small>BOT MANAGER</small></span></a>
-  <nav aria-label="主导航"><a href="#features">功能</a><a href="#plugins">插件</a><a href="#downloads">下载</a><a class="nav-github" href="https://github.com/XingChenwa/qqm_project">GitHub ↗</a></nav>
+  <nav aria-label="主导航"><a href="#demo">项目演示</a><a href="#plugins">内置插件</a><a href="plugins.html">开发文档</a><a href="#downloads">下载</a><a class="nav-github" href="https://github.com/XingChenwa/qqm_project">GitHub ↗</a></nav>
 </header>
 <main id="main">
   <section class="hero wrap">
-    <div class="hero-copy">
-      <p class="eyebrow"><span class="dot"></span> 一个认真打磨的学习交流项目</p>
-      <h1>把 QQ 机器人，<br><em>管得顺手一点。</em></h1>
-      <p class="hero-description">消息在这里，插件也在这里。<br>从一次聊天，到一个自己写的新玩法，<br>用熟悉的中文界面，把灵感慢慢变成日常。</p>
-      <div class="actions"><a class="button primary" href="#downloads">下载客户端 <span>↓</span></a><a class="button secondary" href="https://github.com/XingChenwa/qqm_project">查看项目源码 ↗</a></div>
-      <p class="platform-line">Windows · macOS · Android · iOS</p>
-    </div>
-    <div class="demo" aria-label="功能示意：聊天、Markdown 和插件工作台">
-      <div class="demo-title"><span class="window-dots" aria-hidden="true">● ● ●</span><span>你的机器人工作台</span><span class="demo-label">界面示意</span></div>
-      <div class="demo-body">
-        <aside class="demo-sidebar" aria-hidden="true"><img src="assets/logo.png" alt=""><span class="selected">会话</span><span>插件</span><span>日志</span><span>设置</span></aside>
-        <div class="demo-chat"><div class="demo-chat-heading"><span class="avatar">Q</span><div><strong>今天，也来一点新玩法</strong><small>中文会话 · 随心扩展</small></div><span class="status">QQ BOT</span></div>
-          <div class="bubble user">/签到</div><div class="bubble bot"><strong>签到成功 ✦</strong><br>小小的坚持，也值得记录。</div>
-          <div class="bubble user">天气 北京</div><div class="bubble bot">天气、骰子、投票、翻译……<br>你想要的功能，可以自己写。</div>
-          <div class="demo-composer"><span>输入消息，或试试 /帮助</span><span class="send" aria-hidden="true">↑</span></div>
-        </div>
-      </div>
-      <div class="plugin-float"><span class="plugin-mark">{ }</span><div><strong>你的想法，变成插件</strong><small>JSON / YAML / HTTP</small></div><span class="sparkle">✦</span></div>
+    <p class="eyebrow"><span class="dot"></span> 基于 QQ 官方开放平台 · 跨平台中文客户端</p>
+    <h1>消息与玩法，<br><em>都在一个工作台。</em></h1>
+    <p class="hero-description">连接自己的 QQ 机器人，管理单聊与群聊。<br>认真写一条 Markdown，也随时为它添一个新玩法。</p>
+    <div class="actions"><a class="button primary" href="#downloads">下载客户端 ↓</a><a class="button secondary" href="plugins.html">开始写插件 →</a></div>
+    <p class="platform-line">Windows · macOS · Android · iOS</p>
+  </section>
+
+  <section class="demo-section wrap" id="demo" aria-labelledby="demo-heading">
+    <div class="section-heading"><div><p class="eyebrow">真实客户端运行画面</p><h2 id="demo-heading">先看一眼，它怎么工作。</h2></div><a class="text-link" href="assets/client-chat.png">打开原始截图 ↗</a></div>
+    <figure class="app-preview">
+      <a class="preview-link" href="assets/client-chat.png" data-image-preview aria-label="放大查看真实客户端运行截图"><img src="assets/client-chat.png" width="1920" height="1200" fetchpriority="high" alt="QQ机器人管理器实际运行画面：左侧为导航，中间为群聊与单聊列表，右侧为 Markdown 消息和输入区，底部显示机器人离线状态。"><span class="preview-hint">点击放大查看 ↗</span></a>
+      <figcaption><span class="screenshot-tag">WINDOWS · 实际运行</span><span>当前客户端的离线示例会话，不包含真实账号或聊天记录。</span></figcaption>
+    </figure>
+    <div class="demo-notes">
+      <article><span>01 / 会话</span><h3>先找到对话，再专注内容</h3><p>单聊与群聊集中查看，支持会话搜索、昵称头像、引用和图片预览。</p></article>
+      <article><span>02 / 消息</span><h3>让消息按你的节奏出现</h3><p>新消息不打断当前阅读；自己发送成功后，回到最新消息。Markdown 有独立编辑与预览区。</p></article>
+      <article><span>03 / 扩展</span><h3>常用工具，放在手边</h3><p>插件、日志与设置从左侧导航进入。文件编辑、规则校验与试运行都在插件工作台完成。</p></article>
     </div>
   </section>
 
   <section class="section wrap" id="features">
-    <div class="section-heading"><div><p class="eyebrow">先把常用的事，做好</p><h2>不止连接，也让管理更轻松。</h2></div><p>基于 QQ 官方开放平台<br>桌面与手机，统一的中文体验</p></div>
+    <div class="section-heading"><div><p class="eyebrow">为机器人的日常管理而做</p><h2>连接之外，把细节也照顾好。</h2></div><p>不是个人 QQ 登录工具<br>使用自己的官方机器人应用</p></div>
     <div class="feature-grid">
-      <article class="feature"><span class="feature-icon" aria-hidden="true">↔</span><h3>清楚地聊，安心地看</h3><p>单聊与群聊统一管理，支持引用、图片预览和 QQ 表情。收到消息不打断阅读，主动发送后定位到最新。</p></article>
-      <article class="feature"><span class="feature-icon" aria-hidden="true">M↓</span><h3>Markdown，单独认真写</h3><p>独立编辑、预览和发送区，搭配消息配置与按钮。桌面端 Enter 发送，Ctrl + Enter 换行。</p></article>
-      <article class="feature"><span class="feature-icon" aria-hidden="true">{ }</span><h3>插件，不只是一个开关</h3><p>文件管理、源码编辑、校验、规则试运行与可恢复历史。简单规则本地运行，复杂逻辑交给 HTTP 服务。</p></article>
-      <article class="feature"><span class="feature-icon" aria-hidden="true">↗</span><h3>工具，也照顾日常细节</h3><p>应用内浏览网页，日志一键复制或导出。桌面自定义窗口与可选托盘，更新弹窗展示说明和安装进度。</p></article>
+      <article class="feature"><span class="feature-icon" aria-hidden="true">M↓</span><h3>编辑，而不只是输入</h3><p>文字与 Markdown 分开操作，编辑、预览、发送一处完成。支持媒体与按钮配置，桌面端 Enter 发送、Ctrl + Enter 换行。</p></article>
+      <article class="feature"><span class="feature-icon" aria-hidden="true">{ }</span><h3>给自己的玩法留接口</h3><p>导入 JSON / YAML 清单，或连接自己的 HTTP 服务。命令、权限、冷却与回复上下文由宿主管理。</p></article>
+      <article class="feature"><span class="feature-icon" aria-hidden="true">↗</span><h3>少一点窗口来回切换</h3><p>链接在应用内浏览，网页默认手机版。桌面自定义标题栏，支持拖动、最小化、最大化与可选的关闭到托盘。</p></article>
+      <article class="feature"><span class="feature-icon" aria-hidden="true">↓</span><h3>问题与更新，都看得见</h3><p>日志可全量复制或导出 TXT / LOG。新版以弹窗展示说明和安装入口，下载后核验签名与安装包完整性。</p></article>
     </div>
   </section>
 
   <section class="plugins-section" id="plugins"><div class="wrap section">
-    <div class="section-heading"><div><p class="eyebrow">六个起点，更多可能</p><h2>今天，给机器人加点什么？</h2></div><a class="text-link" href="https://github.com/XingChenwa/qqm_project/blob/main/docs/plugin-development.md">阅读插件开发文档 ↗</a></div>
+    <div class="section-heading"><div><p class="eyebrow">六个内置插件，从常用到有趣</p><h2>开箱之后，还可以继续生长。</h2></div><a class="text-link" href="plugins.html#section-3">查看全部命令 →</a></div>
     <div class="plugin-grid">
-      <article class="plugin-card"><span>01 / 基础助手</span><h3>从一句“帮助”开始</h3><p>动态命令菜单、连通测试、时间和复读。</p><code>/帮助</code><code>/ping</code></article>
-      <article class="plugin-card"><span>02 / 天气与 IP</span><h3>出门前，问一问</h3><p>高德天气、预报、城市编码与指定 IP 查询。</p><code>天气 北京</code><code>/forecast 上海</code></article>
-      <article class="plugin-card"><span>03 / 随机游乐场</span><h3>选择困难？交给随机</h3><p>骰子、硬币、转盘、打乱、随机数与猜拳。</p><code>/骰子 2d6+3</code><code>/选择 茶 | 咖啡</code></article>
-      <article class="plugin-card"><span>04 / 翻译助手</span><h3>读代码，也读懂注释</h3><p>显式命令触发文本与代码注释翻译，按需联网。</p><code>/翻译 Hello</code><code>/注释翻译</code></article>
-      <article class="plugin-card"><span>05 / 每日小会馆</span><h3>给每一天留个小记号</h3><p>签到积分、会话排行、今日运势和抽签。</p><code>/签到</code><code>/今日运势</code></article>
-      <article class="plugin-card"><span>06 / 群互动</span><h3>让群聊热闹一点</h3><p>猜数字、群内投票与可选按钮互动。</p><code>/猜数字 开始</code><code>/投票 结果</code></article>
+      <article class="plugin-card"><span>01 / 基础助手</span><h3>从一句“帮助”开始</h3><p>动态帮助菜单、连通测试、时间查询和文本复读。</p><code>/帮助</code><code>/ping</code></article>
+      <article class="plugin-card"><span>02 / 天气与 IP</span><h3>出门之前，问一问</h3><p>使用高德接口查询天气、预报、城市编码与指定 IP。</p><code>天气 北京</code><code>/forecast 上海</code></article>
+      <article class="plugin-card"><span>03 / 随机游乐场</span><h3>选择困难？交给随机</h3><p>骰子、硬币、选择、转盘、打乱、随机数和猜拳。</p><code>/骰子 2d6+3</code><code>/选择 茶 | 咖啡</code></article>
+      <article class="plugin-card"><span>04 / 翻译助手</span><h3>读代码，也读懂注释</h3><p>按命令触发文本翻译与代码注释翻译，按需调用 DeepSeek。</p><code>/翻译 Hello</code><code>/注释翻译</code></article>
+      <article class="plugin-card"><span>05 / 每日小会馆</span><h3>每天来一点小期待</h3><p>签到积分、会话排行榜、今日运势与抽签。</p><code>/签到</code><code>/今日运势</code></article>
+      <article class="plugin-card"><span>06 / 群互动</span><h3>把大家的选择放一起</h3><p>猜数字、群内投票与可选的 Markdown 按钮互动。</p><code>/猜数字 开始</code><code>/投票 结果</code></article>
     </div>
-    <p class="section-note">天气、翻译等联网插件需要自行配置服务 Key；Markdown、按钮及群内免 @ 取决于机器人已获的平台权限。运势、抽签和积分仅供娱乐。</p>
+    <p class="section-note">天气、翻译需要自行配置服务 Key；Markdown、按钮与群内免 @ 取决于机器人已获得的平台权限。积分、运势与抽签仅供娱乐。</p>
   </div></section>
 
-  <section class="section wrap" id="start">
-    <div class="section-heading"><div><p class="eyebrow">从这里出发</p><h2>接入，然后开始创造。</h2></div></div>
-    <ol class="steps"><li><span>1</span><h3>准备官方机器人</h3><p>在 QQ 开放平台创建机器人，确认所需权限与接入环境。</p></li><li><span>2</span><h3>下载并连接</h3><p>安装对应客户端，在设置中填写自己的应用凭据并连接。</p></li><li><span>3</span><h3>挑选你的玩法</h3><p>在插件中心配置、启用插件，或者导入你自己写的清单。</p></li></ol>
-    <div class="developer-card"><div><p class="eyebrow">写给开发者</p><h3>从规则，到你自己的服务。</h3><p>JSON / YAML 写轻量命令，Node.js / Python 等通过 HTTP 接入复杂玩法。<br>命令、权限、冷却与回复上下文由宿主管理，插件只需专注自己的逻辑。</p><a class="text-link" href="https://github.com/XingChenwa/qqm_project/tree/main/plugins/examples">查看完整示例 ↗</a></div><div class="code-card" aria-label="插件清单结构示意"><span>plugin.json · SDK v2</span><pre><code>{
+  <section class="section wrap" id="guide-entry">
+    <div class="section-heading"><div><p class="eyebrow">文档就在这里，不用来回翻仓库</p><h2>你的第一个插件，从“你好”开始。</h2></div></div>
+    <div class="developer-card">
+      <div><p class="eyebrow">JSON / YAML / HTTP / DART SDK</p><h3>有例子，也有边界。</h3><p>完整手册包含安装流程、命令匹配、模板变量、权限与群消息、Markdown / 媒体 / 按钮、HTTP 协议、Dart SDK 和文件工作区说明。</p><p>右侧是可以直接导入的完整规则清单。导入后检查权限、校验并启用，发送 <code>/myhello 测试</code> 即可尝试。</p><div class="actions"><a class="button primary" href="plugins.html#section-2">两分钟写第一个插件 →</a><a class="text-link" href="https://github.com/XingChenwa/qqm_project/tree/main/plugins/examples">更多示例源码 ↗</a></div></div>
+      <div class="code-example home-example"><div class="code-heading"><span>plugin.json · 完整可导入示例</span></div><pre tabindex="0"><code>{
   "schema_version": 2,
+  "id": "my_hello",
+  "name": "我的问候",
+  "version": "1.0.0",
+  "description": "问候命令示例",
   "runtime": "rules",
-  "permissions": [
-    "message:read",
-    "message:send"
-  ]
-}</code></pre><small>结构示意，完整可安装清单见示例目录。</small></div></div>
+  "permissions": ["message:read", "message:send"],
+  "rules": [{
+    "match": {"type": "command", "value": "myhello"},
+    "message": {
+      "format": "text",
+      "content": "你好，{{sender_name}}！参数：{{args}}"
+    }
+  }]
+}</code></pre></div>
+    </div>
+    <div class="doc-entrances"><a href="plugins.html#section-4"><span>01</span><strong>命令与权限</strong><small>匹配规则、优先级、冷却与全量群事件 →</small></a><a href="plugins.html#section-5"><span>02</span><strong>丰富的回复</strong><small>Markdown、媒体、按钮与回调 →</small></a><a href="plugins.html#section-6"><span>03</span><strong>自己的服务</strong><small>HTTP 协议、Node.js 与 Python 示例 →</small></a></div>
   </section>
+
+  <section class="start-section"><div class="section wrap" id="start">
+    <div class="section-heading"><div><p class="eyebrow">准备好，就从这里开始</p><h2>三步，把机器人接进来。</h2></div></div>
+    <ol class="steps"><li><span>1</span><h3>准备官方机器人</h3><p>在 QQ 开放平台创建机器人，确认所需权限和接入环境。</p></li><li><span>2</span><h3>下载并连接</h3><p>安装对应客户端，填写自己的应用凭据，然后连接机器人。</p></li><li><span>3</span><h3>启用你的玩法</h3><p>在插件中心按需配置、启用插件，也可以导入自己的规则清单。</p></li></ol>
+  </div></section>
 
   <section class="downloads section wrap" id="downloads">
     <div class="section-heading"><div><p class="eyebrow">选一个你顺手的设备</p><h2>选择你的平台</h2></div><a class="text-link" href="https://github.com/XingChenwa/qqm_project/releases">所有版本 ↗</a></div>
@@ -89,8 +106,11 @@
     <noscript><p class="notice">请启用 JavaScript 读取最新版本，或直接前往 <a href="https://github.com/XingChenwa/qqm_project/releases">GitHub Releases</a> 下载。</p></noscript>
   </section>
 
-  <section class="star-banner wrap" id="star"><div><p class="eyebrow">一个 Star，一点继续打磨的动力</p><h2>如果喜欢这个项目，<br>欢迎点个 Star ✦</h2><p>遇到问题，带上版本和脱敏日志来提 Issue；<br>有更好的想法，也欢迎贡献代码、文档和新玩法。</p></div><div class="actions"><a class="button primary" href="https://github.com/XingChenwa/qqm_project">☆ 给项目点个 Star</a><a class="button secondary" href="https://github.com/XingChenwa/qqm_project/issues">问题与建议 ↗</a></div></section>
+
+  <section class="star-banner wrap" id="star"><div><p class="eyebrow">一个开源的学习交流项目</p><h2>如果喜欢这个项目，<br>欢迎点个 Star ✦</h2><p>一点支持，就是继续打磨的动力。<br>也欢迎贡献代码、文档和新玩法，或带上版本与脱敏日志反馈问题。</p></div><div class="actions"><a class="button primary" href="https://github.com/XingChenwa/qqm_project">☆ 给项目点个 Star</a><a class="button secondary" href="https://github.com/XingChenwa/qqm_project/issues">问题与建议 ↗</a></div></section>
 </main>
-<footer class="wrap"><span>QQ机器人管理器 · 学习为目的编写的<br><small>基于 QQ 官方开放平台开发，非腾讯官方客户端。</small></span><span>作者 QQ：2377130783<br><a href="https://github.com/XingChenwa/qqm_project">项目地址 ↗</a></span></footer>
+<dialog class="image-dialog" aria-labelledby="image-dialog-title"><div class="dialog-toolbar"><h2 id="image-dialog-title">客户端实际运行截图</h2><button type="button" class="dialog-close" autofocus>关闭大图 ×</button></div><div class="dialog-image-scroll"><img src="assets/client-chat.png" width="1920" height="1200" alt="放大的 QQ机器人管理器真实运行截图"></div><p>离线示例数据 · 可横向滚动查看细节 · 按 Esc 关闭</p></dialog>
+<p id="copy-status" class="sr-only" aria-live="polite"></p>
+<footer class="wrap"><span>QQ机器人管理器 · 学习为目的编写的<br><small>基于 QQ 官方开放平台开发，非腾讯官方客户端。</small></span><span><a href="https://github.com/XingChenwa/qqm_project/blob/main/LICENSE">GPL-2.0-only</a> · 作者 QQ：2377130783<br><a href="plugins.html">插件开发手册</a> · <a href="https://github.com/XingChenwa/qqm_project">项目地址 ↗</a></span></footer>
 </body>
 </html>

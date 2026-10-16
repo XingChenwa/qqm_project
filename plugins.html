@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="QQ机器人管理器插件开发手册：JSON/YAML 规则、HTTP 插件、Markdown 与按钮、权限、Dart SDK 和文件工作区。含完整示例与命令说明。">
+  <meta name="theme-color" content="#f5f8ff">
+  <title>插件开发手册 · QQ机器人管理器</title>
+  <link rel="icon" href="assets/logo.png">
+  <link rel="stylesheet" href="assets/site.css">
+  <script src="assets/docs.js" defer></script>
+</head>
+<body class="docs-page">
+<a class="skip-link" href="#guide">跳到文档正文</a>
+<header class="site-header wrap">
+  <a class="brand" href="./"><img src="assets/logo.png" width="38" height="38" alt=""><span>QQ机器人管理器<small>BOT MANAGER</small></span></a>
+  <nav aria-label="主导航"><a href="./#demo">项目演示</a><a href="plugins.html" aria-current="page">开发文档</a><a href="./#downloads">下载</a><a class="nav-github" href="https://github.com/XingChenwa/qqm_project">GitHub ↗</a></nav>
+</header>
+<div class="docs-heading wrap">
+  <p class="eyebrow">PLUGIN WORKSHOP / SDK v2</p>
+  <h1>把想法，写成一个插件。</h1>
+  <p>从第一条问候命令，到你自己的服务。这里是完整的插件开发手册。</p>
+  <div class="doc-meta"><a href="#section-2">开始第一个插件 ↓</a><a href="https://github.com/XingChenwa/qqm_project/tree/main/plugins/examples">示例源码 ↗</a><a href="https://github.com/XingChenwa/qqm_project/blob/main/docs/plugin-development.md">查看 Markdown 源文档 ↗</a></div>
+</div>
+<div class="docs-layout wrap">
+  <aside class="docs-sidebar">
+    <details class="docs-toc" open>
+      <summary>文档目录</summary>
+      <nav aria-label="文档目录"><a href="#section-1">1. 先选运行方式</a>
+<a href="#section-2">2. 两分钟安装第一个插件</a>
+<a href="#section-3">3. 内置玩法命令</a>
+<a href="#section-4">4. 群消息、优先级与权限</a>
+<a href="#section-5">5. 清单与结构化回复</a>
+<a href="#section-6">6. 用 JavaScript / Python 编写 HTTP 插件</a>
+<a href="#section-7">7. Dart SDK v2</a>
+<a href="#section-8">8. 文件管理、数据与测试</a>
+<a href="#section-9">9. QQ 官方能力边界与参考</a></nav>
+    </details>
+    <div class="docs-help"><strong>需要先试一试？</strong><p>安装客户端，打开「插件 → 写插件」，导入清单后先校验和试运行。</p><a href="./#downloads">下载客户端 →</a></div>
+  </aside>
+  <main id="guide" class="docs-article"><p>这套插件系统让开发者在四端共享命令与玩法。宿主负责 QQ 连接、凭据、回复上下文、序号和发送；插件只返回结果。可使用 JSON/YAML 规则、HTTP 服务或随应用编译的 Dart SDK 开发插件。</p>
+<p>内置六个插件，覆盖基础助手、天气与 IP、随机游乐场、翻译、每日小会馆和群互动。需要固定回复时，也可以编写可独立启停的规则插件。</p>
+<h2 id="section-1" tabindex="-1">1. 先选运行方式<a class="heading-anchor" href="#section-1" aria-label="本节链接">#</a></h2>
+<div class="table-scroll" role="region" aria-label="文档表格" tabindex="0"><table>
+<thead>
+<tr>
+<th>方式</th>
+<th>用途</th>
+<th>执行位置</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>rules</code> JSON / YAML</td>
+<td>命令、关键词、Markdown、按钮、固定媒体</td>
+<td>应用内直接安装，无需编译</td>
+</tr>
+<tr>
+<td><code>http</code> 清单 + 自有服务</td>
+<td>Node.js / Python / Go 等复杂玩法</td>
+<td>开发者的服务；应用只调用已授权地址</td>
+</tr>
+<tr>
+<td><code>builtin</code> Dart SDK</td>
+<td>深度逻辑、原生集成、离线玩法</td>
+<td>源码审核后随应用重新编译</td>
+</tr>
+</tbody></table>
+</div>
+<p>文件管理器可以编辑 <code>.json/.yaml/.yml/.md/.txt/.js/.mjs/.py/.dart</code>。<strong>能编辑不等于能执行</strong>：应用不 eval 脚本、不运行 shell、不自动启动服务，也不内置 Node/Redis。手机上的本地 HTTP 地址指手机自己，不是电脑。</p>
+<h2 id="section-2" tabindex="-1">2. 两分钟安装第一个插件<a class="heading-anchor" href="#section-2" aria-label="本节链接">#</a></h2>
+<p>进入「插件 → 写插件 → 新建插件项目」，填写唯一 ID，生成 <code>plugin.json</code>。也可将下列 UTF-8 清单粘贴到「导入」：</p>
+<div class="code-example"><div class="code-heading"><span>json</span></div><pre tabindex="0"><code>{
+  &quot;schema_version&quot;: 2,
+  &quot;id&quot;: &quot;my_hello&quot;,
+  &quot;name&quot;: &quot;我的问候&quot;,
+  &quot;version&quot;: &quot;1.0.0&quot;,
+  &quot;description&quot;: &quot;问候命令示例&quot;,
+  &quot;runtime&quot;: &quot;rules&quot;,
+  &quot;permissions&quot;: [&quot;message:read&quot;, &quot;message:send&quot;],
+  &quot;rules&quot;: [
+    {
+      &quot;match&quot;: {&quot;type&quot;: &quot;command&quot;, &quot;value&quot;: &quot;myhello&quot;},
+      &quot;message&quot;: {&quot;format&quot;: &quot;text&quot;, &quot;content&quot;: &quot;你好，{{sender_name}}！参数：{{args}}&quot;}
+    }
+  ]
+}</code></pre></div>
+<ol>
+<li>校验或本地试运行；预览不会调用 HTTP 或发送 QQ。</li>
+<li>点击「安装到插件中心」，检查权限；替换现有 ID 还要确认替换。</li>
+<li>安装和替换后均停用，检查配置后再启用。</li>
+<li>发送 <code>/myhello 测试</code> 或 <code>#myhello 测试</code>。</li>
+</ol>
+<p>已有 v1 清单继续可用。v2 推荐显式 <code>message.format</code>，避免正文里的 Markdown 符号被误判。不要占用内置 ID。</p>
+<h2 id="section-3" tabindex="-1">3. 内置玩法命令<a class="heading-anchor" href="#section-3" aria-label="本节链接">#</a></h2>
+<div class="table-scroll" role="region" aria-label="文档表格" tabindex="0"><table>
+<thead>
+<tr>
+<th>插件 / ID</th>
+<th>命令与行为</th>
+<th>配置 / 数据</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>基础助手 <code>example_plugin</code></td>
+<td><code>/帮助</code>、<code>/help</code>、<code>/菜单</code> 动态菜单；<code>/ping</code>；<code>/时间</code>；<code>/复读 文本</code></td>
+<td>复读最多 1000 字，不包含式触发普通聊天</td>
+</tr>
+<tr>
+<td>天气与 IP <code>weather_plugin</code></td>
+<td><code>天气 北京</code>、<code>查询天气 上海</code>、<code>/weather 110105</code>；<code>天气预报 北京</code>、<code>/forecast 北京</code>；<code>城市编码 北京</code>；<code>查ip地址 114.114.114.114</code>、<code>/ip IPv4</code></td>
+<td>高德 Web 服务 Key、默认城市；同名地区需用编码确认；不查询 QQ 用户 IP</td>
+</tr>
+<tr>
+<td>随机游乐场 <code>dice_plugin</code></td>
+<td><code>/骰子 2d6+3</code>、<code>/roll 1d20</code>、裸 <code>2d6</code>；<code>/硬币 3</code>；<code>/选择 火锅 | 烧烤</code>；<code>/转盘 A | B</code>；<code>/打乱 小明 | 小红</code>；<code>/随机数 1 100</code>；<code>/猜拳 石头</code></td>
+<td>数量 1–100、面数 2–1000；选择 2–20 项；不是博彩或密码生成器</td>
+</tr>
+<tr>
+<td>翻译 <code>translate_comment</code></td>
+<td><code>/注释翻译</code>、<code>/translate</code>、<code>/fanyi</code> 后接带语言名的代码块；<code>/翻译 文本</code></td>
+<td>DeepSeek Key、目标语言、模型名；仅明确命令会联网，可能产生费用</td>
+</tr>
+<tr>
+<td>每日小会馆 <code>daily_club</code></td>
+<td><code>/签到</code>、<code>/积分</code>、<code>/排行</code>、<code>/今日运势</code>、<code>/抽签</code></td>
+<td>每日积分 1–100；北京时间按日签到，重复签到不加分，排行榜前十，单会话最多 1000 人</td>
+</tr>
+<tr>
+<td>群互动 <code>group_games</code></td>
+<td><code>/猜数字 开始</code>、<code>/猜数字 50</code>、<code>/猜数字 结束</code>；<code>/投票 创建 标题 | A | B</code>、<code>/投票 选择 1</code>、<code>/投票 结果</code>、<code>/投票 结束</code></td>
+<td>猜数字 15 分钟 / 50 次；投票 24 小时、2–6 项、1000 人；发起人或官方角色为群主/管理员可结束</td>
+</tr>
+</tbody></table>
+</div>
+<p>投票每人一票，可改票；旧投票按钮不能作用于新投票。按钮默认关闭，机器人拥有 Markdown/键盘权限后可在群互动配置启用；不开按钮也能用文本命令完整操作。积分是本地娱乐数据，无现金价值。运势与抽签仅供娱乐，不用于现实决策。</p>
+<p>翻译最多 12000 字、4 个代码块、120 段注释；请求 35 秒、响应 128 KB 上限。代码模式仅提交识别出的注释列表，再按原位置替换，不让模型重写整个代码。支持常见 Python、C/C++、Java、Dart、Go、C#、Rust 与基础 JS/TS；复杂原始字符串、JS 正则/模板等保守拒绝。字符串、Python 文档字符串不翻译。结果仍应人工审核，注释可能影响工具或编译配置；不保证语义级解析所有语言。普通文本翻译会把命令参数发给 DeepSeek。</p>
+<h2 id="section-4" tabindex="-1">4. 群消息、优先级与权限<a class="heading-anchor" href="#section-4" aria-label="本节链接">#</a></h2>
+<p>群内免 @ 的前提是 QQ 平台已开通「接收所有消息」，且应用允许接收全量群消息；代码不能绕过平台权限。<a href="https://bot.q.qq.com/wiki/develop/api-v2/autogen/event/group_message_create.html">全量群事件文档</a></p>
+<ul>
+<li>全量群事件中，内置插件只响应明确 <code>/</code>、<code>#</code> 命令；天气/IP 的明确自然指令、骰子表达式也可触发。普通聊天不兜底回复。</li>
+<li>第三方 <code>command</code> 规则可免 @；<code>exact/prefix/contains</code> 默认仅处理单聊或 @ 消息。需要普通全量消息时同时声明 <code>&quot;listen_all&quot;:true</code> 和权限 <code>events:group-all</code>，安装时由操作者确认。</li>
+<li>插件按 <code>priority</code> 从小到大运行，范围 0–1000，默认 100；同优先级按加载顺序。首个返回有效回复的插件结束本轮，避免多个插件消耗被动回复额度。</li>
+<li><code>cooldown_ms</code>：0–60000，默认 0，同插件、会话、发送者的回复冷却；每插件最多 4 个并发任务。</li>
+<li><code>permission</code> 放在规则上：<code>all</code>（默认）、<code>admin</code>、<code>owner</code>。依据平台 <code>author.member_role</code>；未知角色拒绝，不把昵称/OpenID 自述当权限。管理器本机手动命令标记为 <code>operator</code>；签到与群游戏拒绝没有真实发送者的手动身份。</li>
+</ul>
+<p>支持 <code>match.type</code>：<code>command</code>、<code>exact</code>、<code>prefix</code>、<code>contains</code>、<code>callback</code>。<code>scope</code> 为 <code>all/group/private</code>，<code>case_sensitive</code> 作用于普通文本；命令名不区分大小写。<code>command.value</code> 不带 <code>/</code>、<code>#</code> 或空白。<code>callback.value</code> 是命名空间后的动作名，例如 <code>qqm:my_buttons:hello:参数</code> 对应 <code>hello</code>。</p>
+<p>模板变量：<code>{{content}}</code>、<code>{{args}}</code>、<code>{{sender_name}}</code>、<code>{{sender_id}}</code>、<code>{{session_id}}</code>、<code>{{sender_role}}</code>、<code>{{now}}</code>、<code>{{config.键}}</code>。<code>now</code> 为北京时间；未知变量为空，secret 不插值，只替换一次。命令参数规范化空白，但多行代码块保留。需要原文用 <code>content</code>。富文本模板中的用户参数不会自动转义，开发者应使用纯文本或在 HTTP 服务转义。</p>
+<h2 id="section-5" tabindex="-1">5. 清单与结构化回复<a class="heading-anchor" href="#section-5" aria-label="本节链接">#</a></h2>
+<p><a href="https://github.com/XingChenwa/qqm_project/blob/main/plugins/schema/plugin.schema.json">JSON Schema</a> 提供编辑器提示；应用还会交叉检查权限、配置、URL 和域名。清单不执行代码。最大 256 KB、16 层、10000 节点，最多 64 条规则、32 个配置项、32 个第三方插件；未知字段直接拒绝。</p>
+<p>必填字段：<code>schema_version</code>（1 或 2）、<code>id</code>、<code>name</code>、<code>version</code>、<code>description</code>、<code>runtime</code>、<code>permissions</code>、<code>rules</code>。ID 3–64 位小写字母、数字、下划线，以字母开头。名称/版本最多 80 字，描述最多 1000 字。<code>author</code> 可选。每条规则使用 <code>reply</code> 或 <code>message</code>，不能同时使用；HTTP 规则可以都省略，由服务决定结果。</p>
+<div class="code-example"><div class="code-heading"><span>json</span></div><pre tabindex="0"><code>{
+  &quot;match&quot;: {&quot;type&quot;: &quot;command&quot;, &quot;value&quot;: &quot;菜单&quot;, &quot;scope&quot;: &quot;group&quot;},
+  &quot;permission&quot;: &quot;all&quot;,
+  &quot;message&quot;: {
+    &quot;format&quot;: &quot;markdown&quot;,
+    &quot;content&quot;: &quot;# 插件菜单\n选择一个操作：&quot;,
+    &quot;buttons&quot;: [[
+      {&quot;label&quot;: &quot;查看积分&quot;, &quot;data&quot;: &quot;/积分&quot;},
+      {&quot;label&quot;: &quot;打招呼&quot;, &quot;data&quot;: &quot;qqm:my_buttons:hello&quot;, &quot;callback&quot;: true}
+    ]]
+  }
+}</code></pre></div>
+<p><code>format</code> 为 <code>text/markdown/media</code>。正文最多 16000 字符；文本/Markdown 必须非空。按钮只用于 Markdown，最多 5 行、每行 5 个；文字 1–10 字、data 最多 512 字符。普通按钮填命令；回调按钮须声明 <code>interaction:read</code>，data 必须以 <code>qqm:&lt;本插件ID&gt;:</code> 开头，再写一条 <code>callback</code> 规则处理。群按钮不设置仅 C2C 支持的自动发送参数。</p>
+<p>媒体格式例：<code>{&quot;format&quot;:&quot;media&quot;,&quot;content&quot;:&quot;图片说明&quot;,&quot;media_url&quot;:&quot;https://cdn.example.com/pic.png&quot;,&quot;media_type&quot;:1}</code>。需声明 <code>message:media</code> 和 <code>media_hosts:[&quot;cdn.example.com&quot;]</code>，类型 1 图片 / 2 视频 / 3 语音 / 4 文件。URL 仅 HTTPS、无凭据和片段；域名严格匹配，不允许通过模板换到其他主机。QQ 服务器还需能够访问该媒体。不是本地任意文件上传接口。</p>
+<p>权限基础为 <code>message:read</code>、<code>message:send</code>；HTTP 增加 <code>network:http</code>。可选 <code>message:media</code>、<code>interaction:read</code>、<code>events:group-all</code>。<code>network:amap/deepseek</code> 仅可信内置插件使用；清单不是原生代码的 OS 沙箱。</p>
+<p>配置项由 <code>config_schema</code> 定义，类型 <code>string/secret/boolean/integer</code>，支持 <code>key/label/type/default/required</code>。key 字母开头，最多 64 字符；字符串最多 8192 字符。<code>config</code> 仅存声明过的默认值。分享清单会清除 secret 默认值，不带本机密钥；不要把密钥写进规则正文或普通配置。</p>
+<h2 id="section-6" tabindex="-1">6. 用 JavaScript / Python 编写 HTTP 插件<a class="heading-anchor" href="#section-6" aria-label="本节链接">#</a></h2>
+<p>完整示例：</p>
+<ul>
+<li><a href="https://github.com/XingChenwa/qqm_project/blob/main/plugins/examples/hello_json/plugin.json">JSON 问候</a>、<a href="https://github.com/XingChenwa/qqm_project/blob/main/plugins/examples/hello_yaml/plugin.yaml">YAML 问候</a></li>
+<li><a href="https://github.com/XingChenwa/qqm_project/blob/main/plugins/examples/buttons/plugin.json">Markdown 按钮与回调</a></li>
+<li><a href="https://github.com/XingChenwa/qqm_project/blob/main/plugins/examples/media/plugin.json">媒体回复</a></li>
+<li><a href="https://github.com/XingChenwa/qqm_project/blob/main/plugins/examples/http_echo/plugin.json">HTTP 清单</a>、<a href="https://github.com/XingChenwa/qqm_project/blob/main/plugins/examples/http_echo/server.py">Python 服务</a></li>
+<li><a href="https://github.com/XingChenwa/qqm_project/blob/main/plugins/examples/http_echo/server.mjs">Node.js 服务</a></li>
+</ul>
+<p>HTTP 清单设置 <code>http.url</code>、<code>timeout_ms</code>（1000–20000，默认 8000）、可选 <code>token_config</code> 和 <code>send_config_keys</code>。URL 生产环境只允许 HTTPS；HTTP 仅回环本机调试。禁止 URL 凭据、查询和片段，不跟随重定向、不重试。<code>token_config</code> 指向 secret，以 Bearer 请求头授权，不进入 JSON；<code>send_config_keys</code> 只能选择非 secret 配置。</p>
+<p>POST 请求示意（HTTP 封装版本保留 <code>1</code>，新增字段为可选）：</p>
+<div class="code-example"><div class="code-heading"><span>json</span></div><pre tabindex="0"><code>{
+  &quot;schema_version&quot;: 1,
+  &quot;plugin_id&quot;: &quot;custom_http_echo&quot;,
+  &quot;event&quot;: &quot;command&quot;,
+  &quot;command&quot;: &quot;echo&quot;,
+  &quot;args&quot;: [&quot;你好&quot;],
+  &quot;text&quot;: &quot;你好&quot;,
+  &quot;message&quot;: {
+    &quot;message_id&quot;: &quot;来源消息ID&quot;,
+    &quot;session_id&quot;: &quot;群或用户OpenID&quot;,
+    &quot;sender_id&quot;: &quot;发送者OpenID&quot;,
+    &quot;sender_name&quot;: &quot;小明&quot;,
+    &quot;sender_role&quot;: &quot;member&quot;,
+    &quot;content&quot;: &quot;/echo 你好&quot;,
+    &quot;message_type&quot;: 0,
+    &quot;is_group&quot;: true,
+    &quot;is_full_group_message&quot;: false,
+    &quot;event_type&quot;: &quot;message&quot;,
+    &quot;timestamp&quot;: &quot;2026-10-16T00:00:00.000Z&quot;
+  },
+  &quot;config&quot;: {&quot;language&quot;: &quot;中文&quot;}
+}</code></pre></div>
+<p><code>event</code> 为 <code>message/command/interaction</code>；回调时 <code>message.callback_data</code> 包含命名空间参数，message_id 为交互事件 ID。附件存在时传 <code>attachments</code>（URL、文件名、类型、尺寸），服务不要盲目信任或下载任意 URL。<strong>不传机器人密钥、access_token、message_scene 鉴权令牌或历史聊天</strong>。操作者手动执行的 message_id/sender_id 可能为空。</p>
+<p>服务返回 HTTP 200：<code>{&quot;reply&quot;:&quot;文本&quot;}</code>、<code>{&quot;reply&quot;:null}</code>，或 <code>{&quot;message&quot;:{&quot;format&quot;:&quot;markdown&quot;,&quot;content&quot;:&quot;# 你好&quot;}}</code>。结构化格式同上，权限和媒体域名仍由宿主检查。请求与响应各 64 KB。服务不能指定其他目标会话、传任意 QQ API 请求、修改 msg_seq 或请求机器人 Token。停用/卸载时迟到的结果不会继续发送。</p>
+<p>本机试运行（示例令牌仅供本地测试，请自行替换）：</p>
+<div class="code-example"><div class="code-heading"><span>powershell</span></div><pre tabindex="0"><code>$env:QQM_PLUGIN_TOKEN = &#39;local-demo-token-change-me&#39;
+node plugins/examples/http_echo/server.mjs
+# 或 python plugins/examples/http_echo/server.py</code></pre></div>
+<p>示例监听 <code>127.0.0.1:8787</code>；在插件配置填写同一令牌，启用后 <code>/echo 测试</code>。服务不会由应用启动。部署公网需自行增加 TLS、访问令牌、限流、幂等、数据备份；不要把开发服务器直接暴露公网。服务收到 OpenID/消息内容，请明确用途、最小化日志和保留时间。Node/Redis 玩法可以写在此服务。</p>
+<h2 id="section-7" tabindex="-1">7. Dart SDK v2<a class="heading-anchor" href="#section-7" aria-label="本节链接">#</a></h2>
+<p>导入 <code>package:qqm_plugins/sdk.dart</code>。原 <code>onEnable/onDisable/onMessage/onCommand/handleMessage</code> 接口保持兼容，返回 String 的旧插件继续自动判断 Markdown。新插件推荐重写 <code>execute(PluginMessage)</code> 返回 <code>PluginReply?</code>，完整保留身份与会话上下文；返回 null 表示不处理。</p>
+<div class="code-example"><div class="code-heading"><span>dart</span></div><pre tabindex="0"><code>class CounterPlugin extends BotPlugin {
+  CounterPlugin(super.info);
+  @override
+  Future&lt;void&gt; onEnable() async {}
+  @override
+  Future&lt;void&gt; onDisable() async {}
+  @override
+  Future&lt;String?&gt; onMessage(PluginMessage message) async =&gt; null;
+  @override
+  Future&lt;String?&gt; onCommand(String command, List&lt;String&gt; args) async =&gt; null;
+  @override
+  Future&lt;PluginReply?&gt; execute(PluginMessage message) async {
+    if (parseSlashCommand(message.content)?.command != &#39;count&#39;) return null;
+    final key = &#39;${message.isGroup}:${message.sessionId}&#39;;
+    final count = await host!.store.update&lt;int&gt;(key, (data) {
+      final next = (data[&#39;count&#39;] as int? ?? 0) + 1;
+      data[&#39;count&#39;] = next;
+      return next;
+    });
+    return PluginReply(&#39;本会话计数：$count&#39;, format: &#39;text&#39;);
+  }
+}</code></pre></div>
+<ul>
+<li><code>commands</code> 返回 <code>PluginCommand</code> 列表，动态帮助和插件卡片自动显示。<code>acceptsUnmentioned</code> 决定是否接收未 @ 全量消息，默认仅 <code>/</code>、<code>#</code> 命令；不能突破平台接收权限。</li>
+<li><code>PluginMessage</code> 还提供 senderRole、isFullGroupMessage、eventType、callbackData、attachments；回调通过 <code>execute</code> 或默认 <code>onInteraction</code> 处理。</li>
+<li><code>host.store.update</code> 串行原子读改写；按当前 AppID + 插件 ID 隔离，开发者再用会话/发送者组成键。必须使用 JSON 数据；整个插件最多 256 个数据键、512 KB。不放密钥，不在 action 内启动异步工作。</li>
+<li><code>host.store.read</code>、<code>snapshot</code> 读取；<code>clear</code> 清空。宿主在插件菜单提供数据导出/清理，清理需先停用。卸载不自动擦除玩法数据；应用“清除全部数据”会清除。</li>
+<li><code>executionTimeout</code> 默认 10 秒，启停 5 秒；异步操作自己取消和限时。超时不代表任意 Dart 工作能被强行中止。<code>onTick</code> 仅保留接口，目前无自动调度，不承诺定时推送。</li>
+</ul>
+<p>新 Dart 插件需加入 <code>plugins/lib/built_in_registry.dart</code>、<code>plugins/index.json</code>、根 pubspec 的清单 assets，再重新编译。参考新内置 <code>daily_club</code> / <code>group_games</code>；源码是受信任应用代码，必须审核依赖，不能视为安全沙箱。</p>
+<h2 id="section-8" tabindex="-1">8. 文件管理、数据与测试<a class="heading-anchor" href="#section-8" aria-label="本节链接">#</a></h2>
+<p>工作区位于应用支持目录 <code>plugin_workspace/&lt;项目ID&gt;/</code>，不提供系统全盘浏览。最多 6 层、128 个文本文件、单文件 256 KB；不跟随符号链接/目录联接，不接受 <code>..</code>、绝对路径或系统保留名。原生源码只是编辑文本，不能通过清单执行。</p>
+<p>切换/关闭会提示未保存草稿；保存用原内容检查防止覆盖其他窗口的修改。旧版本和移除的文件进入 <code>plugin_workspace/_history</code>，可恢复为新文件，不覆盖现有文件。最多保留 500 份，达到上限会停止保存并提示手动备份整理，不自动删除。文件操作无法防御同一用户恶意并发替换文件系统路径，不把工作区暴露给不受信任的本地进程。</p>
+<p>玩法数据独立于配置备份，普通导出清单不带签到/投票；整套配置备份仍可能含实际密钥，切勿公开。插件卡片「… → 导出本地玩法数据」提供 JSON，含参与者 OpenID，应妥善保管；目前不支持数据导入恢复，清理前请确认用途。</p>
+<p>开发验证：<code>flutter analyze --no-pub lib plugins test</code>；<code>flutter test</code>。测试使用空机器人凭据、录制发送接口与回环服务，不连接真实 QQ、不使用真实付费 Key。需要在开发者测试机器人上验证的项目：Markdown/键盘权限、真实按钮回调、媒体外链可达、全量群事件开通。自动化通过不代表已取得平台权限。</p>
+<h2 id="section-9" tabindex="-1">9. QQ 官方能力边界与参考<a class="heading-anchor" href="#section-9" aria-label="本节链接">#</a></h2>
+<p>平台的被动回复有时限/次数限制，群消息不支持流式参数；相同源消息的回复序号由宿主统一递增，不让插件自己维护。Markdown 与普通 content 分开构造，媒体先上传再引用；平台权限或审核失败需在 QQ 控制台处理。不要通过随机序号绕过平台去重，不承诺任意主动群推送。</p>
+<ul>
+<li><a href="https://bot.q.qq.com/wiki/develop/api-v2/server-inter/message/overview.html">QQ 消息概览</a></li>
+<li><a href="https://bot.q.qq.com/wiki/develop/api-v2/autogen/api/v2_groups_group_openid_messages.post.html">发送群消息与键盘</a></li>
+<li><a href="https://bot.q.qq.com/wiki/develop/api-v2/autogen/event/interaction_create.html">交互事件</a>（仅需应答的按钮/菜单类型由宿主 ACK；群用户使用 group_member_openid，不冒用频道 user_id）</li>
+<li><a href="https://lbs.amap.com/api/webservice/guide/api/weatherinfo">高德天气接口</a></li>
+<li><a href="https://api-docs.deepseek.com/api/create-chat-completion/">DeepSeek Chat Completions</a>（模型可在配置中调整，服务可能收费）</li>
+</ul>
+<p>建议下一批扩展：个人/群订阅与定时提醒（先设计授权和后台保活）、知识库问答（按群隔离、明确 AI 服务数据流向）、词库问答插件、管理员命令审计、插件依赖与版本兼容检查、可审核的签名插件仓库。不推荐为“玩法多”开放任意系统命令、远程源码自动执行或无权限群管理 API。</p>
+
+    <div class="doc-end"><strong>写出新玩法，也欢迎分享。</strong><p>提交示例、完善文档，或带上脱敏信息反馈问题。</p><a href="https://github.com/XingChenwa/qqm_project/issues">问题与建议 ↗</a><a href="./">返回项目首页 →</a></div>
+  </main>
+</div>
+<p id="copy-status" class="sr-only" aria-live="polite"></p>
+<footer class="wrap"><span>QQ机器人管理器 · 学习交流项目<br><small>基于 QQ 官方开放平台开发，非腾讯官方客户端。</small></span><span><a href="https://github.com/XingChenwa/qqm_project/blob/main/LICENSE">GPL-2.0-only</a> · 作者 QQ：2377130783<br><a href="https://github.com/XingChenwa/qqm_project">如果喜欢，给项目点个 Star ↗</a></span></footer>
+</body>
+</html>

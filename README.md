@@ -9,7 +9,7 @@
 - 应用内浏览器、日志复制导出、桌面窗口与可选托盘。
 - 应用内查看新版说明、下载和安装入口。
 
-[项目地址](https://github.com/XingChenwa/qqm_project) · [下载客户端](https://github.com/XingChenwa/qqm_project/releases) · [插件开发文档](https://github.com/XingChenwa/qqm_project/blob/main/docs/plugin-development.md)
+[项目首页与演示](https://xingchenwa.github.io/qqm_project/) · [下载客户端](https://github.com/XingChenwa/qqm_project/releases) · [插件开发手册](https://xingchenwa.github.io/qqm_project/plugins.html)
 
 学习为目的编写的，非腾讯官方产品。作者 QQ：2377130783。
 

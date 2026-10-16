@@ -16,7 +16,7 @@ function fallback(message) {
   $('#release-error').textContent = message;
   $('#release-error').classList.remove('hidden');
   document.querySelectorAll('[data-platform]').forEach(card => {
-    card.querySelector('.release-meta').textContent = '等待首个完整的 GitHub 正式版本';
+    card.querySelector('.release-meta').textContent = '版本信息暂不可用，请在 GitHub 查看';
     const link = card.querySelector('.download-link');
     link.href = releasesPage; link.textContent = '前往 GitHub Releases ↗';
     link.classList.remove('disabled'); link.removeAttribute('aria-disabled');
