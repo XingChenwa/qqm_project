@@ -1,6 +1,6 @@
 param(
   [Parameter(Mandatory=$true)][string]$UpdatePublicKey,
-  [string]$UpdateBaseUrl = 'https://xingchenwa.github.io/qqm_project',
+  [string]$UpdateBaseUrl = 'https://xingchenwa.github.io/qqm-releases',
   [string]$Flutter = 'flutter',
   [switch]$Installer,
   [string]$Iscc = 'ISCC.exe'
@@ -10,7 +10,7 @@ $workspace = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $key = [Convert]::FromBase64String($UpdatePublicKey)
 if ($key.Length -ne 32) { throw 'UPDATE_PUBLIC_KEY must be a 32-byte Ed25519 public key in base64, NOT the private key.' }
 $uri = [Uri]$UpdateBaseUrl
-if ($uri.Scheme -ne 'https' -or -not $uri.Host -or $uri.UserInfo -or $uri.Query -or $uri.Fragment -or ($uri.AbsolutePath -ne '/' -and $UpdateBaseUrl.TrimEnd('/') -ne 'https://xingchenwa.github.io/qqm_project')) { throw 'UpdateBaseUrl must be the GitHub Pages project URL or a legacy HTTPS origin.' }
+if ($uri.Scheme -ne 'https' -or -not $uri.Host -or $uri.UserInfo -or $uri.Query -or $uri.Fragment -or ($uri.AbsolutePath -ne '/' -and $UpdateBaseUrl.TrimEnd('/') -ne 'https://xingchenwa.github.io/qqm-releases')) { throw 'UpdateBaseUrl must be the GitHub Pages project URL or a legacy HTTPS origin.' }
 if ($Installer -and -not (Get-Command $Iscc -ErrorAction SilentlyContinue)) { throw 'Install Inno Setup 6.5+ or supply -Iscc with its compiler path.' }
 if ($Installer) {
   $compilerDirectory = Split-Path -Parent (Get-Command $Iscc).Source

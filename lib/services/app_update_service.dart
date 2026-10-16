@@ -28,7 +28,7 @@ enum UpdatePhase {
 class AppUpdateService extends ChangeNotifier {
   static const defaultServer = String.fromEnvironment(
     'UPDATE_BASE_URL',
-    defaultValue: 'https://xingchenwa.github.io/qqm_project',
+    defaultValue: 'https://xingchenwa.github.io/qqm-releases',
   );
   static const defaultKey = String.fromEnvironment('UPDATE_PUBLIC_KEY');
   static const _native = MethodChannel('cn.uuze.botmanager/updates');
@@ -109,7 +109,7 @@ class AppUpdateService extends ChangeNotifier {
       server.host == 'xingchenwa.github.io' &&
       server.port == 443 &&
       server.userInfo.isEmpty &&
-      {'/qqm_project', '/qqm_project/'}.contains(server.path);
+      {'/qqm-releases', '/qqm-releases/'}.contains(server.path);
 
   bool get busy => {
     UpdatePhase.checking,
@@ -172,7 +172,7 @@ class AppUpdateService extends ChangeNotifier {
     try {
       final nonce = const Uuid().v4();
       final envelope = usesGitHubPages
-          ? await _json('/qqm_project/updates/stable.json')
+          ? await _json('/qqm-releases/updates/stable.json')
           : await _json(
               '/api/v1/update',
               query: {'platform': platform, 'arch': arch, 'nonce': nonce},

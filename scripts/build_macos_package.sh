@@ -10,7 +10,7 @@ cd "$project_dir"
 update_args=()
 if [[ -n "${UPDATE_PUBLIC_KEY:-}" ]]; then
   update_args+=("--dart-define=UPDATE_PUBLIC_KEY=$UPDATE_PUBLIC_KEY")
-  update_args+=("--dart-define=UPDATE_BASE_URL=${UPDATE_BASE_URL:-https://xingchenwa.github.io/qqm_project}")
+  update_args+=("--dart-define=UPDATE_BASE_URL=${UPDATE_BASE_URL:-https://xingchenwa.github.io/qqm-releases}")
 fi
 flutter build macos --release --no-pub "${update_args[@]}"
 app_path="$project_dir/build/macos/Build/Products/Release/QQBotManager.app"

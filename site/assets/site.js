@@ -1,5 +1,5 @@
 'use strict';
-const repository = 'XingChenwa/qqm_project';
+const repository = 'XingChenwa/qqm-releases';
 const releasesPage = `https://github.com/${repository}/releases`;
 const $ = selector => document.querySelector(selector);
 const text = (tag, value) => { const node = document.createElement(tag); node.textContent = value; return node; };

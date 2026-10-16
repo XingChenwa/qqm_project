@@ -2,12 +2,12 @@
 
 这是一个基于 QQ 官方开放平台的 Flutter 跨平台管理工具，用于配置机器人、收发会话消息及运行插件。界面和系统对话框默认使用简体中文。
 
-## GitHub 首页和自动更新（当前源码，尚未部署）
+## GitHub 首页和双仓库发布
 
-- 不再需要宝塔、PHP 或 MySQL。下载首页由 GitHub Pages 托管，四端安装包放在 GitHub Releases；首页增加“如果喜欢这个项目，欢迎点个 Star”。
+- 主源码保持私有，公开下载使用独立的 `XingChenwa/qqm-releases` 仓库；不复制应用源码或 Git 历史。不再需要宝塔、PHP 或 MySQL。下载首页由 GitHub Pages 托管，四端安装包放在 GitHub Releases；首页增加“如果喜欢这个项目，欢迎点个 Star”。
 - 发布正式 Release 后自动校验版本/密钥并构建 Windows、Android、iOS、macOS；四端全部成功后上传安装包、签名清单并部署首页。手动工作流仍仅构建测试包。
 - 设备统计整套移除：不再收集设备资料、注册或发送心跳，后台设备页和统计 API 退役，已有历史数据库不删。
-- 一次性启用 Pages 并配置签名 Secrets/公钥，详见 [GitHub 发布指南](docs/github-release.md)。旧版客户端需手动安装一次迁移版；当前未提交、未推送、未启动线上发布。
+- 一次性启用 Pages 并配置签名 Secrets/公钥，详见 [GitHub 发布指南](docs/github-release.md)。旧版客户端需手动安装一次迁移版；安装包自动发布还需配置原更新签名私钥与公开仓库发布令牌。
 
 ## 插件 v2（当前源码改动，尚未构建新安装包）
 
@@ -15,7 +15,7 @@
 - JSON/YAML v2 支持明确的文本、Markdown、媒体与按钮回复、回调、角色权限、优先级、冷却；v1 保持兼容。复杂 JS/Python 逻辑通过 HTTP 插件接入，不直接兼容 Yunzai/icqq。
 - 内置插件文件管理器：子目录、文本源码编辑、导入导出、重命名、未保存保护、冲突检查、可恢复本地历史及规则试运行。脚本文件仅编辑，不在客户端动态执行。
 - 设置里的默认自动回复和关键词回复及旧兜底执行链路移除；普通聊天不兜底回复。全量群的明确命令交给插件自身策略，仍需平台权限。
-- 详见 [完整开发文档](docs/plugin-development.md) 和 [示例目录](plugins/examples/)。插件改造本身不改变发布版本；当前源码未自动提交或发布安装包。
+- 详见 [完整开发文档](docs/plugin-development.md) 和 [示例目录](plugins/examples/)。插件改造本身不改变发布版本；修改源码不等于安装包已构建或发布。
 
 ## 1.3.3 聊天发送和定位
 
@@ -183,7 +183,7 @@ Windows 本机不能直接编译 iOS IPA 或 macOS 应用。可操作 GitHub 的
 
 ## 下载首页与版本发布
 
-使用 [GitHub Pages 首页](https://xingchenwa.github.io/qqm_project/) 与 [GitHub Releases](https://github.com/XingChenwa/qqm_project/releases)。目标地址需在首次配置、推送和部署后生效，不表示本地修改已上线。完整步骤见 [GitHub 发布指南](docs/github-release.md)。旧 `management/` 源码保留供兼容迁移，不再需要部署；使用设备统计已移除，不自动删除历史记录。
+使用 [GitHub Pages 首页](https://xingchenwa.github.io/qqm-releases/) 与 [GitHub Releases](https://github.com/XingChenwa/qqm-releases/releases)。目标地址需在首次配置、推送和部署后生效，不表示本地修改已上线。完整步骤见 [GitHub 发布指南](docs/github-release.md)。旧 `management/` 源码保留供兼容迁移，不再需要部署；使用设备统计已移除，不自动删除历史记录。
 
 Windows 自动下载校验后的 EXE，确认后覆盖安装并保留数据；Android 系统确认安装；iOS 导出 IPA 后有效重签；macOS 打开 DMG 后手动替换，不承诺静默安装。更新在启动时和每五分钟检测，不是即时推送。旧 PHP 版需先手动安装一次新版以迁移更新地址。
 

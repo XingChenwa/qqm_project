@@ -18,7 +18,7 @@ permissions:
 env:
   FLUTTER_VERSION: '3.44.3'
   UPDATE_PUBLIC_KEY: ${{ vars.UPDATE_PUBLIC_KEY || 'EmpeSLtZms6Uz7D61o6E3gQzBytIPqsNU+dSq47M9ko=' }}
-  UPDATE_BASE_URL: ${{ vars.UPDATE_BASE_URL || 'https://xingchenwa.github.io/qqm_project' }}
+  UPDATE_BASE_URL: ${{ vars.UPDATE_BASE_URL || 'https://xingchenwa.github.io/qqm-releases' }}
 
 jobs:
   preflight:
@@ -29,12 +29,13 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-      - run: node --test tool/tests/github_release.test.mjs
+      - run: node --test tool/tests/github_release.test.mjs tool/tests/github_site_sync.test.mjs
       - name: 检查标签、构建号和更新密钥
         run: node tool/github_release.mjs preflight
         env:
           GH_TOKEN: ${{ github.token }}
           UPDATE_SIGNING_PRIVATE_KEY: ${{ secrets.UPDATE_SIGNING_PRIVATE_KEY }}
+          PUBLIC_RELEASE_TOKEN: ${{ secrets.PUBLIC_RELEASE_TOKEN }}
 
   android:
     needs: preflight
@@ -186,35 +187,34 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+
   publish:
     needs: [preflight, android, ios, macos, windows]
     if: github.event_name == 'release'
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 25
     concurrency:
-      group: github-pages-publish
+      group: public-distribution-sync
       cancel-in-progress: false
     permissions:
       actions: read
-      contents: write
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+      contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-      - name: 四端校验、签名并上传 GitHub Release
+      - name: 检出公开下载仓库（只写此仓库）
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: XingChenwa/qqm-releases
+          ref: main
+          path: build/distribution
+          ssh-key: ${{ secrets.DISTRIBUTION_DEPLOY_KEY }}
+          persist-credentials: true
+      - name: 私有构建产物校验后发布到公开仓库，再同步首页
         run: node tool/github_release.mjs publish
         env:
           GH_TOKEN: ${{ github.token }}
+          DISTRIBUTION_DIRECTORY: build/distribution
           UPDATE_SIGNING_PRIVATE_KEY: ${{ secrets.UPDATE_SIGNING_PRIVATE_KEY }}
-      - uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5
-      - uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b # v4
-        with:
-          path: build/github-pages
-      - name: 发布下载首页与更新清单
-        id: deployment
-        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4
+          PUBLIC_RELEASE_TOKEN: ${{ secrets.PUBLIC_RELEASE_TOKEN }}

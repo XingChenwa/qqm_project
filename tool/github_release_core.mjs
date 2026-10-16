@@ -1,7 +1,8 @@
 import {createHash, createPrivateKey, createPublicKey, sign, verify} from 'node:crypto';
 
-export const repository = 'XingChenwa/qqm_project';
-export const pagesUrl = 'https://xingchenwa.github.io/qqm_project';
+export const sourceRepository = 'XingChenwa/qqm_project';
+export const repository = 'XingChenwa/qqm-releases';
+export const pagesUrl = 'https://xingchenwa.github.io/qqm-releases';
 export const manifestName = 'update-manifest.json';
 const seedPrefix = Buffer.from('302e020100300506032b657004220420', 'hex');
 const publicPrefix = Buffer.from('302a300506032b6570032100', 'hex');

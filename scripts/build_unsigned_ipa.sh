@@ -15,7 +15,7 @@ xcodebuild -version
 update_args=()
 if [[ -n "${UPDATE_PUBLIC_KEY:-}" ]]; then
   update_args+=("--dart-define=UPDATE_PUBLIC_KEY=$UPDATE_PUBLIC_KEY")
-  update_args+=("--dart-define=UPDATE_BASE_URL=${UPDATE_BASE_URL:-https://xingchenwa.github.io/qqm_project}")
+  update_args+=("--dart-define=UPDATE_BASE_URL=${UPDATE_BASE_URL:-https://xingchenwa.github.io/qqm-releases}")
 fi
 flutter build ios --release --no-codesign --no-pub "${update_args[@]}"
 app_path="$project_dir/build/ios/iphoneos/Runner.app"

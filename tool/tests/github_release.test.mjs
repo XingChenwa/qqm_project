@@ -37,7 +37,7 @@ test('拒绝缺平台、重复平台、跨仓库、恶意跳转、无效包身�
     d => d.releases[0].url += '?target=evil', d => d.releases[0].url += '#fragment']) {
     const data = fixture(); change(data); assert.throws(() => validateManifest(data));
   }
-  assert.equal(trustedAsset('https://user:pass@github.com/XingChenwa/qqm_project/releases/download/v1.3.7/setup.exe', 'v1.3.7'), false);
+  assert.equal(trustedAsset('https://user:pass@github.com/XingChenwa/qqm-releases/releases/download/v1.3.7/setup.exe', 'v1.3.7'), false);
 });
 test('清单体积限制及源码版本一致性', async () => {
   const data = fixture(); data.releases[0].notes = 'x'.repeat(4001); assert.throws(() => signManifest(data, secret, publicKey));
@@ -51,10 +51,15 @@ test('GitHub 发布需要四端完成、签名并部署 Pages；手动构建不�
   assert.match(workflow, /needs: \[preflight, android, ios, macos, windows\]/);
   assert.match(workflow, /publish:\s+needs:[^\n]+\s+if: github.event_name == 'release'/);
   assert.match(workflow, /UPDATE_SIGNING_PRIVATE_KEY/);
-  assert.match(workflow, /actions\/deploy-pages@[a-f0-9]{40}/);
+  assert.match(workflow, /PUBLIC_RELEASE_TOKEN/);
+  assert.match(workflow, /DISTRIBUTION_DEPLOY_KEY/);
+  assert.ok(!workflow.includes('actions/deploy-pages@'));
+  const publicWorkflow = await readFile('deploy/github-distribution/pages.yml', 'utf8');
+  assert.match(publicWorkflow, /actions\/deploy-pages@[a-f0-9]{40}/);
   const publish = await readFile('tool/github_release.mjs', 'utf8');
   assert.ok(!publish.includes("'--clobber'"));
-  assert.match(publish, /files\.push\(\{file: manifestPath/);
+  assert.match(publish, /files\.push\(\{file:manifestPath/);
+  assert.match(publish, /--draft=false/);
 });
 test('静态首页有 Star 和四平台下载，无管理后台或统计 API', async () => {
   const html = await readFile('site/index.html', 'utf8');

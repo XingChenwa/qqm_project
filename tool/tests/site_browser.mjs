@@ -17,13 +17,13 @@ const data = {schema:2,repository,tag:'v1.3.7',version:'1.3.7',build:18,publishe
 const server = createServer(async (request,response) => {
   try {
     const url = new URL(request.url,'http://127.0.0.1');
-    if (url.pathname === '/qqm_project/releases.json') {
+    if (url.pathname === '/qqm-releases/releases.json') {
       const payload = structuredClone(data);
       if (mode === 'invalid') payload.releases[0].url = 'https://evil.invalid/setup.exe';
       response.setHeader('content-type','application/json');
       response.end(JSON.stringify(mode === 'empty' ? {releases:[]} : payload)); return;
     }
-    const relative = decodeURIComponent(url.pathname).replace(/^\/qqm_project\//,'');
+    const relative = decodeURIComponent(url.pathname).replace(/^\/qqm-releases\//,'');
     const path = resolve(site,relative || 'index.html');
     assert.ok(path.startsWith(site + (process.platform === 'win32' ? '\\' : '/')));
     const bytes = await readFile(path);
@@ -32,7 +32,7 @@ const server = createServer(async (request,response) => {
   } catch {response.statusCode=404;response.end('not found');}
 });
 await new Promise(resolve => server.listen(0,'127.0.0.1',resolve));
-const origin = `http://127.0.0.1:${server.address().port}/qqm_project/`;
+const origin = `http://127.0.0.1:${server.address().port}/qqm-releases/`;
 const browser = await chromium.launch({headless:true,...(process.env.QQM_CHROME ? {executablePath:process.env.QQM_CHROME} : {})});
 try {
   const page = await browser.newPage();

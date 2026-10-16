@@ -16,7 +16,7 @@ Future<void> main(List<String> args) async {
       server.scheme == 'https' &&
       server.host == 'xingchenwa.github.io' &&
       server.port == 443 &&
-      {'/qqm_project', '/qqm_project/'}.contains(server.path);
+      {'/qqm-releases', '/qqm-releases/'}.contains(server.path);
   if (server.scheme != 'https' ||
       server.host.isEmpty ||
       server.userInfo.isNotEmpty ||
@@ -37,7 +37,7 @@ Future<void> main(List<String> args) async {
   try {
     final request = await client.getUrl(
       githubPages
-          ? server.resolve('/qqm_project/updates/stable.json')
+          ? server.resolve('/qqm-releases/updates/stable.json')
           : server
                 .resolve('/api/v1/update')
                 .replace(

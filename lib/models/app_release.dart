@@ -3,7 +3,7 @@ import 'dart:convert';
 import 'package:cryptography/cryptography.dart';
 
 class AppRelease {
-  static const repository = 'XingChenwa/qqm_project';
+  static const repository = 'XingChenwa/qqm-releases';
   final String platform, arch, version, format, sha256, notes;
   final int build, size;
   final Uri url;
