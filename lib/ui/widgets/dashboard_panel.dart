@@ -53,7 +53,7 @@ class DashboardPanel extends StatelessWidget {
                 context,
                 1,
                 '配置机器人',
-                '填写 AppID 与 ClientSecret',
+                '优先扫码授权，也可手动填写凭据',
                 configured,
                 onOpenSettings,
               ),

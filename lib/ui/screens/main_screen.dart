@@ -26,11 +26,13 @@ import 'settings_screen.dart';
 class MainScreen extends StatefulWidget {
   final VoidCallback toggleTheme;
   final ThemeMode themeMode;
+  final bool openSettingsOnStart;
 
   const MainScreen({
     super.key,
     required this.toggleTheme,
     required this.themeMode,
+    this.openSettingsOnStart = false,
   });
 
   @override
@@ -71,6 +73,7 @@ class _MainScreenState extends State<MainScreen> {
         client.refreshSessionProfile(_selectedSession!.id);
       }
       _tryStartupConnect(client);
+      if (widget.openSettingsOnStart) _openSettings();
     });
   }
 
@@ -512,6 +515,17 @@ class _MainScreenState extends State<MainScreen> {
     }
   }
 
+  Future<void> _toggleConnection(BotClient bot) async {
+    if (bot.isConnecting) return;
+    if (bot.isConnected) {
+      bot.disconnect();
+    } else if (bot.config.appId.isEmpty || bot.config.clientSecret.isEmpty) {
+      await _openSettings();
+    } else {
+      await bot.connect();
+    }
+  }
+
   Widget _mobileScaffold(BotClient bot) {
     final chatting =
         _sideIndex == 2 && _mobileChatOpen && _selectedSession != null;
@@ -545,15 +559,7 @@ class _MainScreenState extends State<MainScreen> {
           actions: [
             IconButton(
               tooltip: bot.isConnected ? '断开机器人' : '连接机器人',
-              onPressed: bot.isConnecting
-                  ? null
-                  : () {
-                      if (bot.isConnected) {
-                        bot.disconnect();
-                      } else {
-                        bot.connect();
-                      }
-                    },
+              onPressed: bot.isConnecting ? null : () => _toggleConnection(bot),
               icon: Icon(
                 bot.isConnected ? Icons.link_off : Icons.link,
                 color: bot.isConnected ? AppTheme.qqGreen : null,
@@ -744,9 +750,7 @@ class _MainScreenState extends State<MainScreen> {
           ),
           const SizedBox(width: 12),
           OutlinedButton.icon(
-            onPressed: bot.isConnecting
-                ? null
-                : () => connected ? bot.disconnect() : bot.connect(),
+            onPressed: bot.isConnecting ? null : () => _toggleConnection(bot),
             icon: Icon(
               connected
                   ? Icons.logout_rounded

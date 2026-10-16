@@ -290,8 +290,14 @@ class _UpdateDialog extends StatelessWidget {
 
 class UpdateNotice extends StatefulWidget {
   final Widget child;
+  final bool enabled;
   final BuildContext Function()? dialogContext;
-  const UpdateNotice({super.key, required this.child, this.dialogContext});
+  const UpdateNotice({
+    super.key,
+    required this.child,
+    this.dialogContext,
+    this.enabled = true,
+  });
   @override
   State<UpdateNotice> createState() => _UpdateNoticeState();
 }
@@ -304,7 +310,8 @@ class _UpdateNoticeState extends State<UpdateNotice> {
   Widget build(BuildContext context) {
     final updates = context.watch<AppUpdateService?>();
     final release = updates?.release;
-    if (updates != null &&
+    if (widget.enabled &&
+        updates != null &&
         updates.hasUpdate &&
         release != null &&
         updates.dismissedBuild != release.build &&

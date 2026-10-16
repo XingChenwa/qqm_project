@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'services/app_update_service.dart';
 import 'services/update_preferences.dart';
+import 'services/onboarding_preferences.dart';
 import 'services/desktop_window_controller.dart';
 import 'app.dart';
 import 'models/message.dart';
@@ -35,9 +36,9 @@ void main() async {
 
   // Initialize bot client
   final botClient = BotClient(storageService);
-  final updates = AppUpdateService(
-    UpdatePreferences(await SharedPreferences.getInstance()),
-  );
+  final preferences = await SharedPreferences.getInstance();
+  final updates = AppUpdateService(UpdatePreferences(preferences));
+  final onboarding = OnboardingPreferences(preferences);
 
   DesktopWindowController? desktopWindow;
   if (isDesktopPlatform) {
@@ -57,6 +58,7 @@ void main() async {
     MultiProvider(
       providers: [
         Provider<StorageService>.value(value: storageService),
+        Provider<OnboardingPreferences>.value(value: onboarding),
         ChangeNotifierProvider<PluginManager>.value(value: pluginManager),
         ChangeNotifierProvider<BotClient>.value(value: botClient),
         ChangeNotifierProvider<AppUpdateService>.value(value: updates),

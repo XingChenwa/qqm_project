@@ -454,6 +454,9 @@ void main() {
       expect(find.text(text), findsNothing);
     }
     expect(find.text('返回工作台'), findsOneWidget);
+    expect(find.text('扫码连接（推荐）'), findsOneWidget);
+    await tester.tap(find.text('手动配置'));
+    await tester.pumpAndSettle();
     expect(find.text('测试凭据'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });

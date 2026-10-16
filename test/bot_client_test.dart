@@ -1,8 +1,31 @@
+import 'dart:async';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:qq_bot_manager/core/bot_client.dart';
 import 'package:qq_bot_manager/models/config.dart';
+import 'package:qq_bot_manager/services/api_service.dart';
 
 import 'support/fakes.dart';
+
+class FailedLoginStorage extends MemoryStorage {
+  FailedLoginStorage() : super(config: validConfig());
+  @override
+  Future<void> saveBotConfig(BotConfig config) async =>
+      throw StateError('fixture disk failure');
+}
+
+class DelayedLoginApi extends RecordingApi {
+  final tokenResults = <Completer<ApiResult<AccessTokenResult>>>[];
+  @override
+  Future<ApiResult<AccessTokenResult>> getAccessToken({
+    required String appId,
+    required String clientSecret,
+  }) {
+    final pending = Completer<ApiResult<AccessTokenResult>>();
+    tokenResults.add(pending);
+    return pending.future;
+  }
+}
 
 void main() {
   late MemoryStorage storage;
@@ -70,6 +93,68 @@ void main() {
       BotConfig(appId: 'another-app', clientSecret: 'another-secret'),
     );
     expect(bot.config.accessToken, isEmpty);
+  });
+
+  test('新凭据落盘失败不替换当前账号、密钥或 Token', () async {
+    final failed = FailedLoginStorage();
+    final client = BotClient(
+      failed,
+      apiService: RecordingApi(),
+      webSocketService: TestGateway(),
+    );
+    addTearDown(client.dispose);
+    await expectLater(
+      client.updateConfig(
+        BotConfig(appId: 'new-app', clientSecret: 'new-secret'),
+      ),
+      throwsStateError,
+    );
+    expect(client.config.appId, 'test-app');
+    expect(client.config.clientSecret, 'test-secret');
+    expect(client.config.accessToken, 'valid-token');
+    expect(failed.config.appId, 'test-app');
+  });
+
+  test('扫码切换期间旧 Token 结果不能覆盖新凭据或清空新的并发刷新', () async {
+    final isolated = MemoryStorage(config: validConfig()..tokenExpiresAt = 1);
+    final delayed = DelayedLoginApi();
+    final client = BotClient(
+      isolated,
+      apiService: delayed,
+      webSocketService: TestGateway(),
+    );
+    addTearDown(client.dispose);
+    final oldSend = client.sendTextMessage('user', 'old');
+    await Future<void>.delayed(Duration.zero);
+    expect(delayed.tokenResults, hasLength(1));
+    await client.updateConfig(
+      BotConfig(appId: '100000001', clientSecret: 'new-fixture-secret'),
+    );
+    final first = client.sendTextMessage('user', 'new-1');
+    await Future<void>.delayed(Duration.zero);
+    expect(delayed.tokenResults, hasLength(2));
+    delayed.tokenResults[0].complete(
+      ApiResult.success(
+        AccessTokenResult(accessToken: 'old-fixture-token', expiresIn: 7200),
+      ),
+    );
+    expect(await oldSend, isFalse);
+    final second = client.sendTextMessage('user', 'new-2');
+    await Future<void>.delayed(Duration.zero);
+    expect(delayed.tokenResults, hasLength(2));
+    delayed.tokenResults[1].complete(
+      ApiResult.success(
+        AccessTokenResult(accessToken: 'new-fixture-token', expiresIn: 7200),
+      ),
+    );
+    expect(await first, isTrue);
+    expect(await second, isTrue);
+    expect(
+      delayed.calls.map((item) => item['token']),
+      everyElement('new-fixture-token'),
+    );
+    expect(isolated.config.appId, '100000001');
+    expect(isolated.config.accessToken, 'new-fixture-token');
   });
 
   test('过期群消息和机器人自己发的消息不会作为被动回复来源', () async {

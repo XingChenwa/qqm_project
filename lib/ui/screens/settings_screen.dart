@@ -13,15 +13,19 @@ import '../../utils/constants.dart';
 import '../../models/config.dart';
 import '../../services/storage_service.dart';
 import '../../services/desktop_window_controller.dart';
+import '../../services/qq_qr_login_service.dart';
 import '../themes/app_theme.dart';
 import '../../utils/platforms.dart';
 import '../widgets/app_logo.dart';
 import '../widgets/update_panel.dart';
 import '../widgets/app_dialogs.dart';
+import '../widgets/qq_qr_login_panel.dart';
 import 'browser_screen.dart';
+import 'onboarding_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
-  const SettingsScreen({super.key});
+  final QqQrLoginService Function()? qrServiceFactory;
+  const SettingsScreen({super.key, this.qrServiceFactory});
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
@@ -46,6 +50,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   String _credentialTestStatus = '';
   int _reconnectInterval = 5;
   int _tabIndex = 0;
+  int _connectionMethod = 0;
 
   @override
   void initState() {
@@ -138,6 +143,93 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   void _showError(String message) {
     AppDialogs.show(context, message, title: '操作失败', error: true);
+  }
+
+  Future<bool> _saveQrCredentials(QrBotCredentials credentials) async {
+    if (_isSaving || !mounted) return false;
+    var saved = false;
+    setState(() => _isSaving = true);
+    try {
+      final bot = context.read<BotClient>();
+      final previous = context.read<StorageService>().getBotConfig();
+      if (previous.appId.isNotEmpty &&
+          (previous.appId != credentials.appId ||
+              previous.clientSecret != credentials.appSecret)) {
+        final accepted = await AppDialogs.present<bool>(
+          context,
+          builder: (dialog) => AlertDialog(
+            title: const Text('更新当前机器人凭据？'),
+            content: Text(
+              '当前 AppID：${previous.appId}\n本次 AppID：${credentials.appId}\n\n保存会断开当前连接，再用新凭据连接。不会删除聊天记录、插件或其他设置。',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialog, false),
+                child: const Text('取消'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(dialog, true),
+                child: const Text('确认更新并连接'),
+              ),
+            ],
+          ),
+        );
+        if (accepted != true || !mounted) return false;
+      }
+      final latest = context.read<StorageService>().getBotConfig();
+      if (latest.appId != previous.appId ||
+          latest.clientSecret != previous.clientSecret) {
+        _showError('当前机器人配置已变化，请重新确认后再连接。');
+        return false;
+      }
+      final replacement = BotConfig.fromMap(latest.toMap())
+        ..appId = credentials.appId
+        ..clientSecret = credentials.appSecret;
+      await bot.updateConfig(replacement);
+      saved = true;
+      if (!mounted) return true;
+      setState(() {
+        _appIdController.text = credentials.appId;
+        _clientSecretController.text = credentials.appSecret;
+        _credentialTestStatus = '';
+      });
+      final connected = await bot.connect();
+      if (mounted) {
+        AppDialogs.show(
+          context,
+          connected
+              ? '扫码授权已保存，机器人已连接。'
+              : '凭据已保存，但网关尚未连接成功。请查看连接状态，检查平台权限或稍后重试。',
+          title: connected ? '连接成功' : '连接未完成',
+          error: !connected,
+        );
+      }
+      return true;
+    } catch (_) {
+      if (mounted) {
+        _showError(saved ? '凭据已保存，但连接未完成，请稍后重新连接。' : '扫码凭据保存失败，请重试。');
+      }
+      return saved;
+    } finally {
+      if (mounted) setState(() => _isSaving = false);
+    }
+  }
+
+  Future<void> _replayOnboarding() async {
+    final openConnection = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (route) => OnboardingScreen(
+          replay: true,
+          onFinished: (open) async => Navigator.pop(route, open),
+        ),
+      ),
+    );
+    if (openConnection == true && mounted) {
+      setState(() {
+        _tabIndex = 0;
+        _connectionMethod = 0;
+      });
+    }
   }
 
   Future<void> _testCredentials() async {
@@ -541,25 +633,67 @@ class _SettingsScreenState extends State<SettingsScreen> {
       title: '机器人凭据',
       icon: Icons.verified_user_outlined,
       children: [
-        _field('AppID', _appIdController),
-        _field('机器人密钥', _clientSecretController, obscure: true),
-        _field('Markdown 模板 ID', _markdownTemplateController),
-        Row(
+        Wrap(
+          spacing: 10,
+          runSpacing: 8,
           children: [
-            FilledButton(
-              onPressed: _isTestingCredentials ? null : _testCredentials,
-              child: Text(_isTestingCredentials ? '验证中...' : '测试凭据'),
+            ChoiceChip(
+              label: const Text('扫码连接（推荐）'),
+              selected: _connectionMethod == 0,
+              onSelected: _isSaving
+                  ? null
+                  : (_) => setState(() => _connectionMethod = 0),
             ),
-            const SizedBox(width: 10),
-            if (_credentialTestStatus.isNotEmpty)
-              _statusChip(
-                _credentialTestStatus,
-                _credentialTestStatus == '验证成功'
-                    ? AppTheme.qqGreen
-                    : AppTheme.qqRed,
-              ),
+            ChoiceChip(
+              label: const Text('手动配置'),
+              selected: _connectionMethod == 1,
+              onSelected: _isSaving
+                  ? null
+                  : (_) => setState(() => _connectionMethod = 1),
+            ),
           ],
         ),
+        const SizedBox(height: 16),
+        if (_connectionMethod == 0)
+          QqQrLoginPanel(
+            onConfirm: _saveQrCredentials,
+            serviceFactory: widget.qrServiceFactory,
+            enabled: !_isSaving,
+          )
+        else ...[
+          const Padding(
+            padding: EdgeInsets.only(bottom: 14),
+            child: Text(
+              '从 QQ 开放平台获取 AppID 和机器人密钥，填写后保存。',
+              style: TextStyle(fontSize: 13),
+            ),
+          ),
+          _field('AppID', _appIdController),
+          _field('机器人密钥', _clientSecretController, obscure: true),
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: [
+              FilledButton(
+                onPressed: _isTestingCredentials ? null : _testCredentials,
+                child: Text(_isTestingCredentials ? '验证中...' : '测试凭据'),
+              ),
+              OutlinedButton(
+                onPressed: _isSaving ? null : _saveConfig,
+                child: const Text('保存手动配置'),
+              ),
+              if (_credentialTestStatus.isNotEmpty)
+                _statusChip(
+                  _credentialTestStatus,
+                  _credentialTestStatus == '验证成功'
+                      ? AppTheme.qqGreen
+                      : AppTheme.qqRed,
+                ),
+            ],
+          ),
+        ],
+        const SizedBox(height: 16),
+        _field('Markdown 模板 ID', _markdownTemplateController),
       ],
     );
   }
@@ -799,6 +933,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
             const SelectableText('作者QQ：2377130783'),
             const SizedBox(height: 8),
             const Text('问题建议可以反馈'),
+            const SizedBox(height: 16),
+            OutlinedButton.icon(
+              onPressed: _replayOnboarding,
+              icon: const Icon(Icons.school_outlined),
+              label: const Text('重新查看使用引导'),
+            ),
             const SizedBox(height: 24),
             const Text('项目地址'),
             const SizedBox(height: 4),

@@ -42,6 +42,7 @@ class BotClient extends ChangeNotifier {
   final Map<String, Future<void>> _pendingPluginDispatches = {};
   int _fullGroupMessageCount = 0;
   Future<String?>? _tokenRequest;
+  int _configRevision = 0;
   Timer? _tokenRefreshTimer;
   String _lastSendError = '';
   bool _disposed = false;
@@ -125,9 +126,13 @@ class BotClient extends ChangeNotifier {
   /// Get a valid access token, refreshing if expired.
   Future<String?> _getAccessToken() {
     if (!_config.isTokenExpired) return Future.value(_config.accessToken);
-    return _tokenRequest ??= _refreshAccessToken().whenComplete(
-      () => _tokenRequest = null,
-    );
+    if (_tokenRequest != null) return _tokenRequest!;
+    late final Future<String?> pending;
+    pending = _refreshAccessToken().whenComplete(() {
+      if (identical(_tokenRequest, pending)) _tokenRequest = null;
+    });
+    _tokenRequest = pending;
+    return pending;
   }
 
   Future<String?> _refreshAccessToken() async {
@@ -144,11 +149,16 @@ class BotClient extends ChangeNotifier {
     _addLog('正在获取 access_token...');
 
     final requestedConfig = _config;
+    final requestedRevision = _configRevision;
     final result = await _apiService.getAccessToken(
       appId: requestedConfig.appId,
       clientSecret: requestedConfig.clientSecret,
     );
-    if (_disposed || !identical(requestedConfig, _config)) return null;
+    if (_disposed ||
+        requestedRevision != _configRevision ||
+        !identical(requestedConfig, _config)) {
+      return null;
+    }
 
     final data = result.data;
     if (!result.isSuccess || data == null) {
@@ -1722,23 +1732,29 @@ class BotClient extends ChangeNotifier {
   }
 
   Future<void> updateConfig(BotConfig newConfig) async {
+    _configRevision++;
     final nicknameSettingChanged =
         _config.enableOiapiNickname != newConfig.enableOiapiNickname;
     final credentialsChanged =
         _config.appId != newConfig.appId ||
         _config.clientSecret != newConfig.clientSecret;
     if (credentialsChanged) {
-      _resetProfileLookups();
-      disconnect();
       newConfig.accessToken = '';
       newConfig.tokenExpiresAt = 0;
     } else {
-      if (nicknameSettingChanged) _resetNicknameLookups();
       newConfig.accessToken = _config.accessToken;
       newConfig.tokenExpiresAt = _config.tokenExpiresAt;
     }
+    // Do not disconnect or replace working credentials if persistence fails.
+    await _storage.saveBotConfig(newConfig);
+    if (credentialsChanged) {
+      _resetProfileLookups();
+      disconnect();
+      _tokenRequest = null;
+    } else if (nicknameSettingChanged) {
+      _resetNicknameLookups();
+    }
     _config = newConfig;
-    await _storage.saveBotConfig(_config);
     if (credentialsChanged) _loadSessions();
     _addLog('配置已更新');
     notifyListeners();

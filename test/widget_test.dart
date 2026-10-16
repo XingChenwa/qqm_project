@@ -131,6 +131,10 @@ void main() {
       );
       await tester.pump();
       expect(find.text('机器人凭据'), findsOneWidget);
+      expect(find.text('扫码连接（推荐）'), findsOneWidget);
+      expect(find.text('测试凭据'), findsNothing);
+      await tester.tap(find.text('手动配置'));
+      await tester.pumpAndSettle();
       expect(find.text('测试凭据'), findsOneWidget);
       expect(find.text('验证成功'), findsNothing);
       // Flutter 会在测试结束时自动报告未处理的布局异常。
