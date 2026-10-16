@@ -1,8 +1,8 @@
 # QQ机器人管理器 宝塔部署（旧版兼容）
 
-> 当前下载与更新已迁移 [GitHub Pages + Releases](../docs/github-release.md)，无需部署本目录。以下仅供旧站维护与迁移；设备统计已整套移除，客户端不再上报，后台相关接口返回 410。新安装不创建统计表，现有历史表不删。
+> 当前下载与更新已迁移 [GitHub Pages + Releases](../docs/github-release.md)，无需部署本目录。以下仅供旧站维护与迁移。
 
-这个 PHP 和 MySQL 后台为 `https://botmanager.uuze.cn` 提供软件下载首页、版本发布、签名更新接口（设备统计已移除）。业务记录全部存入宝塔 MySQL，不会回退到 SQLite。`config.php` 保存数据库和账号中心连接参数；首次安装自动生成的 `data/config.json` 保存签名私钥和回源鉴权值，不是用 JSON 代替 MySQL。
+这个 PHP 和 MySQL 后台为 `https://botmanager.uuze.cn` 提供软件下载首页、版本发布、签名更新接口。业务记录全部存入宝塔 MySQL，不会回退到 SQLite。`config.php` 保存数据库和账号中心连接参数；首次安装自动生成的 `data/config.json` 保存签名私钥和回源鉴权值，不是用 JSON 代替 MySQL。
 
 后台仅使用杂鱼账号中心登录，只允许其服务端返回的绑定邮箱为 `2377130783@qq.com` 的账号进入。没有本地账号密码登录入口，也没有公开网页安装器。新安装只需填写 PHP 配置并运行一次 `install`，不需要手工创建 JSON、私钥或数据表。
 
@@ -144,10 +144,6 @@ sudo -u www /www/server/php/82/bin/php bin/manage.php import windows x64 1.3.0 1
 ```
 
 后台不提供远程 URL 抓包功能。撤下版本后，源站立即不再提供该包，但还需手工清理 EdgeOne 中对应 `/packages/哈希/文件名` 缓存。已下载到客户端的包无法远程收回。
-
-## 历史统计保留
-
-统计页、采集和查询已移除；历史记录不自动删除或清理。`prune` 现在只清理限流缓存。旧服务仍需正常保护数据目录与服务器日志，不要把历史数据库发布到 Pages。
 
 ## 备份和验证
 

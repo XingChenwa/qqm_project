@@ -1,6 +1,6 @@
 # 软件更新和 EdgeOne 配置
 
-> 旧部署兼容文档：当前使用 GitHub Pages + Releases，不再需要 EdgeOne、PHP 或 MySQL。新流程请看 [GitHub 发布指南](github-release.md)。统计已移除，下文历史统计说明不再适用；原有数据库由部署者自行保管。
+> 旧部署兼容文档：当前使用 GitHub Pages + Releases，不再需要 EdgeOne、PHP 或 MySQL。新流程请看 [GitHub 发布指南](github-release.md)，以下仅供维护旧站参考；原有数据库由部署者自行保管。
 
 发布服务使用 `https://botmanager.uuze.cn`，宝塔 PHP 与 MySQL 部署、杂鱼账号管理员登录和上传入口见 [后台部署](../management/README.md)。先在宝塔建库，在 `config.php` 填写数据库连接信息并执行 `install`、`db-check`，再配置网站和客户端公钥；旧版客户端不会因为服务器上线就自动获得更新能力。
 
@@ -61,7 +61,7 @@ Nginx 示例通过 FastCGI 的 `QQM_PROXY_ADDR` 传递原始 TCP 地址。若宝
 - `origin_token_missing` / `origin_token_mismatch`：检查覆盖规则是否发布、匹配的 HOST 是否正确。启用强制鉴权后，这类请求会在进入管理接口前直接返回“回源鉴权失败”403，而不会返回诊断详情；在服务器本机核对密钥，不要公开配置。
 - `invalid_peer`：检查 Nginx 的 `QQM_PROXY_ADDR` / `REMOTE_ADDR`，不要用客户端自带的头部填入该参数。
 
-这里检测的是当前浏览器访问，不会补造设备记录。`1.3.1+12` 首次默认开启统计，启动即自动登记，后续每分钟更新；以前关闭的用户保持关闭。修正 IP 配置后，已有记录在下一次成功心跳更新。旧版客户端不会因更新网站而自动获得新功能。
+这里检测的是当前浏览器访问；修正 IP 配置后可重新检测，不会改变客户端功能。
 
 ## CDN 缓存和安全规则
 
@@ -71,7 +71,7 @@ Nginx 示例通过 FastCGI 的 `QQM_PROXY_ADDR` 传递原始 TCP 地址。若宝
 - `/assets/*`：可缓存；1.3.2 使用独立版本文件名，不依赖查询参数刷新。上传页面时必须同步上传完整 assets，发布后清理旧 HTML 缓存。不要在 EdgeOne 自动合并、改写后台脚本。
 - PHP 接口不设置开放跨域；客户端直接使用 HTTPS，不需要 `Access-Control-Allow-Origin: *`。
 
-PHP 已限制注册、心跳、登录频率；这不替代源站防火墙和边缘抗攻击。不要为了修复一个接口而关闭全站安全防护，按路径调整规则。Nginx、PHP 和 EdgeOne 日志不要保存 OAuth 授权码、Token、Secret，日志和备份保留时间需独立设置。
+PHP 已限制接口调用和登录频率；这不替代源站防火墙和边缘抗攻击。不要为了修复一个接口而关闭全站安全防护，按路径调整规则。Nginx、PHP 和 EdgeOne 日志不要保存 OAuth 授权码、Token、Secret，日志和备份保留时间需独立设置。
 
 ## 首次接入更新
 
@@ -109,10 +109,6 @@ iOS 当前是未签名 IPA 下载和系统分享/导出，可交给全能签使�
 
 macOS 使用 Universal DMG。客户端校验签名和 SHA-256 后打开镜像，由用户退出旧版并拖入“应用程序”替换；不会静默安装。当前临时签名测试包未经过 Developer ID 签名或 Apple 公证，正式分发要求另行完成。[Flutter macOS 发布说明](https://docs.flutter.dev/deployment/macos)
 
-## 历史统计已退役
-
-新版客户端不再读取设备名称、型号或统计安装 ID，不发送注册、心跳或统计删除请求。后台不提供使用设备、在线数量或版本分布，统计接口返回 410。原数据库的历史统计表不自动删除，`prune` 仅清理限流缓存。
-
 ## 上线验收
 
 先运行 `php bin/manage.php db-check` 确认实际连接的是你创建的 MySQL 专用数据库，网站 PHP 已启用 `pdo_mysql`。如果配置过旧域名，服务器 `config.php`（旧部署为 `data/config.json`）的 `app_url`、杂鱼 OAuth 回调与 GitHub 仓库变量 `UPDATE_BASE_URL` 也要改成 `botmanager.uuze.cn`，更改示例文件不会自动覆盖已保存的配置。
@@ -121,4 +117,3 @@ macOS 使用 Universal DMG。客户端校验签名和 SHA-256 后打开镜像，
 2. 不带密钥或带错误密钥直连源站动态接口返回 403。经过 CDN 的检测显示 `accepted` 和 `EO-Connecting-IP`；免费版确认 `edgeone_token` 模式，严格模式另确认实际节点网段匹配。不要用公开或弱密钥充当源站身份校验。
 3. 新客户端首次手工安装后，发布更高构建号；检查清单通过签名、包校验后才进入就绪。篡改包、清单或重定向不得执行安装。先用专用测试目录，不在真实机器人目录试验覆盖。
 4. 用同签名 APK 验证系统覆盖安装；iPhone 验证导出与合法重签，不把 Windows 编译结果当成 iOS 安装验证。
-5. 统计注册、心跳、删除及管理员查询接口均已退役（授权请求返回 410），没有新设备记录产生；升级和清理命令不删除历史记录。新客户端的统计旧偏好应被忽略；GitHub 更新不依赖统计。

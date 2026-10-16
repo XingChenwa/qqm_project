@@ -10,9 +10,9 @@
 | 首页 | <https://xingchenwa.github.io/qqm_project/> |
 | 客户端更新入口 | `https://xingchenwa.github.io/qqm_project/updates/stable.json` |
 
-不需要宝塔、PHP、MySQL 或额外下载仓库。设备统计已移除，现有历史数据库不会被流程删除。
+不需要宝塔、PHP、MySQL 或额外下载仓库。
 
-**仓库可见性由所有者自己修改。** 迁移脚本和工作流不会把私有仓库自动公开。使用免费 GitHub Pages 时，应先公开仓库，再启用网站；在此之前，源码和分支准备好不代表网站已能公开访问。公开会暴露所有可访问的分支、标签与 Git 历史，请先检查历史凭据，必要时先轮换密钥，不要只删除当前文件。
+本项目使用公开仓库和 GitHub Pages。仓库可见性由所有者管理，发布工作流不会修改；分支、标签与 Git 历史中都不应包含凭据。
 
 ## 2. 一次性配置
 
@@ -41,6 +41,12 @@
 | Variable | `UPDATE_BASE_URL` | `https://xingchenwa.github.io/qqm_project` |
 
 沿用原公钥：`EmpeSLtZms6Uz7D61o6E3gQzBytIPqsNU+dSq47M9ko=`。这是公开验证材料，**不能当私钥填写**。现有私钥只留在你自己的安全存储和 Actions Secret 中，不要发送到聊天。公钥不匹配时流程会拒绝发布，客户端不会从网页自动信任新公钥。
+
+原宝塔站点的签名私钥通常在 `/www/wwwroot/botmanager.uuze.cn/data/config.json` 的 `signing_secret` 字段；使用自定义 `QQM_DATA_DIR` 时，以实际数据目录为准。用服务器文件管理器读取，只复制该字段的完整 Base64 值，不复制字段名、引号或整个文件，也不需要再次 Base64 编码。
+
+到本仓库 Settings → Secrets and variables → Actions → New repository secret，名称填写 `UPDATE_SIGNING_PRIVATE_KEY`，Secret 填入上面的原值并保存。不要填在 Variables、README 或工作流源码中。[GitHub Secret 配置说明](https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/use-secrets)
+
+保留服务器原配置与安全备份，不能删除配置重新生成。若原私钥已丢失，公钥无法恢复私钥；需另行规划换钥和重新打包，旧客户端不能直接信任新密钥。这里只迁移原密钥，不自动换钥。
 
 同仓库发布直接使用 GitHub 自动提供的 `GITHUB_TOKEN`，不再需要跨仓库 PAT 或 SSH 部署密钥。不要将任何 token、私钥、证书上传到 docs 分支。
 

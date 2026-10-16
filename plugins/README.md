@@ -11,7 +11,7 @@
 - `lib/examples/developer_echo_plugin.dart`：可编译的 Dart SDK 扩展示例，不默认注册。
 - `schema/plugin.schema.json`：v2 JSON Schema，兼容 v1 文本规则。
 
-应用内「写插件」提供插件专用文件管理器、未保存保护、本地历史、导入导出与规则试运行。Dart/JS/Python 文件仅可编辑，不会在客户端动态执行；复杂逻辑通过 HTTP 接入，Dart 插件仍需编译。与 Yunzai 的命令体验相近，不是 icqq 兼容层。
+应用内「写插件」提供插件专用文件管理器、未保存保护、本地历史、导入导出与规则试运行。Dart/JS/Python 文件仅可编辑，不会在客户端动态执行；复杂逻辑通过 HTTP 接入，Dart 插件仍需编译。
 
 第三方 JSON/YAML 请从应用的「插件 → 导入」安装。已安装的定义与配置保存到应用自己的本机存储，支持重启恢复；仅复制一个文件进源码目录不会自动执行。手机也使用同一套导入流程。
 

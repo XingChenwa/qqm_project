@@ -57,8 +57,6 @@
 
 ## 写自己的插件
 
-插件体验借鉴 Yunzai 的命令、规则与玩法管理，但 **不直接兼容 Yunzai / icqq 插件**，不能直接导入云崽 JS 文件运行。
-
 - **JSON / YAML 规则**：无需重新编译，适合命令、固定回复、Markdown、媒体和按钮。
 - **HTTP 插件**：复杂玩法用自己的 Node.js、Python、Go 等服务实现，客户端调用经过授权的地址。
 - **内置 Dart SDK**：需要深度集成时，审核后随客户端一起编译。
@@ -86,45 +84,8 @@
 
 [完整协议与教程](docs/plugin-development.md) · [示例目录](plugins/examples/) · [Dart SDK](plugins/README.md)
 
-## 从源码运行
-
-使用 Flutter **3.44.3**，各平台还需要相应原生构建工具。iOS / macOS 构建需要 macOS 与 Xcode，可使用仓库配置的 GitHub macOS Runner。
-
-```sh
-git clone https://github.com/XingChenwa/qqm_project.git
-cd qqm_project
-flutter pub get
-flutter analyze
-flutter test
-flutter run -d windows
-```
-
-最后一行按实际设备替换，例如 `-d macos` 或手机设备 ID。首次运行前确认当前配置，应用会尝试连接已保存的机器人；测试请使用测试机器人，勿对生产会话发送测试消息。
-
-目录说明：
-
-```text
-lib/                 客户端、消息、插件与界面
-plugins/             插件 SDK、清单、内置玩法与示例
-test/                Flutter 自动化测试
-tool/  scripts/      发布校验、打包与测试工具
-docs/                main 分支中的开发与构建文档
-.github/workflows/   四端构建、正式发布与网站资料同步
-```
-
-**网站源码在独立的 [docs 分支](https://github.com/XingChenwa/qqm_project/tree/docs) 根目录**，与上面的文档目录不是一回事。编辑网站请切换到该分支，不需要启动 Flutter。
-
-## 网站与版本发布
-
-应用源码在 `main`，官网在 `docs`，安装包在 **本仓库 Releases**。不需要另建下载仓库，也不再使用独立的下载分发仓库。
-
-正式 Release 触发四端构建；全部成功后上传安装包、最后上传签名清单，并更新网站的下载数据和客户端更新入口。手动构建只生成 Actions 测试产物，不自动发布正式版。签名私钥只放在 Actions Secrets，不进入客户端或网页。
-
-[GitHub 发布与 docs 分支配置](docs/github-release.md) · [Windows 打包](docs/windows-release.md) · [手机和 macOS 构建](docs/mobile-build.md)
-
 ## 数据与第三方服务
 
-- 已移除设备使用统计：不注册设备、不上报设备名称 / 型号、不发送统计心跳。更新请求仍会像普通网络访问一样被托管服务处理。
 - 机器人凭据和会话保存在本地，请保护配置与备份。日志或报错截图请先脱敏。
 - 缺少单聊昵称时，默认向第三方 OIAPI 提交 AppID 和 OpenID 查询；不提交机器人密钥、Token 或聊天正文。
 - 天气、翻译、表情资源和你安装的 HTTP 插件可能访问相应服务；使用前检查其权限、费用和服务规则。翻译会提交明确请求翻译的内容。
