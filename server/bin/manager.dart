@@ -29,7 +29,8 @@ Future<void> _run(List<String> args) async {
       '--host 127.0.0.1 --port 23336 --data ./data --assets .\n'
       '--public-url https://bot.example.com （HTTPS 反向代理时设置）\n'
       '--no-auto-connect （不自动连接已保存的机器人）\n'
-      '首次启动生成 data/admin-password.txt；不会输出密码、机器人密钥或 Token。',
+      '首次使用必须在网页设置管理密码；初始化码保存在 data/setup-token.txt。\n'
+      '不会输出初始化码、密码、机器人密钥或 Token。',
     );
     return;
   }
@@ -72,17 +73,13 @@ Future<void> _run(List<String> args) async {
     host: option('host', '127.0.0.1'),
     port: port,
     publicUrl: option('public-url', ''),
+    autoConnect: !args.contains('--no-auto-connect'),
   );
   stdout.writeln(
     'QQ机器人管理器已启动：${server.address}\n'
-    '登录密码文件：${p.join(data.path, 'admin-password.txt')}\n'
+    '${server.needsSetup ? '首次使用请先在网页设置管理密码。初始化码文件：${server.setupTokenPath}' : '管理密码已设置，请使用自己的密码登录。'}\n'
     '公网访问请使用 HTTPS 反向代理，不要将 data 目录设为网站根目录。',
   );
-  if (!args.contains('--no-auto-connect') &&
-      bot.config.appId.isNotEmpty &&
-      bot.config.clientSecret.isNotEmpty) {
-    unawaited(bot.connect());
-  }
   final stopped = Completer<void>();
   var stopping = false;
   Future<void> shutdown(ProcessSignal signal) async {

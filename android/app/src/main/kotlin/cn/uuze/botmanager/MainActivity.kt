@@ -1,12 +1,18 @@
 package cn.uuze.botmanager
 
 import android.content.Intent
+import android.Manifest
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.pm.PackageInfo
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
 import androidx.core.content.FileProvider
+import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -15,8 +21,65 @@ import java.io.File
 import java.security.MessageDigest
 
 class MainActivity : FlutterActivity() {
+    private var notificationChannel: MethodChannel? = null
+    private var permissionReply: MethodChannel.Result? = null
+    private var notificationLaunch: String? = null
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        notificationLaunch = intent?.getStringExtra("qqm_notification")
+        notificationChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "cn.uuze.botmanager/notifications").also { channel ->
+            channel.setMethodCallHandler { call, result ->
+                try {
+                    when (call.method) {
+                        "isAllowed" -> result.success(NotificationManagerCompat.from(this).areNotificationsEnabled())
+                        "consumeLaunch" -> { result.success(notificationLaunch); notificationLaunch = null; intent?.removeExtra("qqm_notification") }
+                        "requestPermission" -> {
+                            if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                                if (permissionReply != null) { result.error("NOTIFICATION_BUSY", "正在申请通知权限", null) }
+                                else { permissionReply = result; requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 23336) }
+                            } else result.success(NotificationManagerCompat.from(this).areNotificationsEnabled())
+                        }
+                        "openSettings" -> {
+                            startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, packageName))
+                            result.success(null)
+                        }
+                        "cancelAll" -> { NotificationManagerCompat.from(this).cancelAll(); result.success(null) }
+                        "show" -> {
+                            val notifications = NotificationManagerCompat.from(this)
+                            if (!notifications.areNotificationsEnabled()) { result.success(null); return@setMethodCallHandler }
+                            if (Build.VERSION.SDK_INT >= 26) {
+                                getSystemService(NotificationManager::class.java)?.createNotificationChannel(
+                                    NotificationChannel("qqm_messages", "聊天与群事件", NotificationManager.IMPORTANCE_DEFAULT).apply {
+                                        description = "QQ机器人管理器在线收到的消息、入群申请和群成员事件"
+                                    })
+                            }
+                            val id = call.argument<Number>("id")?.toInt() ?: error("缺少通知编号")
+                            val payload = call.argument<String>("payload") ?: error("缺少会话信息")
+                            require(payload.length <= 8192)
+                            val target = Intent(this, MainActivity::class.java).apply {
+                                putExtra("qqm_notification", payload)
+                                addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                            }
+                            val pending = PendingIntent.getActivity(this, id, target, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+                            val body = call.argument<String>("body")?.take(1000) ?: ""
+                            val notification = NotificationCompat.Builder(this, "qqm_messages")
+                                .setSmallIcon(R.drawable.ic_stat_qqm)
+                                .setContentTitle(call.argument<String>("title")?.take(200) ?: "QQ机器人管理器")
+                                .setContentText(body).setStyle(NotificationCompat.BigTextStyle().bigText(body))
+                                .setContentIntent(pending).setAutoCancel(true).setOnlyAlertOnce(true)
+                                .setCategory(NotificationCompat.CATEGORY_MESSAGE).setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+                                .setGroup(call.argument<String>("thread")).build()
+                            if (Build.VERSION.SDK_INT < 33 || checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) {
+                                notifications.notify(id, notification)
+                            }
+                            result.success(null)
+                        }
+                        else -> result.notImplemented()
+                    }
+                } catch (_: Exception) { result.error("NOTIFICATION_FAILED", "系统通知操作未完成，请检查通知权限", null) }
+            }
+        }
         // The app uses SharedPreferences.getInstance() (the legacy API).
         // Register that host directly as well, rather than relying solely on
         // the async/DataStore plugin's delegated registration. Same file/codec;
@@ -83,6 +146,24 @@ class MainActivity : FlutterActivity() {
                     result.error("INSTALL_FAILED", exception.message ?: "系统未能打开安装界面", null)
                 }
             }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        intent.getStringExtra("qqm_notification")?.let { payload ->
+            notificationLaunch = payload
+            notificationChannel?.invokeMethod("opened", payload)
+            intent.removeExtra("qqm_notification")
+        }
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == 23336) {
+            permissionReply?.success(grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED && NotificationManagerCompat.from(this).areNotificationsEnabled())
+            permissionReply = null
+        }
     }
 
     @Suppress("DEPRECATION")

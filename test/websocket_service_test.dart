@@ -101,7 +101,10 @@ void main() {
     await until(() => gateway.payloads.any((p) => p['op'] == 2));
     expect(service.isConnected, isFalse);
     expect(gateway.payloads.single['d']['token'], 'QQBot test-token');
-    expect(gateway.payloads.single['d']['intents'], (1 << 25) | (1 << 26));
+    expect(
+      gateway.payloads.single['d']['intents'],
+      (1 << 24) | (1 << 25) | (1 << 26),
+    );
     gateway.ready(gateway.sockets.single);
     expect(await connecting, isTrue);
     expect(service.isConnected, isTrue);

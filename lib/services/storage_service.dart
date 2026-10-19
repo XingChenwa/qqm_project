@@ -4,6 +4,7 @@ import '../runtime/storage_platform.dart';
 import '../models/message.dart';
 import '../models/config.dart';
 import '../models/plugin.dart';
+import '../models/group_notice.dart';
 
 class StorageService {
   late Box<String> _messagesBox;
@@ -162,6 +163,45 @@ class StorageService {
     await _prefs.setBool('theme_dark', isDark);
   }
 
+  List<GroupNotice> getGroupNotices(String appId) {
+    final raw = _prefs.getString(
+      'group_notices:${base64Url.encode(utf8.encode(appId))}',
+    );
+    if (raw == null) return [];
+    try {
+      return (jsonDecode(raw) as List)
+          .whereType<Map>()
+          .map((value) => GroupNotice.fromMap(Map<String, dynamic>.from(value)))
+          .where((notice) => notice.appId == appId)
+          .toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<void> saveGroupNotices(String appId, List<GroupNotice> notices) async {
+    if (!await _prefs.setString(
+      'group_notices:${base64Url.encode(utf8.encode(appId))}',
+      jsonEncode(
+        notices
+            .where((notice) => notice.appId == appId)
+            .take(500)
+            .map((notice) => notice.toMap())
+            .toList(),
+      ),
+    )) {
+      throw StateError('群通知未能保存到本地');
+    }
+  }
+
+  bool getSystemNotificationsEnabled() =>
+      _prefs.getBool('mobile_notifications') ?? false;
+  Future<void> setSystemNotificationsEnabled(bool value) async {
+    if (!await _prefs.setBool('mobile_notifications', value)) {
+      throw StateError('通知偏好未能保存');
+    }
+  }
+
   // --- Messages ---
   Future<void> saveMessage(MessageModel message) async {
     await _messagesBox.put(_key(message.id), jsonEncode(message.toMap()));
@@ -223,7 +263,7 @@ class StorageService {
     final json = _read(_sessionsBox, sessionId);
     if (json != null) {
       final session = ChatSession.fromMap(jsonDecode(json));
-      if (incrementUnread) session.unreadCount++;
+      if (incrementUnread && !session.isMuted) session.unreadCount++;
       await _sessionsBox.put(
         _key(sessionId),
         jsonEncode({

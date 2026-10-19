@@ -71,11 +71,12 @@ class MessageBubble extends StatelessWidget {
   }
 
   Widget _avatar(BuildContext context) {
+    // A message's avatar belongs to its sender, even inside a group. Only
+    // the group conversation itself uses ProfileAvatar(isGroup: true).
     return ProfileAvatar(
       name: message.senderName,
       url: message.senderAvatarUrl,
       radius: 17,
-      isGroup: !message.isFromBot,
     );
   }
 

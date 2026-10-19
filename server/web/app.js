@@ -54,7 +54,16 @@ function nowTime(value) {
 function showLogin() {
   S.logged = false;
   $("app").hidden = true;
+  $("auth-loading").hidden = true;
+  $("setup-view").hidden = true;
   $("login-view").hidden = false;
+}
+function showSetup() {
+  S.logged = false;
+  $("app").hidden = true;
+  $("auth-loading").hidden = true;
+  $("login-view").hidden = true;
+  $("setup-view").hidden = false;
 }
 async function api(path, { method = "GET", body } = {}) {
   const response = await fetch("/api/" + path, {
@@ -74,7 +83,12 @@ async function api(path, { method = "GET", body } = {}) {
     throw Error("服务器返回格式异常，请检查代理或服务日志。");
   }
   if (!response.ok) {
-    if (response.status === 401 && path !== "login") showLogin();
+    if (data.needsSetup === true) showSetup();
+    else if (
+      (response.status === 401 && path !== "login") ||
+      (response.status === 409 && path === "setup")
+    )
+      showLogin();
     throw Error(data.error || "操作失败，请重试");
   }
   return data;
@@ -392,7 +406,9 @@ function renderSessions() {
         meta.append(
           el("span", { class: "unread" }, Math.min(session.unreadCount, 99)),
         );
-      return el(
+      if (session.isMuted)
+        meta.append(el("span", { title: "已屏蔽消息提醒" }, "静音"));
+      const item = el(
         "button",
         {
           class: "session-item" + (session.id === S.session ? " active" : ""),
@@ -411,6 +427,8 @@ function renderSessions() {
         ),
         meta,
       );
+      window.bindQQMSessionMenu?.(item, session);
+      return item;
     }),
   );
   if (!list.length)
@@ -526,6 +544,14 @@ function renderMessages() {
             },
           },
           "引用",
+        ),
+      );
+    if (message.canRecall)
+      main.append(
+        el(
+          "button",
+          { class: "quote", onclick: () => window.recallQQMMessage?.(message) },
+          "撤回",
         ),
       );
     area.append(
@@ -1086,6 +1112,7 @@ async function refresh(force = false) {
       );
     }
     S.state = data;
+    window.onQQMRefresh?.(data);
     S.revision = data.revision;
     $("version").textContent = `${data.version}+${data.build} · Linux 网页版`;
     $("status").textContent = data.status;
@@ -1126,11 +1153,31 @@ async function refresh(force = false) {
 }
 async function enter() {
   S.logged = true;
+  $("auth-loading").hidden = true;
+  $("setup-view").hidden = true;
   $("login-view").hidden = true;
   $("app").hidden = false;
   await refresh(true);
   updatePreview();
 }
+$("setup-form").onsubmit = (event) => {
+  event.preventDefault();
+  perform(async () => {
+    const password = $("setup-password").value;
+    const confirmation = $("setup-confirm").value;
+    if (password !== confirmation) throw Error("两次输入的管理密码不一致");
+    if ([...password].length < 12 || password.length > 256 || !password.trim())
+      throw Error("管理密码需为 12–256 个字符，不能只含空白");
+    await post("setup", {
+      token: $("setup-token").value.trim(),
+      password,
+      confirmation,
+    });
+    $("setup-form").reset();
+    S.revision = -1;
+    await enter();
+  }, event.submitter);
+};
 $("login-form").onsubmit = (event) => {
   event.preventDefault();
   perform(async () => {
@@ -1156,9 +1203,28 @@ setInterval(() => {
       if (S.logged) $("network-banner").hidden = false;
     });
 }, 1500);
-api("state")
-  .then((data) => {
-    S.state = data;
-    return enter();
-  })
-  .catch(() => showLogin());
+async function initializeAuth() {
+  $("login-view").hidden = true;
+  $("setup-view").hidden = true;
+  $("auth-loading").hidden = false;
+  $("auth-loading-message").textContent = "正在检查管理密码设置…";
+  $("auth-retry").hidden = true;
+  try {
+    const status = await api("auth/status");
+    if (status.needsSetup) return showSetup();
+    showLogin();
+    try {
+      const data = await api("state");
+      S.state = data;
+      await enter();
+    } catch {
+      showLogin();
+    }
+  } catch {
+    $("auth-loading-message").textContent =
+      "暂时无法连接管理服务，请检查服务和网络后重试。";
+    $("auth-retry").hidden = false;
+  }
+}
+$("auth-retry").onclick = initializeAuth;
+initializeAuth();

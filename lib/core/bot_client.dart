@@ -13,6 +13,8 @@ import '../services/ip_whitelist_service.dart';
 import '../utils/profile_helpers.dart';
 import '../utils/helpers.dart';
 import '../utils/qq_mentions.dart';
+import '../models/group_notice.dart';
+import 'group_management.dart';
 
 enum ConnectStep { idle, gettingToken, gettingGateway, connecting, done }
 
@@ -24,6 +26,23 @@ class BotClient extends ChangeNotifier {
   ProfileRequestQueue _profileRequests;
   ProfileRequestQueue _nicknameRequests;
   final OiapiService _oiapiService;
+  final _incomingNotices = StreamController<MessageModel>.broadcast();
+  Stream<MessageModel> get incomingNotices => _incomingNotices.stream;
+  late final GroupManagement groups = GroupManagement(
+    storage: _storage,
+    api: _apiService,
+    request: _requestGroupApi,
+    appId: () => _config.appId,
+    epoch: () => _accountEpoch,
+    muted: (id) =>
+        _sessions.any((session) => session.id == id && session.isMuted),
+    memberName: (group, member) =>
+        _knownMember('group:$group:$member', group, member)['name'] ?? '',
+    changed: () {
+      if (!_disposed) notifyListeners();
+    },
+    log: _addLog,
+  );
   int _nicknameGeneration = 0;
   final _profileSyncs = <String, Future<void>>{};
   final _memberProfiles = <String, Map<String, String>>{};
@@ -82,6 +101,29 @@ class BotClient extends ChangeNotifier {
       notifyListeners();
     }
     return result;
+  }
+
+  Future<ApiResult<T>> _requestGroupApi<T>(
+    GroupTarget target,
+    Future<ApiResult<T>> Function(String token, String baseUrl) action,
+  ) async {
+    bool current() =>
+        !_disposed &&
+        target.epoch == _accountEpoch &&
+        target.appId == _config.appId;
+    if (!current() || target.groupId.isEmpty) {
+      return ApiResult.failure('机器人已切换或群 OpenID 无效，请重新打开此页面');
+    }
+    final baseUrl = _config.resolvedApiBaseUrl;
+    final token = await _getAccessToken();
+    if (!current()) return ApiResult.failure('机器人已切换，已取消原群操作');
+    if (token == null) {
+      return ApiResult.failure(
+        _connectionError.isEmpty ? '请先配置并连接机器人' : _connectionError,
+      );
+    }
+    final result = await _checkedApi(() => action(token, baseUrl));
+    return current() ? result : ApiResult.failure('机器人已切换，请回原机器人刷新确认');
   }
 
   Future<void> _configWrites = Future<void>.value();
@@ -389,6 +431,7 @@ class BotClient extends ChangeNotifier {
     if (_disposed) return;
     _lastEventType = eventType;
     _lastEventAt = DateTime.now();
+    groups.ingest(eventType, data);
     if (const [
       'INTERACTION_CREATE',
       'GROUP_ADD_ROBOT',
@@ -1152,8 +1195,11 @@ class BotClient extends ChangeNotifier {
         sessionType: isGroup ? 1 : 0,
         lastMessageTime: timestamp,
         lastMessage: message.sessionPreview,
-        unreadCount: (previous?.unreadCount ?? 0) + 1,
+        unreadCount: previous?.isMuted == true
+            ? 0
+            : (previous?.unreadCount ?? 0) + 1,
         isPinned: previous?.isPinned ?? false,
+        isMuted: previous?.isMuted ?? false,
         profileStatus: previous?.profileStatus ?? '',
         profileUpdatedAt: previous?.profileUpdatedAt,
         nicknameSource: !isGroup && hasName
@@ -1171,6 +1217,9 @@ class BotClient extends ChangeNotifier {
     }
 
     _dispatchForAutoResponse(message);
+    if (!message.isBotAuthor && previous?.isMuted != true) {
+      _incomingNotices.add(_withUserAvatar(message));
+    }
     final preview = message.sessionPreview;
     _addLog(
       '收到消息 [${isGroup ? "群聊" : "好友"}${eventType.isNotEmpty ? "/$eventType" : ""}] $senderName: ${preview.length > 50 ? '${preview.substring(0, 50)}...' : preview}',
@@ -1689,7 +1738,15 @@ class BotClient extends ChangeNotifier {
   }
 
   bool canRecallMessage(MessageModel message) {
-    return message.isFromBot &&
+    final group = _sessions.any(
+      (session) => session.id == message.sessionId && session.sessionType == 1,
+    );
+    final moderate =
+        group &&
+        groups.isAdministrator(message.sessionId) &&
+        !message.isBotAuthor &&
+        !['owner', 'admin'].contains(message.senderRole);
+    return (message.isFromBot || moderate) &&
         _ownsMessage(message) &&
         !message.isRecalled &&
         message.extra?['localOnly'] != true &&
@@ -1700,7 +1757,7 @@ class BotClient extends ChangeNotifier {
   Future<bool> recallMessage(MessageModel message) async {
     final epoch = _accountEpoch;
     if (!canRecallMessage(message)) {
-      _addLog('撤回失败: 只能撤回机器人 2 分钟内发送的消息');
+      _setSendError('只能撤回 2 分钟内的消息；撤回普通群成员消息需机器人具有群管理员身份');
       return false;
     }
     final token = await _prepareSend(message.sessionId);
@@ -1734,7 +1791,7 @@ class BotClient extends ChangeNotifier {
       if (_disposed || epoch != _accountEpoch) return false;
       await _storage.updateSessionLastMessage(
         message.sessionId,
-        '[你撤回了一条消息]',
+        message.isFromBot ? '[你撤回了一条消息]' : '[已撤回群成员消息]',
         DateTime.now(),
         incrementUnread: false,
       );
@@ -1956,6 +2013,24 @@ class BotClient extends ChangeNotifier {
     _loadSessions();
   }
 
+  Future<void> setSessionMuted(
+    String sessionId,
+    bool muted, {
+    GroupTarget? expected,
+  }) async {
+    if (expected != null && !groups.isCurrent(expected)) {
+      throw StateError('机器人已切换，请重新打开此会话设置');
+    }
+    final epoch = _accountEpoch;
+    final session = _sessions.where((item) => item.id == sessionId).firstOrNull;
+    if (session == null) throw StateError('会话不存在');
+    await _storage.saveSession(
+      session.copyWith(isMuted: muted, unreadCount: 0),
+    );
+    if (_disposed || epoch != _accountEpoch) return;
+    _loadSessions();
+  }
+
   Future<void> addSession(
     String openId, {
     required bool isGroup,
@@ -2017,6 +2092,8 @@ class BotClient extends ChangeNotifier {
     _oiapiService.dispose();
     _tokenRefreshTimer?.cancel();
     _wsService.dispose();
+    groups.dispose();
+    unawaited(_incomingNotices.close());
     super.dispose();
   }
 }

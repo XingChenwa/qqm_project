@@ -9,6 +9,7 @@ import 'package:qq_bot_manager/models/message.dart';
 import 'package:qq_bot_manager/runtime/assets_server.dart';
 import 'package:qq_bot_manager/services/storage_service.dart';
 import '../server/src/manager_server.dart';
+import 'support/server_fixture_api.dart';
 
 Future<void> main(List<String> args) async {
   if (args.length != 1 || !args.single.contains('qqm-server-browser-')) {
@@ -36,6 +37,9 @@ Future<void> main(List<String> args) async {
         id: id,
         name: name,
         sessionType: type,
+        avatarUrl: type == 0
+            ? 'https://example.invalid/private-avatar.png'
+            : 'https://example.invalid/old-group-avatar.png',
         lastMessage: '让灵感变成新玩法 ✦',
         lastMessageTime: DateTime.now(),
         unreadCount: type == 0 ? 2 : 0,
@@ -49,6 +53,7 @@ Future<void> main(List<String> args) async {
         sessionId: 'group-a',
         senderId: index.isOdd ? 'bot' : 'member-a',
         senderName: index.isOdd ? '小助手' : '薯条同学',
+        senderAvatarUrl: 'https://example.invalid/sender-avatar.png',
         content: index == 28
             ? '今天的插件也可以在网页里编辑了吗？'
             : index == 29
@@ -60,10 +65,39 @@ Future<void> main(List<String> args) async {
       ),
     );
   }
+  await storage.saveMessage(
+    MessageModel(
+      id: 'private-fixture',
+      sessionId: 'user-a',
+      senderId: 'user-a',
+      senderName: '薯条同学',
+      senderAvatarUrl: 'https://example.invalid/private-avatar.png',
+      content: '单聊用户头像也需要保留。',
+      messageType: 0,
+      timestamp: DateTime.now(),
+    ),
+  );
   final manager = PluginManager(storage);
   await manager.init();
+  final api = ServerFixtureApi();
+  final bot = BotClient(storage, apiService: api);
+  bot.groups.ingest(
+    'GROUP_JOIN_REQUEST',
+    api.joinRequest('group-a'),
+    emit: false,
+  );
+  bot.groups.ingest('GROUP_MEMBER_ADD', {
+    'group_openid': 'group-a',
+    'member_openid': 'member-a',
+    'timestamp': 1792454400,
+  }, emit: false);
+  bot.groups.ingest('GROUP_MEMBER_REMOVE', {
+    'group_openid': 'group-a',
+    'member_openid': 'member-b',
+    'timestamp': 1792454401,
+  }, emit: false);
   final server = await ManagerServer.start(
-    bot: BotClient(storage),
+    bot: bot,
     plugins: manager,
     storage: storage,
     data: directory,

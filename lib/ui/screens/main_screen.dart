@@ -14,6 +14,8 @@ import '../../utils/helpers.dart';
 import '../../utils/bot_command_context.dart';
 import '../../utils/constants.dart';
 import '../../services/ip_whitelist_service.dart';
+import '../../services/storage_service.dart';
+import '../../services/mobile_notifications.dart';
 import '../themes/app_theme.dart';
 import '../widgets/chat_input.dart';
 import '../widgets/mobile_workspace.dart';
@@ -28,6 +30,8 @@ import '../widgets/profile_avatar.dart';
 import '../widgets/app_dialogs.dart';
 import '../widgets/ip_whitelist_dialog.dart';
 import 'settings_screen.dart';
+import 'notifications_screen.dart';
+import 'group_settings_screen.dart';
 
 class MainScreen extends StatefulWidget {
   final VoidCallback toggleTheme;
@@ -65,6 +69,7 @@ class _MainScreenState extends State<MainScreen> {
   int _chatSentRevision = 0;
   int _accountEpoch = -1;
   IpWhitelistProblem? _shownIpWhitelistProblem;
+  MobileNotifications? _notifications;
 
   @override
   void initState() {
@@ -78,6 +83,14 @@ class _MainScreenState extends State<MainScreen> {
       client.addListener(_onBotUpdate);
       client.onLog = _addLog;
       client.onMessageReceived = _processWithPlugins;
+      _notifications = MobileNotifications(
+        bot: client,
+        storage: context.read<StorageService>(),
+        visibleSession: () =>
+            _sideIndex == 2 && _mobileChatOpen ? _selectedSession?.id : null,
+        onOpen: _openSystemNotification,
+      );
+      unawaited(_notifications!.start());
       if (_selectedSession != null) {
         client.refreshSessionProfile(_selectedSession!.id);
       }
@@ -88,9 +101,122 @@ class _MainScreenState extends State<MainScreen> {
 
   @override
   void dispose() {
+    _notifications?.dispose();
     _botClient?.removeListener(_onBotUpdate);
     _messageScrollController.dispose();
     super.dispose();
+  }
+
+  Future<void> _openSystemNotification(
+    String appId,
+    String sessionId,
+    String noticeId,
+  ) async {
+    if (!mounted) return;
+    final bot = context.read<BotClient>();
+    if (bot.config.appId != appId) await bot.switchBot(appId);
+    if (!mounted || bot.config.appId != appId) return;
+    if (noticeId.isNotEmpty) {
+      await _openNotifications(groupId: sessionId);
+      return;
+    }
+    final session = bot.sessions.where((s) => s.id == sessionId).firstOrNull;
+    if (session == null) return;
+    setState(() {
+      _sideIndex = 2;
+      _selectedSession = session;
+      _mobileChatOpen = true;
+      _replyToMessage = null;
+      _chatOpenRevision++;
+    });
+    await bot.markSessionRead(session.id);
+  }
+
+  Future<void> _openNotifications({String? groupId}) async {
+    _notifications?.inboxVisible = true;
+    try {
+      await Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => NotificationsScreen(
+            systemNotifications: _notifications,
+            groupId: groupId,
+          ),
+        ),
+      );
+    } finally {
+      _notifications?.inboxVisible = false;
+    }
+  }
+
+  Future<void> _openSessionSettings(ChatSession session) => Navigator.push(
+    context,
+    MaterialPageRoute(builder: (_) => GroupSettingsScreen(session: session)),
+  );
+  Widget _notificationBell(BotClient bot) => IconButton(
+    tooltip: '消息与通知',
+    onPressed: () => _openNotifications(),
+    icon: Badge(
+      isLabelVisible: bot.groups.unreadCount > 0,
+      label: Text(
+        bot.groups.unreadCount > 99 ? '99+' : '${bot.groups.unreadCount}',
+      ),
+      child: const Icon(Icons.notifications_none_rounded),
+    ),
+  );
+
+  Future<void> _sessionMenu(ChatSession session, BotClient bot) async {
+    final target = bot.groups.target(session.id);
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      useSafeArea: true,
+      builder: (sheet) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              title: Text(session.name, overflow: TextOverflow.ellipsis),
+            ),
+            ListTile(
+              leading: Icon(
+                session.isMuted
+                    ? Icons.notifications_active_outlined
+                    : Icons.notifications_off_outlined,
+              ),
+              title: Text(session.isMuted ? '取消屏蔽消息提醒' : '屏蔽消息提醒'),
+              subtitle: const Text('保留记录，不影响机器人和插件收发'),
+              onTap: () => Navigator.pop(sheet, 'mute'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.tune),
+              title: Text(session.sessionType == 1 ? '群聊设置' : '用户设置'),
+              onTap: () => Navigator.pop(sheet, 'settings'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (!mounted ||
+        !bot.groups.isCurrent(target) ||
+        !bot.sessions.any((s) => s.id == session.id)) {
+      return;
+    }
+    if (action == 'settings') {
+      await _openSessionSettings(session);
+    } else if (action == 'mute') {
+      try {
+        await bot.setSessionMuted(
+          session.id,
+          !session.isMuted,
+          expected: target,
+        );
+      } catch (_) {
+        if (mounted) {
+          await AppDialogs.show(context, '免打扰设置未保存，请重试', error: true);
+        }
+      }
+    }
   }
 
   Future<void> _tryStartupConnect(BotClient client) async {
@@ -696,7 +822,14 @@ class _MainScreenState extends State<MainScreen> {
       onBack: () => setState(() => _mobileChatOpen = false),
       onSwitchBot: () => _chooseBot(bot),
       onConnection: () => _toggleConnection(bot),
-      onSettings: _openSettings,
+      onSettings: chatting
+          ? () => _openSessionSettings(_selectedSession!)
+          : _openSettings,
+      settingsLabel: chatting
+          ? (_selectedSession!.sessionType == 1 ? '群聊设置' : '用户设置')
+          : '设置',
+      onNotifications: () => _openNotifications(),
+      notificationCount: bot.groups.unreadCount,
       onNewChat: _newSession,
       onNavigate: _navigateTo,
       body: Column(
@@ -858,6 +991,7 @@ class _MainScreenState extends State<MainScreen> {
             label: Text(connected ? '断开连接' : '连接'),
           ),
           const SizedBox(width: 10),
+          _notificationBell(bot),
           IconButton(
             tooltip: '设置',
             onPressed: () => Navigator.push(
@@ -1229,6 +1363,8 @@ class _MainScreenState extends State<MainScreen> {
         borderRadius: BorderRadius.circular(8),
         child: InkWell(
           borderRadius: BorderRadius.circular(8),
+          onLongPress: () => _sessionMenu(session, bot),
+          onSecondaryTap: () => _sessionMenu(session, bot),
           onTap: () {
             setState(() {
               _selectedSession = session;
@@ -1290,7 +1426,15 @@ class _MainScreenState extends State<MainScreen> {
                               ),
                             ),
                           ),
-                          if (session.unreadCount > 0)
+                          if (session.isMuted)
+                            const Padding(
+                              padding: EdgeInsets.only(left: 6),
+                              child: Icon(
+                                Icons.notifications_off_outlined,
+                                size: 15,
+                              ),
+                            ),
+                          if (session.unreadCount > 0 && !session.isMuted)
                             _unreadBadge(session.unreadCount),
                           if (session.unreadCount == 0 && !mobile)
                             _statusDot(accent),
@@ -1402,9 +1546,11 @@ class _MainScreenState extends State<MainScreen> {
               tooltip: '插件与工具',
             ),
           IconButton(
-            onPressed: () => _navigateTo(1),
-            icon: const Icon(Icons.people_outline_rounded),
-            tooltip: '会话信息',
+            onPressed: session == null
+                ? null
+                : () => _openSessionSettings(session),
+            icon: const Icon(Icons.tune_rounded),
+            tooltip: session?.sessionType == 1 ? '群聊设置' : '用户设置',
           ),
         ],
       ),
@@ -1437,7 +1583,39 @@ class _MainScreenState extends State<MainScreen> {
           message: message,
           showSender: showSender,
           canRecall: bot.canRecallMessage(message),
-          onRecall: () => bot.recallMessage(message),
+          onRecall: () async {
+            if (!message.isFromBot) {
+              final confirmed = await AppDialogs.present<bool>(
+                context,
+                builder: (dialog) => AlertDialog(
+                  title: const Text('撤回群成员消息？'),
+                  content: Text(
+                    '${message.senderName}：${message.sessionPreview}',
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(dialog, false),
+                      child: const Text('取消'),
+                    ),
+                    FilledButton(
+                      onPressed: () => Navigator.pop(dialog, true),
+                      child: const Text('确认撤回'),
+                    ),
+                  ],
+                ),
+              );
+              if (confirmed != true) return;
+            }
+            final recalled = await bot.recallMessage(message);
+            if (!recalled && mounted) {
+              await AppDialogs.show(
+                context,
+                bot.lastSendError,
+                title: '撤回失败',
+                error: true,
+              );
+            }
+          },
           onReply: message.isFromBot || message.isRecalled
               ? (message.isRecalled || message.referenceIndex.isEmpty
                     ? null

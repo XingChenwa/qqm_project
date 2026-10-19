@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
-import 'package:crypto/crypto.dart';
 import 'package:path/path.dart' as p;
 import 'package:qq_bot_manager/core/bot_client.dart';
 import 'package:qq_bot_manager/core/plugin_dispatcher.dart';
@@ -15,6 +14,9 @@ import 'package:qq_bot_manager/services/ip_whitelist_service.dart';
 import 'package:qq_bot_manager/services/plugin_workspace.dart';
 import 'package:qq_bot_manager/services/storage_service.dart';
 import 'package:qq_bot_manager/utils/constants.dart';
+import 'package:qq_bot_manager/core/group_management.dart';
+import 'package:qq_bot_manager/models/group_notice.dart';
+import 'admin_auth.dart';
 
 /// Authenticated same-origin control plane. No generic filesystem, proxy,
 /// subprocess or command-execution route is exposed to the browser.
@@ -25,14 +27,15 @@ class ManagerServer {
   final Directory assets;
   final PluginWorkspace workspace;
   final String publicUrl;
-  final List<int> _passwordHash;
+  final AdminAuth _auth;
+  final bool _autoConnect;
   final _sessions = <String, DateTime>{};
   final _failures = <String, ({int count, DateTime since})>{};
   final _logs = <Map<String, dynamic>>[];
   final _ip = PublicIpService();
   late final HttpServer _server;
   int _revision = 0, _logId = 0, _activeRequests = 0;
-  bool _closed = false;
+  bool _closed = false, _authBusy = false;
   Timer? _tick;
   Future<void> _mutations = Future<void>.value();
 
@@ -43,11 +46,11 @@ class ManagerServer {
     this.assets,
     Directory data,
     this.publicUrl,
-    String password,
+    this._auth,
+    this._autoConnect,
   ) : workspace = PluginWorkspace(
         Directory(p.join(data.path, 'plugin_workspace')),
-      ),
-      _passwordHash = sha256.convert(utf8.encode(password)).bytes;
+      );
 
   static Future<ManagerServer> start({
     required BotClient bot,
@@ -58,6 +61,7 @@ class ManagerServer {
     String host = '127.0.0.1',
     int port = 23336,
     String publicUrl = '',
+    bool autoConnect = false,
   }) async {
     if (publicUrl.isNotEmpty) {
       final uri = Uri.tryParse(publicUrl);
@@ -72,21 +76,7 @@ class ManagerServer {
       }
       publicUrl = uri.origin;
     }
-    final passwordFile = File(p.join(data.path, 'admin-password.txt'));
-    if (await FileSystemEntity.type(passwordFile.path, followLinks: false) ==
-        FileSystemEntityType.link) {
-      throw const FormatException('密码文件不能为符号链接');
-    }
-    if (!await passwordFile.exists()) {
-      await passwordFile.writeAsString(_randomToken(), flush: true);
-    }
-    if (!Platform.isWindows) {
-      await Process.run('chmod', ['600', passwordFile.path]);
-    }
-    final password = (await passwordFile.readAsString()).trim();
-    if (password.length < 24 || password.length > 256) {
-      throw const FormatException('登录密码需为 24–256 字符；不会覆盖已有密码');
-    }
+    final auth = await AdminAuth.open(data);
     final result = ManagerServer._(
       bot,
       plugins,
@@ -94,7 +84,8 @@ class ManagerServer {
       assets,
       data,
       publicUrl,
-      password,
+      auth,
+      autoConnect,
     );
     await result.workspace.ensureRoot();
     result._server = await HttpServer.bind(host, port);
@@ -107,7 +98,7 @@ class ManagerServer {
     result._server.listen((request) => unawaited(result._handle(request)));
     var ticking = false;
     result._tick = Timer.periodic(const Duration(minutes: 1), (_) async {
-      if (ticking || result._closed) return;
+      if (ticking || result._closed || !result._auth.isConfigured) return;
       ticking = true;
       try {
         await plugins.tick();
@@ -115,6 +106,7 @@ class ManagerServer {
         ticking = false;
       }
     });
+    result._maybeAutoConnect();
     return result;
   }
 
@@ -123,6 +115,18 @@ class ManagerServer {
       .replaceAll('=', '');
   Uri get address =>
       Uri(scheme: 'http', host: _server.address.address, port: _server.port);
+  bool get needsSetup => !_auth.isConfigured;
+  String get setupTokenPath => _auth.setupTokenPath;
+  void _maybeAutoConnect() {
+    if (!_closed &&
+        _auth.isConfigured &&
+        _autoConnect &&
+        bot.config.appId.isNotEmpty &&
+        bot.config.clientSecret.isNotEmpty) {
+      unawaited(bot.connect());
+    }
+  }
+
   void _changed() => _revision++;
   String _redact(String value) {
     for (final config in bot.botProfiles) {
@@ -141,14 +145,6 @@ class ManagerServer {
     });
     if (_logs.length > 2000) _logs.removeAt(0);
     _changed();
-  }
-
-  bool _constantEqual(List<int> a, List<int> b) {
-    var diff = a.length ^ b.length;
-    for (var i = 0; i < a.length && i < b.length; i++) {
-      diff |= a[i] ^ b[i];
-    }
-    return diff == 0;
   }
 
   void _json(HttpRequest request, dynamic value, [int code = 200]) {
@@ -195,6 +191,63 @@ class ManagerServer {
       }
     }
     return null;
+  }
+
+  void _grantSession(HttpRequest request) {
+    if (_sessions.length >= 32) _sessions.remove(_sessions.keys.first);
+    final token = _randomToken();
+    _sessions[token] = DateTime.now().add(const Duration(hours: 12));
+    request.response.cookies.add(
+      Cookie('qqm_session', token)
+        ..httpOnly = true
+        ..secure = publicUrl.isNotEmpty
+        ..sameSite = SameSite.strict
+        ..path = '/'
+        ..maxAge = 43200,
+    );
+  }
+
+  Future<void> _authenticate(HttpRequest request, {required bool setup}) async {
+    if (setup && _auth.isConfigured) {
+      _json(request, {'error': '管理密码已经设置，请直接登录'}, 409);
+      return;
+    }
+    if (!setup && !_auth.isConfigured) {
+      _json(request, {'error': '首次使用必须先设置管理密码', 'needsSetup': true}, 428);
+      return;
+    }
+    final peer = request.connectionInfo?.remoteAddress.address ?? 'unknown';
+    _failures.removeWhere(
+      (_, value) => DateTime.now().difference(value.since).inMinutes >= 5,
+    );
+    final failure = _failures[peer];
+    if ((failure != null && failure.count >= 10) || _failures.length >= 1024) {
+      _json(request, {'error': '尝试次数过多，请 5 分钟后重试'}, 429);
+      return;
+    }
+    // Reserve an attempt before any asynchronous work. Only one expensive KDF
+    // runs at a time; parallel first-install requests cannot replace a password.
+    _failures[peer] = (
+      count: (failure?.count ?? 0) + 1,
+      since: failure?.since ?? DateTime.now(),
+    );
+    final body = await _body(request);
+    final password = _str(body, 'password', 256);
+    if (setup) {
+      await _auth.configure(
+        token: _str(body, 'token', 256),
+        password: password,
+        confirmation: _str(body, 'confirmation', 256),
+      );
+      _maybeAutoConnect();
+      _changed();
+    } else if (!await _auth.verifyPassword(password)) {
+      _json(request, {'error': '管理密码不正确'}, 401);
+      return;
+    }
+    _failures.remove(peer);
+    _grantSession(request);
+    _json(request, {'ok': true});
   }
 
   bool _sameOrigin(HttpRequest request) {
@@ -254,6 +307,10 @@ class ManagerServer {
         const files = {
           '/': ('server/web/index.html', 'text/html; charset=utf-8'),
           '/app.js': ('server/web/app.js', 'text/javascript; charset=utf-8'),
+          '/group-management.js': (
+            'server/web/group-management.js',
+            'text/javascript; charset=utf-8',
+          ),
           '/style.css': ('server/web/style.css', 'text/css; charset=utf-8'),
           '/logo.png': ('assets/branding/logo.png', 'image/png'),
         };
@@ -277,43 +334,28 @@ class ManagerServer {
         _json(request, {'error': '请从管理界面访问'}, 403);
         return;
       }
-      if (route == '/api/login' && request.method == 'POST') {
-        final peer = request.connectionInfo?.remoteAddress.address ?? 'unknown';
-        _failures.removeWhere(
-          (_, value) => DateTime.now().difference(value.since).inMinutes >= 5,
-        );
-        final failure = _failures[peer];
-        if (failure != null && failure.count >= 10 ||
-            _failures.length >= 1024) {
-          _json(request, {'error': '尝试次数过多，请 5 分钟后重试'}, 429);
+      if (route == '/api/auth/status' && request.method == 'GET') {
+        _json(request, {'needsSetup': needsSetup});
+        return;
+      }
+      if ((route == '/api/login' || route == '/api/setup') &&
+          request.method == 'POST') {
+        if (_authBusy) {
+          _json(request, {'error': '正在验证管理密码，请稍后重试'}, 429);
           return;
         }
-        final body = await _body(request);
-        final password = _str(body, 'password', 256);
-        if (!_constantEqual(
-          sha256.convert(utf8.encode(password)).bytes,
-          _passwordHash,
-        )) {
-          _failures[peer] = (
-            count: (failure?.count ?? 0) + 1,
-            since: failure?.since ?? DateTime.now(),
+        _authBusy = true;
+        try {
+          await _serial(
+            () => _authenticate(request, setup: route == '/api/setup'),
           );
-          _json(request, {'error': '管理密码不正确'}, 401);
-          return;
+        } finally {
+          _authBusy = false;
         }
-        _failures.remove(peer);
-        if (_sessions.length >= 32) _sessions.remove(_sessions.keys.first);
-        final token = _randomToken();
-        _sessions[token] = DateTime.now().add(const Duration(hours: 12));
-        response.cookies.add(
-          Cookie('qqm_session', token)
-            ..httpOnly = true
-            ..secure = publicUrl.isNotEmpty
-            ..sameSite = SameSite.strict
-            ..path = '/'
-            ..maxAge = 43200,
-        );
-        _json(request, {'ok': true});
+        return;
+      }
+      if (needsSetup) {
+        _json(request, {'error': '首次使用必须先设置管理密码', 'needsSetup': true}, 401);
         return;
       }
       final session = _session(request);
@@ -345,10 +387,13 @@ class ManagerServer {
     } catch (error) {
       if (error is FormatException ||
           error is PluginManifestException ||
+          error is GroupApiException ||
           error is StateError) {
         final message = error is PluginManifestException
             ? error.message
             : error is FormatException
+            ? error.message
+            : error is GroupApiException
             ? error.message
             : error.toString();
         _json(request, {'error': _redact(message)}, 400);
@@ -373,6 +418,20 @@ class ManagerServer {
   };
   void _checkAccount(String value) {
     if (value != bot.config.appId) throw StateError('机器人已切换，请刷新后重试');
+  }
+
+  void _checkEpoch(Map<String, dynamic> values) {
+    _checkAccount(_str(values, 'appId', 64));
+    if (int.tryParse('${values['epoch']}') != bot.accountEpoch) {
+      throw StateError('机器人凭据已切换，请刷新后重试');
+    }
+  }
+
+  GroupTarget _groupTarget(Map<String, dynamic> values) {
+    _checkEpoch(values);
+    final group = _str(values, 'group', 512);
+    if (group.isEmpty) throw const FormatException('缺少群 OpenID');
+    return GroupTarget(bot.config.appId, group, bot.accountEpoch);
   }
 
   Map<String, dynamic> _received(ReceivedMessageBody body) => {
@@ -400,12 +459,39 @@ class ManagerServer {
     'content': message.content,
     'markdownContent': message.markdownContent,
     'isRecalled': message.isRecalled,
+    'canRecall': bot.canRecallMessage(message),
     'time': message.timestamp.toIso8601String(),
     'imageUrl': message.imageUrl,
     if (message.hasReceivedPayload) 'body': _received(message.receivedBody),
   };
   Future<void> _get(HttpRequest request) async {
     final query = request.uri.queryParameters;
+    final route = request.uri.path;
+    if (route.startsWith('/api/group/')) {
+      final target = _groupTarget(query);
+      final data = switch (route) {
+        '/api/group/info' => await bot.groups.loadInfo(target),
+        '/api/group/bot-state' => await bot.groups.loadBotState(target),
+        '/api/group/mute' => await bot.groups.loadMute(target),
+        '/api/group/members' => await bot.groups.members(
+          target,
+          cursor: query['cursor'] ?? '',
+        ),
+        '/api/group/member' => await bot.groups.member(
+          target,
+          query['member'] ?? '',
+        ),
+        '/api/group/requests' => {
+          'next_cursor': await bot.groups.syncRequests(
+            target,
+            cursor: query['cursor'] ?? '',
+          ),
+        },
+        _ => throw const FormatException('群管理接口不存在'),
+      };
+      _json(request, data);
+      return;
+    }
     switch (request.uri.path) {
       case '/api/state':
         if (query['revision'] == '$_revision') {
@@ -415,6 +501,8 @@ class ManagerServer {
         final problem = bot.ipWhitelistProblem;
         _json(request, {
           'revision': _revision,
+          'epoch': bot.accountEpoch,
+          'groupNoticeUnread': bot.groups.unreadCount,
           'version': AppConstants.appVersion,
           'build': AppConstants.appBuild,
           'config': _config(bot.config),
@@ -463,6 +551,13 @@ class ManagerServer {
               .toList(),
           'hasOlder': messages.length > 500,
         });
+      case '/api/notices':
+        _checkEpoch(query);
+        _json(request, {
+          'notices': bot.groups.notices
+              .map((notice) => notice.toMap())
+              .toList(),
+        });
       case '/api/logs':
         _json(request, {'logs': _logs});
       case '/api/ip':
@@ -497,6 +592,63 @@ class ManagerServer {
 
   Future<void> _post(HttpRequest request, Map<String, dynamic> body) async {
     switch (request.uri.path) {
+      case '/api/notices/read':
+        _checkEpoch(body);
+        if (body['all'] == true) {
+          bot.groups.markAllRead();
+        } else {
+          bot.groups.markRead(_str(body, 'id', 128));
+        }
+      case '/api/group/approve':
+        final target = _groupTarget(body);
+        final notice = bot.groups.notices
+            .where(
+              (notice) =>
+                  notice.id == _str(body, 'id', 128) &&
+                  notice.groupId == target.groupId,
+            )
+            .firstOrNull;
+        if (notice == null ||
+            body['approve'] is! bool ||
+            (body['blacklist'] != null && body['blacklist'] is! bool)) {
+          throw const FormatException('申请不存在或审核参数无效');
+        }
+        await bot.groups.approve(
+          notice,
+          approve: body['approve'] as bool,
+          reason: _str(body, 'reason', 500),
+          blacklist: body['blacklist'] == true,
+        );
+      case '/api/group/mute':
+        final target = _groupTarget(body);
+        final operation = _str(body, 'operation', 16);
+        final expiry = body['expiresAt'] == null
+            ? null
+            : DateTime.tryParse(_str(body, 'expiresAt', 64));
+        await bot.groups.setMemberMute(
+          target,
+          _str(body, 'member', 512),
+          operation: operation,
+          expiresAt: expiry,
+        );
+      case '/api/session/mute':
+        _checkEpoch(body);
+        if (body['muted'] is! bool) throw const FormatException('屏蔽设置必须为开关');
+        await bot.setSessionMuted(
+          _str(body, 'session', 512),
+          body['muted'] as bool,
+        );
+      case '/api/recall':
+        _checkEpoch(body);
+        final message = bot
+            .getMessagesForSession(_str(body, 'session', 512))
+            .where((message) => message.id == _str(body, 'message', 1024))
+            .firstOrNull;
+        if (message == null || !await bot.recallMessage(message)) {
+          throw StateError(
+            bot.lastSendError.isEmpty ? '消息不存在或不能撤回' : bot.lastSendError,
+          );
+        }
       case '/api/config':
         final appId = _str(body, 'appId', 32).trim();
         if (!RegExp(r'^[0-9]{4,32}$').hasMatch(appId)) {
@@ -668,6 +820,8 @@ class ManagerServer {
     _tick?.cancel();
     await _server.close(force: true);
     await _mutations;
+    bot.disconnect();
+    await bot.groups.flush();
     bot.removeListener(_changed);
     plugins.removeListener(_changed);
     bot.dispose();

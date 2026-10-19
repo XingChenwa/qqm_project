@@ -9,9 +9,20 @@ import 'package:qq_bot_manager/models/message.dart';
 import 'package:qq_bot_manager/runtime/assets_server.dart';
 import 'package:qq_bot_manager/services/storage_service.dart';
 import '../server/src/manager_server.dart';
+import 'support/server_fixture_api.dart';
 
 void check(bool value, String message) {
   if (!value) throw StateError(message);
+}
+
+class OfflineBot extends BotClient {
+  OfflineBot(super.storage, {super.apiService});
+  int connectCalls = 0;
+  @override
+  Future<bool> connect() async {
+    connectCalls++;
+    return false;
+  }
 }
 
 Future<void> main() async {
@@ -57,7 +68,8 @@ Future<void> main() async {
       plugins.plugins.length == 7 && plugins.enabledCount == 0,
       '七个插件应默认关闭',
     );
-    final bot = BotClient(storage);
+    final groupApi = ServerFixtureApi();
+    final bot = OfflineBot(storage, apiService: groupApi);
     service = await ManagerServer.start(
       bot: bot,
       plugins: plugins,
@@ -65,6 +77,7 @@ Future<void> main() async {
       data: temporary,
       assets: Directory.current,
       port: 0,
+      autoConnect: true,
     );
     final origin = service.address;
     String? cookie;
@@ -101,12 +114,24 @@ Future<void> main() async {
     }
 
     check((await request('/health')).code == 200, '健康检查');
+    check(service.needsSetup && bot.connectCalls == 0, '设置密码前不得自动连接机器人');
     check((await request('/')).code == 200, '页面资源');
+    for (final path in [
+      'setup-token.txt',
+      'admin-auth.json',
+      'admin-password.txt',
+    ]) {
+      check((await request('/data/$path')).code == 404, '密码与初始化码不能通过 HTTP 读取');
+    }
     check(
-      (await request('/data/admin-password.txt')).code == 404,
-      '密码不能通过 HTTP 读取',
+      (await request('/api/auth/status')).data['needsSetup'] == true,
+      '首次使用显示密码设置页',
     );
     check((await request('/api/state')).code == 401, '接口必须登录');
+    check(
+      (await request('/api/connect', body: {})).code == 401,
+      '未设置密码不能直接使用管理功能',
+    );
     check(
       (await request(
             '/api/login',
@@ -130,17 +155,199 @@ Future<void> main() async {
       '本地服务拒绝 DNS 重绑定',
     );
     check(
+      (await request('/api/login', body: {'password': 'wrong'})).code == 428,
+      '未设置密码不能跳过初始化登录',
+    );
+    final token = (await File(service.setupTokenPath).readAsString()).trim();
+    const password = 'offline-test-password-2026';
+    check(
+      !(await request('/api/auth/status')).text.contains(token),
+      '初始化码不能经接口泄露',
+    );
+    check(
+      (await request(
+            '/api/setup',
+            body: {
+              'token': 'wrong',
+              'password': password,
+              'confirmation': password,
+            },
+          )).code ==
+          400,
+      '必须验证本地初始化码',
+    );
+    check(
+      (await request(
+            '/api/setup',
+            body: {
+              'token': token,
+              'password': 'short',
+              'confirmation': 'short',
+            },
+          )).code ==
+          400,
+      '必须设置足够长度的管理密码',
+    );
+    check(
+      (await request(
+            '/api/setup',
+            body: {
+              'token': token,
+              'password': password,
+              'confirmation': '$password-mismatch',
+            },
+          )).code ==
+          400,
+      '两次密码必须一致',
+    );
+    check(service.needsSetup && bot.connectCalls == 0, '无效初始化不能开放使用或自动连接');
+    check(
+      (await request(
+            '/api/setup',
+            body: {
+              'token': token,
+              'password': password,
+              'confirmation': password,
+            },
+          )).code ==
+          200,
+      '首次设置管理密码',
+    );
+    check(!service.needsSetup && bot.connectCalls == 1, '密码设置后才允许自动连接');
+    check(!await File(service.setupTokenPath).exists(), '一次性初始化码设置后移除');
+    final authRecord = await File(
+      '${temporary.path}/admin-auth.json',
+    ).readAsString();
+    check(
+      !authRecord.contains(password) && !authRecord.contains(token),
+      '只保存加盐密码哈希',
+    );
+    check(
+      (await request(
+            '/api/setup',
+            body: {
+              'token': token,
+              'password': '$password-replacement',
+              'confirmation': '$password-replacement',
+            },
+          )).code ==
+          409,
+      '初始化接口不能覆盖已设置的密码',
+    );
+    check((await request('/api/logout', body: {})).code == 200, '初始化后可正常退出登录');
+    check(
       (await request('/api/login', body: {'password': 'wrong'})).code == 401,
       '错误密码',
     );
-    final password = (await File(
-      '${temporary.path}/admin-password.txt',
-    ).readAsString()).trim();
     check(
       (await request('/api/login', body: {'password': password})).code == 200,
       '密码登录',
     );
     final state = await request('/api/state');
+    final scope = {'appId': '10000001', 'epoch': state.data['epoch']};
+    final groupScope = {...scope, 'group': 'fixture-group'};
+    final params = Uri(
+      queryParameters: groupScope.map((key, value) => MapEntry(key, '$value')),
+    ).query;
+    bot.groups.ingest(
+      'GROUP_JOIN_REQUEST',
+      groupApi.joinRequest('fixture-group'),
+      emit: false,
+    );
+    check(
+      (await request('/api/notices?$params')).data['notices'].length == 1,
+      '群事件独立保存并可筛选',
+    );
+    check(
+      (await request('/api/group/info?$params')).data['group_member_num'] ==
+          123,
+      '官方群资料接口',
+    );
+    check(
+      (await request('/api/group/bot-state?$params')).data['member_role'] ==
+          'admin',
+      '机器人群状态',
+    );
+    check(
+      (await request('/api/group/members?$params')).data['next_cursor'] ==
+          'fixture-page-2',
+      '群成员分页',
+    );
+    final id = bot.groups.notices.single.id;
+    check(
+      (await request(
+            '/api/group/approve',
+            body: {...groupScope, 'id': id, 'approve': true},
+          )).code ==
+          200,
+      '入群申请可审批',
+    );
+    check(
+      groupApi.approvals.single['requestId'] == 'fixture-request-1' &&
+          groupApi.approvals.single['blacklist'] == false,
+      '审批回传申请ID且不默认拉黑',
+    );
+    check(
+      (await request(
+            '/api/group/approve',
+            body: {...groupScope, 'id': id, 'approve': false},
+          )).code ==
+          400,
+      '已审核不可重复审批',
+    );
+    check(
+      (await request(
+            '/api/group/mute',
+            body: {
+              ...groupScope,
+              'member': 'member-a',
+              'operation': 'add',
+              'expiresAt': DateTime.now()
+                  .add(const Duration(minutes: 10))
+                  .toUtc()
+                  .toIso8601String(),
+            },
+          )).code ==
+          200,
+      '成员禁言设置',
+    );
+    check(
+      (await request('/api/group/mute?$params')).data['members'].length == 1,
+      '群禁言状态查询',
+    );
+    check(
+      (await request(
+            '/api/group/mute',
+            body: {...groupScope, 'member': 'member-a', 'operation': 'del'},
+          )).code ==
+          200,
+      '成员解除禁言',
+    );
+    check(
+      (await request(
+            '/api/session/mute',
+            body: {...scope, 'session': 'fixture-group', 'muted': true},
+          )).code ==
+          200,
+      '会话屏蔽消息提醒',
+    );
+    check(
+      (await request('/api/group/info?$params&epoch=-1')).code == 400,
+      '旧凭据世代不可读取群管理接口',
+    );
+    check(
+      (await request(
+            '/api/group/mute',
+            body: {
+              ...groupScope,
+              'appId': 'another-app',
+              'member': 'member-a',
+              'operation': 'del',
+            },
+          )).code ==
+          400,
+      '跨机器人管理操作拒绝',
+    );
     check(
       state.data['sessions'].length == 1 &&
           state.data['sessions'][0]['avatarUrl'] == '',
@@ -245,7 +452,9 @@ Future<void> main() async {
     );
     check((await request('/api/logout', body: {})).code == 200, '退出登录');
     check((await request('/api/state')).code == 401, '退出后接口失效');
-    stdout.writeln('PASS: Linux 网页服务、登录/CSRF/越界防护、多机器人隔离、聊天恢复、七插件和文件编辑。');
+    stdout.writeln(
+      'PASS: Linux 首次强制设置密码、自动连接门禁、登录/CSRF/越界防护、多机器人隔离、聊天恢复、七插件和文件编辑。',
+    );
   } finally {
     await service?.close();
     http.close(force: true);

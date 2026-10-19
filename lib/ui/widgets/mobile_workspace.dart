@@ -13,6 +13,9 @@ class MobileWorkspace extends StatelessWidget {
   final Widget body;
   final VoidCallback onBack, onSwitchBot, onConnection, onSettings, onNewChat;
   final ValueChanged<int> onNavigate;
+  final VoidCallback? onNotifications;
+  final int notificationCount;
+  final String settingsLabel;
 
   const MobileWorkspace({
     super.key,
@@ -32,6 +35,9 @@ class MobileWorkspace extends StatelessWidget {
     required this.onNavigate,
     this.isGroup = false,
     this.avatarUrl,
+    this.onNotifications,
+    this.notificationCount = 0,
+    this.settingsLabel = '设置',
   });
 
   static const _sections = [2, 3, 0, 4];
@@ -120,8 +126,20 @@ class MobileWorkspace extends StatelessWidget {
                 onPressed: onNewChat,
                 icon: const Icon(Icons.add_comment_outlined, size: 23),
               ),
+            if (onNotifications != null)
+              IconButton(
+                tooltip: '消息与通知',
+                onPressed: onNotifications,
+                icon: Badge(
+                  isLabelVisible: notificationCount > 0,
+                  label: Text(
+                    notificationCount > 99 ? '99+' : '$notificationCount',
+                  ),
+                  child: const Icon(Icons.notifications_none_rounded, size: 23),
+                ),
+              ),
             IconButton(
-              tooltip: '设置',
+              tooltip: settingsLabel,
               onPressed: onSettings,
               icon: const Icon(Icons.settings_outlined, size: 23),
             ),

@@ -185,6 +185,7 @@ class ChatSession {
   final String lastMessage;
   int unreadCount;
   final bool isPinned;
+  final bool isMuted;
   final String profileStatus;
   final DateTime? profileUpdatedAt;
   final String nicknameSource;
@@ -200,6 +201,7 @@ class ChatSession {
     this.lastMessage = '',
     this.unreadCount = 0,
     this.isPinned = false,
+    this.isMuted = false,
     this.profileStatus = '',
     this.profileUpdatedAt,
     this.nicknameSource = '',
@@ -213,6 +215,7 @@ class ChatSession {
     String? lastMessage,
     DateTime? lastMessageTime,
     int? unreadCount,
+    bool? isMuted,
     String? profileStatus,
     DateTime? profileUpdatedAt,
     String? nicknameSource,
@@ -227,6 +230,7 @@ class ChatSession {
     lastMessage: lastMessage ?? this.lastMessage,
     unreadCount: unreadCount ?? this.unreadCount,
     isPinned: isPinned,
+    isMuted: isMuted ?? this.isMuted,
     profileStatus: profileStatus ?? this.profileStatus,
     profileUpdatedAt: profileUpdatedAt ?? this.profileUpdatedAt,
     nicknameSource: nicknameSource ?? this.nicknameSource,
@@ -243,6 +247,7 @@ class ChatSession {
     'lastMessage': lastMessage,
     'unreadCount': unreadCount,
     'isPinned': isPinned,
+    'isMuted': isMuted,
     'profileStatus': profileStatus,
     'profileUpdatedAt': profileUpdatedAt?.toIso8601String(),
     'nicknameSource': nicknameSource,
@@ -261,6 +266,7 @@ class ChatSession {
     lastMessage: map['lastMessage'] as String? ?? '',
     unreadCount: map['unreadCount'] as int? ?? 0,
     isPinned: map['isPinned'] as bool? ?? false,
+    isMuted: map['isMuted'] as bool? ?? false,
     profileStatus: map['profileStatus'] as String? ?? '',
     profileUpdatedAt: DateTime.tryParse(
       map['profileUpdatedAt']?.toString() ?? '',

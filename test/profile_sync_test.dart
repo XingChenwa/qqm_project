@@ -664,11 +664,11 @@ void main() {
           .every((avatar) => avatar.url.isEmpty),
       isTrue,
     );
-    await tester.tap(find.byTooltip('会话信息'));
+    await tester.tap(find.byTooltip('群聊设置'));
     await tester.pumpAndSettle();
     expect(find.textContaining('平台未提供群头像'), findsNothing);
-    expect(find.textContaining('群名已同步'), findsOneWidget);
-    expect(find.text('刷新会话资料'), findsOneWidget);
+    expect(find.textContaining('机器人群内状态'), findsOneWidget);
+    expect(find.byTooltip('刷新群状态'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 }

@@ -410,7 +410,7 @@ class WebSocketService {
         'op': 2,
         'd': {
           'token': 'QQBot $_accessToken',
-          'intents': (1 << 25) | (1 << 26),
+          'intents': (1 << 24) | (1 << 25) | (1 << 26),
           'shard': [0, 1],
           'properties': {r'$os': 'desktop', r'$device': 'qq-bot-manager'},
         },

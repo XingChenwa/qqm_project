@@ -11,9 +11,71 @@
     <link rel="icon" href="/logo.png" />
     <link rel="stylesheet" href="/style.css" />
     <script defer src="/app.js"></script>
+    <script defer src="/group-management.js"></script>
   </head>
   <body>
-    <main id="login-view" class="login-view">
+    <main id="auth-loading" class="login-view" aria-live="polite">
+      <section class="login-card">
+        <img src="/logo.png" alt="" class="brand-logo" />
+        <h1>正在打开工作台</h1>
+        <p id="auth-loading-message" class="muted">正在检查管理密码设置…</p>
+        <button id="auth-retry" class="primary wide" hidden>重新连接</button>
+      </section>
+    </main>
+    <main id="setup-view" class="login-view" hidden>
+      <section class="login-card setup-card">
+        <img src="/logo.png" alt="" class="brand-logo" />
+        <p class="eyebrow">QQ BOT MANAGER / 首次使用</p>
+        <h1>先设置你的管理密码</h1>
+        <p class="muted">设置完成后，才能连接机器人和使用工作台。</p>
+        <form id="setup-form">
+          <label for="setup-token">服务器初始化码</label>
+          <input
+            id="setup-token"
+            type="password"
+            required
+            maxlength="256"
+            autocomplete="one-time-code"
+            spellcheck="false"
+            placeholder="从服务器的 setup-token.txt 复制"
+            aria-describedby="setup-help"
+          />
+          <p id="setup-help" class="hint setup-help">
+            在服务器本地查看私有数据目录中的
+            <code>setup-token.txt</code
+            >，用于验证你拥有这台服务。初始化码不是管理密码。
+          </p>
+          <label for="setup-password">设置管理密码</label>
+          <input
+            id="setup-password"
+            type="password"
+            required
+            minlength="12"
+            maxlength="256"
+            autocomplete="new-password"
+            placeholder="至少 12 个字符，建议混合字母与数字"
+          />
+          <label for="setup-confirm">再次输入管理密码</label>
+          <input
+            id="setup-confirm"
+            type="password"
+            required
+            minlength="12"
+            maxlength="256"
+            autocomplete="new-password"
+            placeholder="再次输入以确认"
+          />
+          <button class="primary wide" type="submit">
+            设置密码并进入工作台 <span aria-hidden="true">→</span>
+          </button>
+        </form>
+        <p class="hint">
+          请妥善保管你设置的密码，不要填写 QQ
+          密码。初始化完成后，初始化码自动失效。
+        </p>
+      </section>
+    </main>
+    <main id="login-view" class="login-view" hidden>
       <section class="login-card">
         <img src="/logo.png" alt="" class="brand-logo" />
         <p class="eyebrow">QQ BOT MANAGER / LINUX</p>
@@ -26,15 +88,15 @@
             type="password"
             required
             autocomplete="current-password"
-            placeholder="输入服务器生成的管理密码"
+            maxlength="256"
+            placeholder="输入你设置的管理密码"
           />
           <button class="primary wide" type="submit">
             进入工作台 <span aria-hidden="true">→</span>
           </button>
         </form>
         <p class="hint">
-          首次启动后，在服务器的 data/admin-password.txt 中查看密码。不要填写 QQ
-          密码。
+          使用首次初始化时设置的管理密码登录，不要填写 QQ 密码。
         </p>
       </section>
     </main>
@@ -71,6 +133,36 @@
             <span id="status" class="status">未连接</span
             ><select id="bot-picker" aria-label="切换机器人"></select
             ><button id="connect" class="primary">连接机器人</button>
+            <button
+              id="notifications"
+              class="icon"
+              aria-label="消息与通知"
+              title="消息与通知"
+            >
+              <svg
+                aria-hidden="true"
+                width="23"
+                height="23"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.8"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path
+                  d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"
+                /></svg
+              ><span id="notice-count" class="unread" hidden></span>
+            </button>
+            <button
+              id="top-settings"
+              class="icon"
+              aria-label="应用设置"
+              title="应用设置"
+            >
+              ⚙
+            </button>
           </div>
         </header>
         <div id="network-banner" class="banner" hidden>
@@ -114,6 +206,14 @@
                   在左侧打开聊天，或先连接机器人
                 </p>
               </div>
+              <button
+                id="chat-settings"
+                class="icon"
+                aria-label="会话设置"
+                title="会话设置"
+              >
+                ⚙
+              </button>
             </header>
             <div id="messages" class="messages" aria-label="聊天记录">
               <div class="empty">

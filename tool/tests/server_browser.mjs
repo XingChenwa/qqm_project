@@ -39,24 +39,103 @@ try {
       reject(Error("Preview exited " + code));
     });
   });
-  const password = (
-    await readFile(join(data, "admin-password.txt"), "utf8")
+  const setupToken = (
+    await readFile(join(data, "setup-token.txt"), "utf8")
   ).trim();
+  const password = "offline-browser-admin-password-2026";
+  const avatarImage = await readFile(resolve("assets/branding/logo.png"));
   browser = await chromium.launch({ headless: true });
   const page = await browser.newPage({
     viewport: { width: 1360, height: 900 },
   });
   const errors = [];
   page.on("pageerror", (error) => errors.push(error.message));
-  await page.route("**/*", (route) =>
-    route.request().url().startsWith(origin) ? route.continue() : route.abort(),
-  );
+  const avatarRequests = [];
+  await page.route("**/*", (route) => {
+    const url = route.request().url();
+    if (url.startsWith(origin)) return route.continue();
+    avatarRequests.push(url);
+    if (
+      url === "https://example.invalid/private-avatar.png" ||
+      url === "https://example.invalid/sender-avatar.png"
+    )
+      return route.fulfill({ contentType: "image/png", body: avatarImage });
+    return route.abort();
+  });
   await page.goto(origin, { waitUntil: "networkidle" });
+  await page.locator("#setup-view").waitFor({ state: "visible" });
+  assert.equal(await page.locator("#login-view").isVisible(), false);
+  assert.equal(await page.locator("#app").isVisible(), false);
+  const lockedStatus = await page.evaluate(
+    async () =>
+      (
+        await fetch("/api/state", {
+          headers: { "X-QQM-Request": "1" },
+        })
+      ).status,
+  );
+  assert.equal(lockedStatus, 401);
+  for (const width of [1360, 390, 320]) {
+    await page.setViewportSize({ width, height: 900 });
+    assert.ok(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+      `setup overflow ${width}`,
+    );
+    await page.screenshot({
+      path: join(shots, `setup-${width}.png`),
+      fullPage: true,
+    });
+  }
+  await page.setViewportSize({ width: 1360, height: 900 });
+  await page.locator("#setup-token").fill("wrong-initialization-code");
+  await page.locator("#setup-password").fill(password);
+  await page.locator("#setup-confirm").fill(password + "-different");
+  await page.locator("#setup-form button").click();
+  await page.getByText("两次输入的管理密码不一致", { exact: true }).waitFor();
+  await page.getByRole("button", { name: "知道了", exact: true }).click();
+  await page.locator("#setup-confirm").fill(password);
+  await page.locator("#setup-form button").click();
+  await page
+    .getByText("初始化码不正确，请在服务器本地查看 setup-token.txt", {
+      exact: true,
+    })
+    .waitFor();
+  assert.equal(await page.locator("#app").isVisible(), false);
+  await page.getByRole("button", { name: "知道了", exact: true }).click();
+  await page.locator("#setup-token").fill(setupToken);
+  await page.locator("#setup-form button").click();
+  await page.locator("#app").waitFor({ state: "visible" });
+  await assert.rejects(readFile(join(data, "setup-token.txt")), {
+    code: "ENOENT",
+  });
+  const authRecord = await readFile(join(data, "admin-auth.json"), "utf8");
+  assert.ok(!authRecord.includes(password) && !authRecord.includes(setupToken));
+  await page.locator("#logout").click();
   await page.locator("#login-view").waitFor({ state: "visible" });
   await page.screenshot({ path: join(shots, "login-desktop.png") });
   await page.locator("#password").fill(password);
   await page.locator("#login-form button").click();
   await page.locator("#app").waitFor({ state: "visible" });
+  await page.locator(".session-item").filter({ hasText: "薯条同学" }).click();
+  await page.locator("#messages .message").waitFor();
+  assert.equal(
+    await page
+      .locator(
+        '#messages .avatar img[src="https://example.invalid/private-avatar.png"]',
+      )
+      .count(),
+    1,
+  );
+  assert.equal(
+    await page
+      .locator(
+        '#chat-avatar img[src="https://example.invalid/private-avatar.png"]',
+      )
+      .count(),
+    1,
+  );
   await page
     .locator(".session-item")
     .filter({ hasText: "机器人开发交流群" })
@@ -65,11 +144,100 @@ try {
     () => document.querySelectorAll(".message").length === 30,
   );
   assert.equal(await page.locator("#sessions .avatar.group img").count(), 0);
+  assert.equal(
+    await page
+      .locator(
+        '#messages .avatar img[src="https://example.invalid/sender-avatar.png"]',
+      )
+      .count(),
+    30,
+  );
+  assert.ok(!avatarRequests.some((url) => url.includes("old-group-avatar")));
   await page.waitForFunction(() => {
     const m = document.querySelector("#messages");
     return m.scrollHeight - m.scrollTop - m.clientHeight < 3;
   });
   await page.screenshot({ path: join(shots, "chat-desktop.png") });
+  // Group settings and notifications use the real server routes and offline
+  // QQ API fixture, rather than intercepting any management action.
+  await page.locator("#chat-settings").click();
+  await page.getByText("123 人", { exact: true }).waitFor();
+  await page.screenshot({ path: join(shots, "group-settings-desktop.png") });
+  await page.setViewportSize({ width: 390, height: 900 });
+  assert.ok(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  );
+  await page.screenshot({ path: join(shots, "group-settings-mobile.png") });
+  await page.getByRole("checkbox", { name: "屏蔽消息提醒" }).check();
+  await page.waitForFunction(
+    () => S.state.sessions.find((s) => s.id === "group-a").isMuted,
+  );
+  await page.getByRole("button", { name: "查看群成员", exact: true }).click();
+  await page
+    .getByRole("button", { name: "加载更多成员", exact: true })
+    .waitFor();
+  await page.getByRole("button", { name: "加载更多成员", exact: true }).click();
+  await page.getByText("测试群主", { exact: true }).waitFor();
+  await page
+    .locator(".group-member")
+    .filter({ hasText: "薯条同学" })
+    .getByRole("button", { name: "资料", exact: true })
+    .click();
+  await page.getByRole("button", { name: "设置禁言", exact: true }).click();
+  await page.getByRole("button", { name: "确认禁言", exact: true }).click();
+  await page.getByRole("button", { name: "解除禁言", exact: true }).waitFor();
+  await page.getByRole("button", { name: "解除禁言", exact: true }).click();
+  await page.getByRole("button", { name: "确认解除", exact: true }).click();
+  await page.getByText("123 人", { exact: true }).waitFor();
+  assert.equal(
+    await page.getByRole("button", { name: "解除禁言", exact: true }).count(),
+    0,
+  );
+  await page.getByRole("checkbox", { name: "屏蔽消息提醒" }).uncheck();
+  await page.waitForFunction(
+    () => !S.state.sessions.find((s) => s.id === "group-a").isMuted,
+  );
+  await page.locator("#modal-close").click();
+  await page.setViewportSize({ width: 1360, height: 900 });
+  await page.locator("#notifications").click();
+  await page.locator(".group-notice-list .group-card").first().waitFor();
+  assert.equal(await page.locator(".group-notice-list .group-card").count(), 3);
+  await page.getByRole("button", { name: "待审核", exact: true }).click();
+  assert.equal(await page.locator(".group-notice-list .group-card").count(), 1);
+  await page.screenshot({ path: join(shots, "notifications-desktop.png") });
+  await page.setViewportSize({ width: 320, height: 850 });
+  assert.ok(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  );
+  await page.screenshot({ path: join(shots, "notifications-mobile.png") });
+  await page.getByRole("button", { name: "同意", exact: true }).click();
+  await page.getByRole("button", { name: "取消", exact: true }).click();
+  await page.getByRole("button", { name: "同意", exact: true }).waitFor();
+  await page.getByRole("button", { name: "同意", exact: true }).click();
+  await page.getByRole("button", { name: "确认同意", exact: true }).click();
+  await page.getByText("入群申请 · 已同意", { exact: true }).waitFor();
+  await page
+    .getByRole("combobox", { name: "群通知筛选" })
+    .selectOption("group-a");
+  await page.getByRole("button", { name: "同步入群申请", exact: true }).click();
+  await page.getByRole("button", { name: "下一页申请", exact: true }).click();
+  await page.getByRole("button", { name: "拒绝", exact: true }).click();
+  assert.equal(
+    await page.locator("#modal input[type=checkbox]").isChecked(),
+    false,
+  );
+  await page.getByRole("textbox", { name: "拒绝理由" }).fill("离线测试拒绝");
+  await page.getByRole("button", { name: "确认拒绝", exact: true }).click();
+  await page.getByText("入群申请 · 已拒绝", { exact: true }).waitFor();
+  await page.getByRole("button", { name: "全部已读", exact: true }).click();
+  await page.locator("#notice-count").waitFor({ state: "hidden" });
+  await page.locator("#modal-close").click();
+  await page.setViewportSize({ width: 1360, height: 900 });
+  assert.equal(await page.locator("#messages .message").count(), 30);
   await page.locator("#draft").fill("第一行");
   await page.locator("#draft").press("Control+Enter");
   await page.locator("#draft").press("End");
@@ -248,7 +416,7 @@ try {
   await page.locator("#login-view").waitFor({ state: "visible" });
   assert.deepEqual(errors, []);
   console.log(
-    "PASS: real web console desktop/mobile layouts, no group avatar requests, Markdown/@ preview/XSS protection, Enter/Ctrl+Enter, scroll policy, plugin editor, persisted theme and logout.",
+    "PASS: mandatory first-install password setup, desktop/mobile layouts, personal avatars preserved without group avatar requests, Markdown/@ preview/XSS protection, Enter/Ctrl+Enter, scroll policy, plugin editor, persisted theme and logout.",
   );
 } finally {
   await browser?.close();

@@ -34,6 +34,9 @@ migrate_working_dir/
 /coverage/
 /dist/
 /server/data/
+**/setup-token.txt
+**/admin-password.txt
+**/admin-auth.json
 *.ipa
 *.apk
 *.p12

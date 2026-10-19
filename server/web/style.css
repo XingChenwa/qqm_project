@@ -166,6 +166,7 @@ label {
 .login-view {
   min-height: 100dvh;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   place-items: center;
   padding: 24px;
   background: radial-gradient(ellipse at 25% 20%, #4187ff17, transparent 65%);
@@ -174,6 +175,7 @@ label {
   background: var(--surface);
   width: 440px;
   max-width: 100%;
+  min-width: 0;
   padding: 42px;
   border: 1px solid var(--line);
   border-radius: 28px;
@@ -197,10 +199,93 @@ label {
   width: 100%;
   margin-bottom: 15px;
 }
+.login-card label {
+  display: block;
+  margin-bottom: 8px;
+  font-weight: 600;
+}
+.login-card form + .hint {
+  margin-top: 18px;
+}
+.setup-card {
+  width: 480px;
+}
+.setup-help {
+  margin: -4px 0 20px;
+  overflow-wrap: anywhere;
+}
+#auth-retry {
+  margin-top: 20px;
+}
 .app {
   height: 100dvh;
   display: flex;
   overflow: hidden;
+}
+.group-panel {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+.group-profile,
+.group-member {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  min-width: 0;
+}
+.group-panel input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  accent-color: var(--blue);
+  margin: 0;
+}
+.group-panel label .button-row {
+  flex-wrap: nowrap;
+}
+.group-id,
+.group-card {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.group-card {
+  display: block;
+  border: 1px solid var(--line);
+  background: var(--soft);
+  border-radius: 14px;
+  padding: 14px;
+  margin: 10px 0;
+}
+.group-card > * + *,
+.group-members > * + * {
+  margin-top: 9px;
+}
+.group-field {
+  display: grid;
+  gap: 3px;
+}
+.group-field small {
+  color: var(--muted);
+}
+.group-error {
+  color: #c13748;
+}
+.group-filters {
+  margin: 8px 0;
+}
+.group-member {
+  border-bottom: 1px solid var(--line);
+  padding: 10px 0;
+}
+#notifications {
+  position: relative;
+}
+#notice-count {
+  font-size: 10px;
+  position: absolute;
+  right: -3px;
+  top: 0;
 }
 .rail {
   width: 88px;

@@ -62,6 +62,8 @@ Future<Widget> initializeApplication(
     desktopWindow = DesktopWindowController(
       storageService,
       beforeExit: () async {
+        botClient.disconnect();
+        await botClient.groups.flush();
         await storageService.flush();
         updates.dispose();
         botClient.dispose();

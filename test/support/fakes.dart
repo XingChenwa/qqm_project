@@ -7,6 +7,7 @@ import 'package:qq_bot_manager/models/config.dart';
 import 'package:qq_bot_manager/models/message.dart';
 import 'package:qq_bot_manager/models/plugin.dart';
 import 'package:qq_bot_manager/models/outgoing_message.dart';
+import 'package:qq_bot_manager/models/group_notice.dart';
 import 'package:qq_bot_manager/services/api_service.dart';
 import 'package:qq_bot_manager/services/storage_service.dart';
 import 'package:qq_bot_manager/services/websocket_service.dart';
@@ -17,6 +18,23 @@ class TestPluginManager extends PluginManager {
 }
 
 class MemoryStorage extends StorageService {
+  final groupNotices = <String, List<GroupNotice>>{};
+  @override
+  List<GroupNotice> getGroupNotices(String appId) =>
+      List.of(groupNotices[appId] ?? []);
+  @override
+  Future<void> saveGroupNotices(String appId, List<GroupNotice> notices) async {
+    groupNotices[appId] = List.of(notices);
+  }
+
+  bool mobileNotifications = false;
+  @override
+  bool getSystemNotificationsEnabled() => mobileNotifications;
+  @override
+  Future<void> setSystemNotificationsEnabled(bool value) async {
+    mobileNotifications = value;
+  }
+
   BotConfig config;
   final storedMessages = <String, MessageModel>{};
   final storedSessions = <String, ChatSession>{};
@@ -144,6 +162,33 @@ BotConfig validConfig() => BotConfig(
 );
 
 class RecordingApi extends ApiService {
+  @override
+  Future<ApiResult<Map<String, dynamic>>> getGroupBotState({
+    required String baseUrl,
+    required String accessToken,
+    required String groupId,
+  }) async => ApiResult.failure('测试：群状态未授权', errorCode: 11253);
+  @override
+  Future<ApiResult<Map<String, dynamic>>> getGroupMuteSettings({
+    required String baseUrl,
+    required String accessToken,
+    required String groupId,
+  }) async => ApiResult.failure('测试：群禁言未授权', errorCode: 11253);
+  @override
+  Future<ApiResult<Map<String, dynamic>>> getGroupMembers({
+    required String baseUrl,
+    required String accessToken,
+    required String groupId,
+    String cursor = '',
+  }) async => ApiResult.failure('测试：群成员列表未授权', errorCode: 11253);
+  @override
+  Future<ApiResult<Map<String, dynamic>>> getGroupJoinRequests({
+    required String baseUrl,
+    required String accessToken,
+    required String groupId,
+    String cursor = '',
+    int limit = 20,
+  }) async => ApiResult.failure('测试：群申请未授权', errorCode: 11253);
   @override
   Future<ApiResult<Map<String, dynamic>>> getGroupInfo({
     required String baseUrl,

@@ -164,6 +164,143 @@ class ApiService {
     '/v2/groups/${Uri.encodeComponent(groupId)}/members/${Uri.encodeComponent(memberId)}',
   );
 
+  Future<ApiResult<Map<String, dynamic>>> getGroupBotState({
+    required String baseUrl,
+    required String accessToken,
+    required String groupId,
+  }) => _getProfile(
+    baseUrl,
+    accessToken,
+    '/v2/groups/${Uri.encodeComponent(groupId)}/bot_state',
+  );
+
+  Future<ApiResult<Map<String, dynamic>>> getGroupMembers({
+    required String baseUrl,
+    required String accessToken,
+    required String groupId,
+    String cursor = '',
+  }) => _getProfile(
+    baseUrl,
+    accessToken,
+    '/v2/groups/${Uri.encodeComponent(groupId)}/members',
+    query: {if (cursor.isNotEmpty) 'cursor': cursor},
+  );
+
+  Future<ApiResult<Map<String, dynamic>>> getGroupJoinRequests({
+    required String baseUrl,
+    required String accessToken,
+    required String groupId,
+    String cursor = '',
+    int limit = 20,
+  }) {
+    if (limit < 1 || limit > 50) {
+      return Future.value(ApiResult.failure('申请列表每页数量需为 1–50'));
+    }
+    return _getProfile(
+      baseUrl,
+      accessToken,
+      '/v2/groups/${Uri.encodeComponent(groupId)}/join_request_list',
+      query: {'limit': limit, if (cursor.isNotEmpty) 'cursor': cursor},
+    );
+  }
+
+  Future<ApiResult<bool>> approveGroupJoinRequest({
+    required String baseUrl,
+    required String accessToken,
+    required String groupId,
+    required String memberId,
+    required String requestId,
+    required bool approve,
+    String reason = '',
+    bool blacklist = false,
+  }) {
+    if (requestId.isEmpty ||
+        memberId.isEmpty ||
+        reason.length > 500 ||
+        (approve && blacklist)) {
+      return Future.value(ApiResult.failure('入群审批参数无效'));
+    }
+    return _postGroupAction(
+      baseUrl,
+      accessToken,
+      '/v2/groups/${Uri.encodeComponent(groupId)}/approval_join_request/${Uri.encodeComponent(memberId)}',
+      {
+        'op': approve ? 'approve' : 'decline',
+        'join_request_id': requestId,
+        if (!approve && reason.isNotEmpty) 'reject_reason': reason,
+        if (!approve) 'add_to_member_blacklist': blacklist,
+      },
+    );
+  }
+
+  Future<ApiResult<Map<String, dynamic>>> getGroupMuteSettings({
+    required String baseUrl,
+    required String accessToken,
+    required String groupId,
+  }) => _getProfile(
+    baseUrl,
+    accessToken,
+    '/v2/groups/${Uri.encodeComponent(groupId)}/restrict_chat_setting',
+  );
+
+  Future<ApiResult<bool>> setGroupMemberMute({
+    required String baseUrl,
+    required String accessToken,
+    required String groupId,
+    required String memberId,
+    required String operation,
+    DateTime? expiresAt,
+  }) {
+    final now = DateTime.now();
+    if (memberId.isEmpty ||
+        !['add', 'update', 'del'].contains(operation) ||
+        (operation != 'del' &&
+            (expiresAt == null ||
+                !expiresAt.isAfter(now) ||
+                expiresAt.difference(now) > const Duration(days: 30)))) {
+      return Future.value(ApiResult.failure('禁言需选择成员和 30 天以内的有效到期时间'));
+    }
+    return _postGroupAction(
+      baseUrl,
+      accessToken,
+      '/v2/groups/${Uri.encodeComponent(groupId)}/restrict_chat_setting',
+      {
+        'members': [
+          {
+            'op': operation,
+            'member_openid': memberId,
+            'mute_expire_at': operation == 'del'
+                ? ''
+                : expiresAt!.toUtc().toIso8601String(),
+          },
+        ],
+      },
+    );
+  }
+
+  Future<ApiResult<bool>> _postGroupAction(
+    String baseUrl,
+    String token,
+    String endpoint,
+    Map<String, dynamic> body,
+  ) async {
+    try {
+      final response = await _dio.post(
+        '$baseUrl$endpoint',
+        data: body,
+        options: Options(
+          headers: {'Authorization': 'QQBot $token'},
+          followRedirects: false,
+        ),
+      );
+      return _toBoolResult(response);
+    } on DioException catch (error) {
+      return ApiResult.failure(_dioErrorMsg(error));
+    } catch (_) {
+      return ApiResult.failure('群管理操作返回格式异常');
+    }
+  }
+
   Future<ApiResult<Map<String, dynamic>>> getBotProfile({
     required String baseUrl,
     required String accessToken,
@@ -172,11 +309,13 @@ class ApiService {
   Future<ApiResult<Map<String, dynamic>>> _getProfile(
     String baseUrl,
     String token,
-    String endpoint,
-  ) async {
+    String endpoint, {
+    Map<String, dynamic>? query,
+  }) async {
     try {
       final response = await _dio.get(
         '$baseUrl$endpoint',
+        queryParameters: query,
         options: Options(
           headers: {'Authorization': 'QQBot $token'},
           followRedirects: false,
@@ -581,11 +720,14 @@ class ApiService {
   }) async {
     try {
       final endpoint = isGroup
-          ? '/v2/groups/$targetId/messages/$messageId'
-          : '/v2/users/$targetId/messages/$messageId';
+          ? '/v2/groups/${Uri.encodeComponent(targetId)}/messages/${Uri.encodeComponent(messageId)}'
+          : '/v2/users/${Uri.encodeComponent(targetId)}/messages/${Uri.encodeComponent(messageId)}';
       final response = await _dio.delete(
         '$baseUrl$endpoint',
-        options: Options(headers: {'Authorization': 'QQBot $accessToken'}),
+        options: Options(
+          headers: {'Authorization': 'QQBot $accessToken'},
+          followRedirects: false,
+        ),
       );
       return _toBoolResult(response);
     } on DioException catch (e) {
@@ -614,7 +756,11 @@ class ApiService {
         response.headers.value('x-trace-id') ??
         (response.data is Map ? response.data['trace_id']?.toString() : null);
     final hint = switch (code) {
-      11253 => '应用无资料查询权限，该接口需要 QQ 平台白名单授权',
+      11253 => '应用无接口访问权限，该能力需要 QQ 平台内邀／白名单授权',
+      40062003 => '无操作权限，机器人需为群管理员，且不能管理群主或其他管理员',
+      40064004 => '已超过 2 分钟，不能撤回这条消息',
+      40061001 => '群管理请求参数无效，请刷新群资料或入群申请后重试',
+      50065001 => '群消息撤回失败，请稍后重试',
       100007 || 10004 => 'AppID 无效或机器人不存在，请检查开放平台配置',
       100016 => 'AppID 或机器人密钥错误',
       22006 => '消息类型与内容不匹配',
