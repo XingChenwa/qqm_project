@@ -136,7 +136,7 @@ try {
     }
     await syncAndBuildWebsite({data,envelope});
     if (process.env.GITCODE_TOKEN) {
-      await mirrorRelease({token:process.env.GITCODE_TOKEN,envelope,publicKey,files});
+      await mirrorRelease({token:process.env.GITCODE_TOKEN,envelope,publicKey,files,onProgress:message=>console.log(message)});
       console.log('GitCode 国内节点已同步并完成公共下载校验。');
     } else {
       console.warn('::warning::尚未配置 GITCODE_TOKEN，本次仅发布 GitHub 国际线路。');

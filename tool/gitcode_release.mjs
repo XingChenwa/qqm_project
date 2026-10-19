@@ -29,7 +29,7 @@ async function bytes(response, maximum) {
   return Buffer.concat(chunks);
 }
 
-export async function mirrorRelease({token, envelope, publicKey, files, request = fetch}) {
+export async function mirrorRelease({token, envelope, publicKey, files, request = fetch, onProgress = () => {}}) {
   requireThat(typeof token === 'string' && token.trim(), '缺少 GITCODE_TOKEN');
   const data = verifyManifest(envelope, publicKey);
   const expected = new Map(data.releases.map(release => [
@@ -82,7 +82,9 @@ export async function mirrorRelease({token, envelope, publicKey, files, request 
   }
 
   const latest = await api('/latest', {missing: true});
-  if (latest) {
+  // GitCode's latest API can return an unfinished PRE release. A retry must be
+  // able to resume it even before the final signed manifest exists.
+  if (latest && latest.prerelease !== true && latest.release_status !== 'pre') {
     const previous = verifyManifest(JSON.parse((await publicAsset(manifestName, 65536, latest.tag_name)).toString('utf8')), publicKey);
     requireThat(previous.tag === latest.tag_name && data.build >= previous.build, '拒绝将 GitCode 最新版本回退');
     requireThat(previous.build !== data.build || previous.tag === data.tag,
@@ -99,6 +101,7 @@ export async function mirrorRelease({token, envelope, publicKey, files, request 
         'author[name]': 'xiaoshutiaoya', 'author[email]': 'xiaoshutiaoya@noreply.gitcode.com',
         content: Buffer.from('# QQ机器人管理器 · 国内下载镜像\n\n此仓库的 Release 提供与 GitHub 正式版相同的安装包和更新签名清单。\n\n- 项目源码：https://github.com/XingChenwa/qqm_project\n- 项目首页：https://xingchenwa.github.io/qqm_project/\n- 开源许可：GPL-2.0-only，以原项目 LICENSE 为准。\n').toString('base64'),
       }});
+      onProgress('已初始化空的 GitCode 下载镜像仓库。');
     }
   }
   let release = await api('/tags/' + data.tag, {missing: true});
@@ -109,6 +112,7 @@ export async function mirrorRelease({token, envelope, publicKey, files, request 
   requireThat(release.tag_name === data.tag && Array.isArray(release.assets), 'GitCode 版本标签不匹配');
   for (const file of prepared) {
     if (!release.assets.some(asset => asset.type === 'attach' && asset.name === file.name)) {
+      onProgress(`上传 GitCode 附件：${file.name}（${file.content.length} 字节）`);
       const upload = await api(`/${data.tag}/upload_url?file_name=${encodeURIComponent(file.name)}`);
       requireThat(trustedMirrorUrl(upload.url, {upload: true}), 'GitCode 上传地址不可信');
       requireThat(upload.headers && Object.keys(upload.headers).every(header =>
@@ -118,6 +122,7 @@ export async function mirrorRelease({token, envelope, publicKey, files, request 
       requireThat(uploaded.ok, `GitCode 附件上传失败（HTTP ${uploaded.status}）`);
       await uploaded.body?.cancel();
     }
+    onProgress(`读回校验 GitCode 附件：${file.name}`);
     const remote = await publicAsset(file.name, file.content.length);
     requireThat(remote.length === file.content.length && sha256(remote) === sha256(file.content),
       'GitCode 已有附件内容不同或上传校验失败；不会覆盖，请使用新版本');

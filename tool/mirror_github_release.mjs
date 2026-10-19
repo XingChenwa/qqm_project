@@ -29,7 +29,7 @@ try {
     gh('release', 'download', tag, '--repo', repository, '--pattern', name, '--dir', directory);
     files.push({name, file: join(directory, name)});
   }
-  await mirrorRelease({token: process.env.GITCODE_TOKEN, envelope, publicKey, files});
+  await mirrorRelease({token: process.env.GITCODE_TOKEN, envelope, publicKey, files, onProgress: message => console.log(message)});
   console.log('GitCode 国内更新节点已同步 ' + data.tag + '，四端文件和签名清单均已读回校验。');
 } catch (error) {
   console.error('GitCode 同步失败：' + (error instanceof Error ? error.message.split('\n')[0] : '未知错误'));
