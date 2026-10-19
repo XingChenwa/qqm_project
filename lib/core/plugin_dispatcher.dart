@@ -38,7 +38,7 @@ class PluginDispatcher {
         timestamp: message.timestamp,
         senderRole: message.receivedBody.authorRole.isNotEmpty
             ? message.receivedBody.authorRole
-            : message.senderRole,
+            : message.extra?['senderRole']?.toString() ?? '',
         isFullGroupMessage: message.isFullGroupMessage,
         isMentioned: command.isMentioned,
         eventType: message.extra?['pluginEventId'] == null
