@@ -35,6 +35,17 @@ class ProfileAvatar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (isGroup) {
+      return CircleAvatar(
+        radius: radius,
+        backgroundColor: AppTheme.qqGreen.withValues(alpha: .12),
+        child: Icon(
+          Icons.groups_rounded,
+          color: AppTheme.qqGreen,
+          size: radius,
+        ),
+      );
+    }
     final avatar = profileAvatar(url);
     if (avatar.isEmpty) return _fallback(context, '平台未提供头像');
     return ClipOval(

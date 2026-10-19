@@ -62,7 +62,7 @@ void main() {
   test('公网 IP 仅按需查询，无 QQ Token、AppID 或请求正文，禁止重定向', () async {
     final adapter = UpdateAdapter(
       (request) async => ResponseBody.fromString(
-        request.uri.host == 'api.ipify.org'
+        request.uri.host == 'myip.ipip.net'
             ? '9.8.7.6'
             : '2001:4860:4860::8888',
         200,
@@ -72,7 +72,7 @@ void main() {
     addTearDown(service.dispose);
     expect(adapter.requests, isEmpty);
     expect(await service.lookup(), ['9.8.7.6']);
-    expect(adapter.requests.single.uri.host, 'api.ipify.org');
+    expect(adapter.requests.single.uri.host, 'myip.ipip.net');
     expect(
       adapter.requests.every(
         (r) =>
@@ -84,6 +84,32 @@ void main() {
       ),
       isTrue,
     );
+  });
+  test('国内接口失败后自动使用备用，不接受 IPv6、HTML 或重定向', () async {
+    final adapter = UpdateAdapter(
+      (request) async => ResponseBody.fromString(
+        request.uri.host == 'myip.ipip.net'
+            ? '<html>服务不可用</html>'
+            : '9.8.7.6\n',
+        200,
+      ),
+    );
+    final service = PublicIpService(http: Dio()..httpClientAdapter = adapter);
+    addTearDown(service.dispose);
+    expect(await service.lookup(), ['9.8.7.6']);
+    expect(adapter.requests.map((r) => r.uri.host), [
+      'myip.ipip.net',
+      'ipv4.icanhazip.com',
+    ]);
+  });
+  test('支持 IPIP 文本响应，只取明确标注的公网 IPv4，不展示位置文字', () async {
+    final adapter = UpdateAdapter(
+      (_) async => ResponseBody.fromString('当前 IP：9.8.7.6  来自于：中国 测试网络\n', 200),
+    );
+    final service = PublicIpService(http: Dio()..httpClientAdapter = adapter);
+    addTearDown(service.dispose);
+    expect(await service.lookup(), ['9.8.7.6']);
+    expect(adapter.requests.length, 1);
   });
   test('IPv4 接口意外返回 IPv6 时拒绝结果，不向用户冒充 IPv4', () async {
     final service = PublicIpService(

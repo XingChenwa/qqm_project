@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'package:flutter/foundation.dart';
+import '../runtime/notifier.dart';
 import 'package:logging/logging.dart';
 import '../models/message.dart';
 import '../models/config.dart';
@@ -651,31 +651,20 @@ class BotClient extends ChangeNotifier {
       return;
     }
     final name = profileName(data['group_name']);
-    // Some event/gateway versions provide avatars, but the documented group
-    // info response does not promise this field. Never use a member's avatar.
-    final avatar = firstProfileAvatar([
-      data['group_avatar'],
-      data['avatar'],
-      data['avatar_url'],
-      current.avatarUrl,
-    ]);
     final status = !result.isSuccess
         ? (result.errorCode == 11253
               ? '群资料查询未获白名单授权（11253），可申请权限后手动刷新'
               : (result.statusCode == 403
                     ? '群资料访问被拒绝（HTTP 403），请检查权限及代理配置'
                     : '群资料暂未获取，稍后可手动刷新'))
-        : [
-            name.isNotEmpty ? '群名已同步' : '平台未返回群名',
-            avatar.isNotEmpty ? '已有群头像' : '平台未提供群头像',
-          ].join('；');
+        : (name.isNotEmpty ? '群名已同步' : '平台未返回群名');
     final keepNewerName =
         current.name != session.name &&
         !isFallbackProfileName(current.name, id, isGroup: true);
     _putSession(
       current.copyWith(
         name: name.isNotEmpty && !keepNewerName ? name : null,
-        avatarUrl: avatar.isNotEmpty ? avatar : null,
+        avatarUrl: '',
         profileStatus: status,
         profileUpdatedAt: DateTime.now(),
       ),
@@ -1113,14 +1102,13 @@ class BotClient extends ChangeNotifier {
             .firstOrNull;
         if (session != null) {
           final groupName = profileName(data['groupName']);
-          final groupAvatar = profileAvatar(data['groupAvatarUrl']);
           _putSession(
             session.copyWith(
               name: isGroup
                   ? (groupName.isNotEmpty ? groupName : null)
                   : (hasName ? senderName : null),
               avatarUrl: isGroup
-                  ? (groupAvatar.isNotEmpty ? groupAvatar : null)
+                  ? ''
                   : (senderAvatarUrl.isNotEmpty ? senderAvatarUrl : null),
               nicknameSource: !isGroup && hasName ? 'qq' : null,
               nicknameUpdatedAt: !isGroup && hasName ? timestamp : null,
@@ -1145,7 +1133,6 @@ class BotClient extends ChangeNotifier {
     _storage.saveMessage(message);
 
     final groupName = profileName(data['groupName']);
-    final groupAvatar = profileAvatar(data['groupAvatarUrl']);
     final name = isGroup
         ? firstProfileName([groupName, previous?.name, '群聊-$sessionId'])
         : firstProfileName([
@@ -1155,7 +1142,7 @@ class BotClient extends ChangeNotifier {
             '用户-$sessionId',
           ]);
     final avatar = isGroup
-        ? firstProfileAvatar([groupAvatar, previous?.avatarUrl])
+        ? ''
         : firstProfileAvatar([senderAvatarUrl, previous?.avatarUrl]);
     _putSession(
       ChatSession(
@@ -1918,7 +1905,7 @@ class BotClient extends ChangeNotifier {
       ..clear()
       ..addAll(
         stored.map((session) {
-          if (session.sessionType != 0) return session;
+          if (session.sessionType != 0) return session.copyWith(avatarUrl: '');
           final avatar = userProfileAvatar(_config.appId, session.id, [
             session.avatarUrl,
           ]);

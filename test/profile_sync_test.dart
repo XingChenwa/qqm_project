@@ -352,7 +352,7 @@ void main() {
     expect(bot.messages.last.senderAvatarUrl, '');
   });
 
-  test('群名和成员昵称后台获取，头像只使用事件字段；不会把成员头像当群头像', () async {
+  test('群名和成员昵称后台获取，群聊不获取头像；个人头像保留', () async {
     final storage = MemoryStorage(config: validConfig());
     final api = ProfileApi();
     final gateway = TestGateway();
@@ -378,7 +378,7 @@ void main() {
     );
     expect(bot.messages.first.senderRole, 'admin');
     expect(bot.sessions.first.avatarUrl, '');
-    expect(bot.sessions.first.profileStatus, contains('未提供群头像'));
+    expect(bot.sessions.first.profileStatus, '群名已同步');
     expect(storage.getMessageById('first')!.senderName, '小明');
     gateway.events.add(profileEvent('second'));
     await until(() => bot.messages.length == 2);
@@ -666,7 +666,8 @@ void main() {
     );
     await tester.tap(find.byTooltip('会话信息'));
     await tester.pumpAndSettle();
-    expect(find.textContaining('平台未提供群头像'), findsOneWidget);
+    expect(find.textContaining('平台未提供群头像'), findsNothing);
+    expect(find.textContaining('群名已同步'), findsOneWidget);
     expect(find.text('刷新会话资料'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });

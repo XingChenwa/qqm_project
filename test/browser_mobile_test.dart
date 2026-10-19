@@ -32,7 +32,7 @@ void main() {
     expect(externalAppUri('file:///C:/secret.txt'), isNull);
   });
 
-  test('默认移动内容模式覆盖所有平台，切换电脑版保留安全限制', () {
+  test('默认模式跟随设备，手动切换保留安全限制', () {
     for (final platform in [
       TargetPlatform.android,
       TargetPlatform.iOS,
@@ -41,12 +41,20 @@ void main() {
     ]) {
       final mobile = browserSettings(
         platform: platform,
+        mobile: true,
         desktopUserAgent: desktopAgent,
       );
       final desktop = browserSettings(
         platform: platform,
         mobile: false,
         desktopUserAgent: desktopAgent,
+      );
+      final automatic = browserSettings(platform: platform);
+      expect(
+        automatic.preferredContentMode,
+        defaultMobileBrowserMode(platform)
+            ? UserPreferredContentMode.MOBILE
+            : UserPreferredContentMode.DESKTOP,
       );
       expect(mobile.preferredContentMode, UserPreferredContentMode.MOBILE);
       expect(desktop.preferredContentMode, UserPreferredContentMode.DESKTOP);
@@ -81,7 +89,7 @@ void main() {
     (TargetPlatform.windows, 1280.0),
     (TargetPlatform.macOS, 1280.0),
   ]) {
-    testWidgets('${platform.name} $width 浏览页默认手机版，切换不新开路由', (tester) async {
+    testWidgets('${platform.name} $width 浏览页默认跟随设备，切换不新开路由', (tester) async {
       debugDefaultTargetPlatformOverride = platform;
       tester.view.physicalSize = Size(width, 800);
       tester.view.devicePixelRatio = 1;
@@ -94,17 +102,24 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      expect(find.text('手机版'), findsOneWidget);
+      final startsMobile = defaultMobileBrowserMode(platform);
+      expect(find.text(startsMobile ? '手机版' : '电脑版'), findsOneWidget);
       final viewport = find.byKey(const ValueKey('browser-viewport'));
-      expect(tester.getSize(viewport).width, width > 430 ? 430 : width);
-      await tester.tap(find.byTooltip('切换为电脑版'));
+      expect(
+        tester.getSize(viewport).width,
+        startsMobile && width > 430 ? 430 : width,
+      );
+      await tester.tap(find.byTooltip(startsMobile ? '切换为电脑版' : '切换为手机版'));
       await tester.pumpAndSettle();
-      expect(find.text('电脑版'), findsOneWidget);
-      expect(tester.getSize(viewport).width, width);
+      expect(find.text(startsMobile ? '电脑版' : '手机版'), findsOneWidget);
+      expect(
+        tester.getSize(viewport).width,
+        !startsMobile && width > 430 ? 430 : width,
+      );
       expect(find.byType(BrowserScreen), findsOneWidget);
-      await tester.tap(find.byTooltip('切换为手机版'));
+      await tester.tap(find.byTooltip(startsMobile ? '切换为手机版' : '切换为电脑版'));
       await tester.pumpAndSettle();
-      expect(find.text('手机版'), findsOneWidget);
+      expect(find.text(startsMobile ? '手机版' : '电脑版'), findsOneWidget);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox.shrink());
       debugDefaultTargetPlatformOverride = null;

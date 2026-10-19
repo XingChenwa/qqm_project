@@ -24,6 +24,11 @@ const server = createServer(async (request,response) => {
       response.setHeader('content-type','application/json');
       response.end(JSON.stringify(mode === 'empty' ? {releases:[]} : payload)); return;
     }
+    if (url.pathname === '/qqm_project/releases-beta.json') {
+      response.setHeader('content-type','application/json');
+      const beta = {...data,tag:'v1.3.8-beta.5',version:'1.3.8-beta.5',build:24,channel:'beta'};
+      response.end(JSON.stringify(mode === 'ready' ? beta : {releases:[]})); return;
+    }
     const relative = decodeURIComponent(url.pathname).replace(/^\/qqm_project\//,'');
     const path = resolve(site,relative || 'index.html');
     assert.ok(path.startsWith(site + (process.platform === 'win32' ? '\\' : '/')));
@@ -58,6 +63,9 @@ try {
       const links = await page.locator('.download-link').evaluateAll(nodes => nodes.map(a => a.href));
       assert.ok(links.every(url => url.startsWith(`https://github.com/${repository}/releases`)));
       if (mode === 'ready') {
+        assert.equal(await page.locator('#linux-package').getAttribute('href'),
+          'https://github.com/'+repository+'/releases/download/v1.3.8-beta.5/qqbotmanager-linux-v1.3.8-beta.5-build24-web-x64.tar.gz');
+        assert.ok((await page.locator('#linux-version').innerText()).includes('Beta'));
         assert.equal(await page.locator('.download-link.disabled').count(),0);
         assert.equal(await page.locator('.history-item img').count(),0);
         assert.ok((await page.locator('#release-history').innerText()).includes('<img src=x'));
@@ -83,7 +91,7 @@ try {
     assert.ok(page.url().endsWith('/plugins.html'));
     assert.equal(await page.locator('.docs-article h2').count(),9);
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `文档页面溢出 ${width}`);
-    assert.ok(await page.locator('.docs-article').innerText().then(value => value.includes('Dart SDK v2') && value.includes('文件管理、数据与测试')));
+    assert.ok(await page.locator('.docs-article').innerText().then(value => value.includes('可导入即运行的脚本 SDK') && value.includes('文件管理、数据与测试')));
     if (width < 820) await page.locator('.docs-toc summary').click();
     await page.getByRole('navigation',{name:'文档目录'}).getByRole('link',{name:'6. 用 JavaScript / Python 编写 HTTP 插件'}).click();
     assert.ok(page.url().endsWith('#section-6'));
@@ -103,6 +111,14 @@ try {
     assert.ok(await page.evaluate(() => [...document.querySelectorAll('a[href^="#"]')].every(a => document.getElementById(a.hash.slice(1)))));
   }
   const staticContext = await browser.newContext({javaScriptEnabled:false,viewport:{width:390,height:900}});
+  for (const width of [1280,390,320]) {
+    await page.setViewportSize({width,height:900});
+    await page.goto(origin+'linux.html',{waitUntil:'networkidle'});
+    await page.getByRole('heading',{level:1,name:'在服务器，让机器人持续在线。'}).waitFor();
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `Linux 指南溢出 ${width}`);
+    assert.ok((await page.locator('.docs-article').innerText()).includes('127.0.0.1:23336'));
+    assert.ok(await page.evaluate(() => [...document.querySelectorAll('a[href^="#"]')].every(a => document.getElementById(a.hash.slice(1)))));
+  }
   const staticPage = await staticContext.newPage();
   await staticPage.route('**/*', route => route.request().url().startsWith(origin) ? route.continue() : route.abort());
   await staticPage.goto(origin+'plugins.html',{waitUntil:'networkidle'});

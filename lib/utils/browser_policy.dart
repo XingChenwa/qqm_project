@@ -57,23 +57,29 @@ Uri? externalAppUri(String value) {
 
 InAppWebViewSettings browserSettings({
   required TargetPlatform platform,
-  bool mobile = true,
+  bool? mobile,
   String desktopUserAgent = '',
-}) => InAppWebViewSettings(
-  preferredContentMode: mobile
-      ? UserPreferredContentMode.MOBILE
-      : UserPreferredContentMode.DESKTOP,
-  userAgent: platform == TargetPlatform.windows
-      ? (mobile ? windowsMobileUserAgent(desktopUserAgent) : desktopUserAgent)
-      : null,
-  useWideViewPort: !mobile,
-  loadWithOverviewMode: !mobile,
-  useShouldOverrideUrlLoading: true,
-  supportMultipleWindows: true,
-  javaScriptCanOpenWindowsAutomatically: false,
-  allowFileAccess: false,
-  allowContentAccess: false,
-  allowFileAccessFromFileURLs: false,
-  allowUniversalAccessFromFileURLs: false,
-  isInspectable: false,
-);
+}) {
+  mobile ??= defaultMobileBrowserMode(platform);
+  return InAppWebViewSettings(
+    preferredContentMode: mobile
+        ? UserPreferredContentMode.MOBILE
+        : UserPreferredContentMode.DESKTOP,
+    userAgent: platform == TargetPlatform.windows
+        ? (mobile ? windowsMobileUserAgent(desktopUserAgent) : desktopUserAgent)
+        : null,
+    useWideViewPort: !mobile,
+    loadWithOverviewMode: !mobile,
+    useShouldOverrideUrlLoading: true,
+    supportMultipleWindows: true,
+    javaScriptCanOpenWindowsAutomatically: false,
+    allowFileAccess: false,
+    allowContentAccess: false,
+    allowFileAccessFromFileURLs: false,
+    allowUniversalAccessFromFileURLs: false,
+    isInspectable: false,
+  );
+}
+
+bool defaultMobileBrowserMode(TargetPlatform platform) =>
+    platform == TargetPlatform.android || platform == TargetPlatform.iOS;

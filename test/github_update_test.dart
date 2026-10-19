@@ -602,6 +602,7 @@ void main() {
       'ios',
       'macos',
       'windows',
+      'linux',
     ]);
     expect(yaml['jobs']['publish']['permissions']['contents'], 'write');
     expect(yaml['jobs']['publish']['permissions']['pages'], 'write');

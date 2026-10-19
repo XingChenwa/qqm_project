@@ -25,7 +25,7 @@ test('拒绝路径和异常构建号；构建步骤使用同一命名源', async
     assert.throws(()=>assetDefinitions(version,22));
   for (const build of [0,-1,1.2,2147483648]) assert.throws(()=>assetDefinitions('1.3.8',build));
   const workflow = await readFile('.github/workflows/mobile-build.yml','utf8');
-  assert.equal((workflow.match(/node tool\/package_names\.mjs github-output/g)||[]).length,4);
+  assert.equal((workflow.match(/node tool\/package_names\.mjs github-output/g)||[]).length,5);
   for (const platform of ['windows','android','ios','macos'])
     assert.ok(workflow.includes('name: ${{ steps.packages.outputs.'+platform+'_artifact }}'));
   const info=readVersion(await readFile('pubspec.yaml','utf8'),await readFile('lib/utils/constants.dart','utf8'));
@@ -44,7 +44,7 @@ test('CLI 写入的每个 GitHub output 独占一行，不输出字面量反斜�
     env:{...process.env,GITHUB_OUTPUT:output},stdio:['ignore','pipe','pipe'],
   });
   const lines=(await readFile(output,'utf8')).trim().split('\n');
-  assert.equal(lines.length,9);
+  assert.equal(lines.length,12);
   assert.ok(lines.every(line=>/^[a-z_]+=[A-Za-z0-9._-]+$/.test(line)));
   assert.ok(!lines.some(line=>line.includes('\\')));
 });

@@ -90,6 +90,11 @@ class IpWhitelistProblem {
 /// On-demand diagnosis only. This client never receives QQ credentials, bot
 /// identifiers, chat content or device information, and does not store results.
 class PublicIpService {
+  static const endpoints = [
+    'https://myip.ipip.net',
+    'https://ipv4.icanhazip.com',
+    'https://api.ipify.org',
+  ];
   final Dio _http;
   PublicIpService({Dio? http})
     : _http =
@@ -102,9 +107,13 @@ class PublicIpService {
             ),
           );
   Future<List<String>> lookup() async {
-    // IPv4-only endpoint, never fall back silently to an IPv6 result.
-    final ip = await _lookup('https://api.ipify.org', InternetAddressType.IPv4);
-    return [?ip];
+    // Prefer the reachable domestic provider, with independent fallbacks.
+    // A failed/invalid response must never silently become an IPv6 result.
+    for (final endpoint in endpoints) {
+      final ip = await _lookup(endpoint, InternetAddressType.IPv4);
+      if (ip != null) return [ip];
+    }
+    return [];
   }
 
   Future<String?> _lookup(String endpoint, InternetAddressType family) async {
@@ -129,7 +138,14 @@ class PublicIpService {
           if (bytes.length + chunk.length > 256) return null;
           bytes.add(chunk);
         }
-        final ip = validPublicIp(utf8.decode(bytes.takeBytes()).trim());
+        final text = utf8.decode(bytes.takeBytes()).trim();
+        final labelled = Uri.parse(endpoint).host == 'myip.ipip.net'
+            ? RegExp(
+                r'^当前\s*IP[：:]\s*((?:\d{1,3}\.){3}\d{1,3})(?=\s|$)',
+                caseSensitive: false,
+              ).firstMatch(text)?.group(1)
+            : null;
+        final ip = validPublicIp(labelled ?? text);
         return ip != null && InternetAddress(ip).type == family ? ip : null;
       })().timeout(
         const Duration(seconds: 6),

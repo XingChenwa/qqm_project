@@ -50,7 +50,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
   bool _ready = false;
   bool _canGoBack = false;
   bool _canGoForward = false;
-  bool _mobileMode = true;
+  bool _mobileMode = defaultMobileBrowserMode(defaultTargetPlatform);
   bool _modeChanging = false;
   String _desktopUserAgent = '';
   double _progress = 0;

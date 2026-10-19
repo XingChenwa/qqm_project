@@ -49,7 +49,7 @@ test('清单体积限制及源码版本一致性', async () => {
 test('GitHub 发布需要四端完成、签名并部署 Pages；手动构建不直接发布', async () => {
   const workflow = await readFile('.github/workflows/mobile-build.yml', 'utf8');
   assert.match(workflow, /release:\s+types: \[published\]/);
-  assert.match(workflow, /needs: \[preflight, android, ios, macos, windows\]/);
+  assert.match(workflow, /needs: \[preflight, android, ios, macos, windows, linux\]/);
   assert.match(workflow, /publish:\s+needs:[^\n]+\s+if: github.event_name == 'release'/);
   assert.match(workflow, /UPDATE_SIGNING_PRIVATE_KEY/);
   assert.ok(!workflow.includes('PUBLIC_RELEASE_TOKEN') && !workflow.includes('DISTRIBUTION_DEPLOY_KEY'));

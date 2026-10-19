@@ -33,6 +33,7 @@ migrate_working_dir/
 /build/
 /coverage/
 /dist/
+/server/data/
 *.ipa
 *.apk
 *.p12

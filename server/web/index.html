@@ -1,0 +1,327 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+    <meta name="color-scheme" content="light dark" />
+    <title>QQ机器人管理器 · Linux 网页版</title>
+    <link rel="icon" href="/logo.png" />
+    <link rel="stylesheet" href="/style.css" />
+    <script defer src="/app.js"></script>
+  </head>
+  <body>
+    <main id="login-view" class="login-view">
+      <section class="login-card">
+        <img src="/logo.png" alt="" class="brand-logo" />
+        <p class="eyebrow">QQ BOT MANAGER / LINUX</p>
+        <h1>你的机器人工作台</h1>
+        <p class="muted">连接、聊天与插件，在浏览器里轻松管理。</p>
+        <form id="login-form">
+          <label for="password">管理密码</label>
+          <input
+            id="password"
+            type="password"
+            required
+            autocomplete="current-password"
+            placeholder="输入服务器生成的管理密码"
+          />
+          <button class="primary wide" type="submit">
+            进入工作台 <span aria-hidden="true">→</span>
+          </button>
+        </form>
+        <p class="hint">
+          首次启动后，在服务器的 data/admin-password.txt 中查看密码。不要填写 QQ
+          密码。
+        </p>
+      </section>
+    </main>
+    <div id="app" class="app" hidden>
+      <aside class="rail">
+        <a class="brand" href="/" aria-label="QQ机器人管理器"
+          ><img src="/logo.png" alt=""
+        /></a>
+        <nav aria-label="工作台导航">
+          <button class="nav active" data-page="chat">
+            <span aria-hidden="true">◫</span><span>聊天</span>
+          </button>
+          <button class="nav" data-page="plugins">
+            <span aria-hidden="true">▧</span><span>插件</span>
+          </button>
+          <button class="nav" data-page="logs">
+            <span aria-hidden="true">≡</span><span>日志</span>
+          </button>
+          <button class="nav" data-page="settings">
+            <span aria-hidden="true">⚙</span><span>设置</span>
+          </button>
+        </nav>
+        <button id="logout" class="rail-bottom" title="退出网页登录">
+          退出
+        </button>
+      </aside>
+      <div class="workspace">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">QQ BOT MANAGER</p>
+            <h1 id="page-title">消息工作台</h1>
+          </div>
+          <div class="top-actions">
+            <span id="status" class="status">未连接</span
+            ><select id="bot-picker" aria-label="切换机器人"></select
+            ><button id="connect" class="primary">连接机器人</button>
+          </div>
+        </header>
+        <div id="network-banner" class="banner" hidden>
+          与管理服务的连接已中断，正在重试。未发送的内容仍保留。
+        </div>
+        <section id="page-chat" class="page chat-page">
+          <aside class="session-pane">
+            <div class="section-title">
+              <h2>会话</h2>
+              <button id="add-session" class="icon" aria-label="新增会话">
+                ＋
+              </button>
+            </div>
+            <input
+              id="search"
+              type="search"
+              placeholder="搜索会话"
+              aria-label="搜索会话"
+            />
+            <div class="filter-row" role="group" aria-label="会话类型">
+              <button class="chip active" data-filter="all">全部</button
+              ><button class="chip" data-filter="private">单聊</button
+              ><button class="chip" data-filter="group">群聊</button>
+            </div>
+            <div id="sessions" class="session-list"></div>
+            <p class="pane-foot">机器人在服务器持续运行</p>
+          </aside>
+          <section class="conversation">
+            <header class="chat-header">
+              <button
+                id="back-sessions"
+                class="icon mobile-only"
+                aria-label="返回会话"
+              >
+                ‹
+              </button>
+              <div id="chat-avatar" class="avatar group">群</div>
+              <div class="grow">
+                <h2 id="chat-name">选择一个会话</h2>
+                <p id="chat-detail" class="muted">
+                  在左侧打开聊天，或先连接机器人
+                </p>
+              </div>
+            </header>
+            <div id="messages" class="messages" aria-label="聊天记录">
+              <div class="empty">
+                <span>◫</span>
+                <h2>让每一次对话，都更从容</h2>
+                <p>选择会话，开始管理你的 QQ 机器人。</p>
+              </div>
+            </div>
+            <button id="new-messages" class="new-messages" hidden>
+              有新消息 ↓
+            </button>
+            <div id="reply-bar" class="reply-bar" hidden>
+              <span id="reply-label"></span
+              ><button id="cancel-reply" class="icon" aria-label="取消引用">
+                ×
+              </button>
+            </div>
+            <section class="composer">
+              <div class="compose-tabs">
+                <button class="active" data-format="text">文字</button
+                ><button data-format="markdown">Markdown</button
+                ><button data-format="image">图片链接</button>
+                <div class="grow"></div>
+                <button id="mention" hidden>@ 成员</button>
+              </div>
+              <div id="compose-area" class="compose-area">
+                <textarea
+                  id="draft"
+                  rows="3"
+                  placeholder="输入消息…"
+                  aria-label="消息编辑器"
+                ></textarea>
+                <div
+                  id="preview"
+                  class="markdown-preview"
+                  hidden
+                  aria-label="Markdown 实时预览"
+                ></div>
+              </div>
+              <footer class="compose-footer">
+                <span id="compose-hint">Enter 发送 · Ctrl + Enter 换行</span
+                ><button id="send" class="primary">
+                  发送 <span aria-hidden="true">↗</span>
+                </button>
+              </footer>
+            </section>
+          </section>
+        </section>
+        <section id="page-plugins" class="page scroll-page" hidden>
+          <div class="page-intro">
+            <div>
+              <h2>把灵感，变成新玩法</h2>
+              <p class="muted">
+                七个随附插件与第三方插件使用同一套加载器。检查配置后，再手动开启。
+              </p>
+            </div>
+            <div class="button-row">
+              <a
+                class="button"
+                href="https://xingchenwa.github.io/qqm_project/plugins.html"
+                target="_blank"
+                rel="noopener noreferrer"
+                >开发手册 ↗</a
+              ><button id="import-plugin" class="primary">＋ 导入插件</button>
+            </div>
+          </div>
+          <div id="plugins" class="plugin-grid"></div>
+        </section>
+        <section id="page-logs" class="page scroll-page" hidden>
+          <div class="page-intro">
+            <div>
+              <h2>运行日志</h2>
+              <p class="muted">
+                最近 2000 条日志，按状态着色；导出前请留意聊天内容。
+              </p>
+            </div>
+            <div class="button-row">
+              <button id="copy-logs">全部复制</button
+              ><button id="export-logs">导出 TXT</button
+              ><button id="export-log">导出 LOG</button>
+            </div>
+          </div>
+          <pre id="logs" class="log-console" aria-label="运行日志"></pre>
+        </section>
+        <section id="page-settings" class="page scroll-page" hidden>
+          <div class="settings-grid">
+            <section class="card">
+              <p class="eyebrow">CONNECTION</p>
+              <h2>机器人连接</h2>
+              <p class="muted">
+                添加新机器人或修改当前配置。已有密钥留空即保留，不会回传浏览器。
+              </p>
+              <form id="config-form">
+                <label for="app-id">AppID</label
+                ><input
+                  id="app-id"
+                  inputmode="numeric"
+                  required
+                  placeholder="QQ 官方机器人 AppID"
+                /><label for="bot-secret">机器人密钥</label
+                ><input
+                  id="bot-secret"
+                  type="password"
+                  autocomplete="new-password"
+                  placeholder="修改时填写；留空保留已有密钥"
+                />
+                <label class="toggle"
+                  ><input
+                    id="auto-reconnect"
+                    type="checkbox"
+                    checked
+                  />断线后自动重连</label
+                >
+                <label class="toggle"
+                  ><input
+                    id="receive-all"
+                    type="checkbox"
+                    checked
+                  />接收群内全部消息（需要平台授权）</label
+                >
+                <label class="toggle"
+                  ><input id="respond-all" type="checkbox" />插件响应免 @
+                  指令</label
+                >
+                <label class="toggle"
+                  ><input
+                    id="oiapi"
+                    type="checkbox"
+                    checked
+                  />补全单聊昵称</label
+                >
+                <label class="toggle"
+                  ><input id="sandbox" type="checkbox" />使用 QQ 沙箱环境</label
+                >
+                <button class="primary" type="submit">保存机器人</button>
+              </form>
+            </section>
+            <div class="settings-stack">
+              <section class="card">
+                <p class="eyebrow">APPEARANCE</p>
+                <h2>外观</h2>
+                <label for="theme">主题</label
+                ><select id="theme">
+                  <option value="system">跟随系统</option>
+                  <option value="light">浅色</option>
+                  <option value="dark">深色</option>
+                </select>
+                <p class="hint">网页根据窗口宽度适配电脑与手机布局。</p>
+              </section>
+              <section class="card">
+                <p class="eyebrow">NETWORK</p>
+                <h2>网络诊断</h2>
+                <p class="muted">
+                  查询的是运行机器人的 Linux
+                  服务器出口，不是访问网页的手机或电脑。
+                </p>
+                <button id="lookup-ip">查询公网 IPv4</button>
+              </section>
+              <section class="card">
+                <p class="eyebrow">ABOUT</p>
+                <h2>QQ机器人管理器</h2>
+                <p id="version" class="muted"></p>
+                <p>基于 QQ 官方开放平台的跨平台管理工具。学习为目的编写的。</p>
+                <a
+                  href="https://github.com/XingChenwa/qqm_project"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  >项目地址 · 欢迎 Star ↗</a
+                >
+                <p class="hint">作者 QQ：2377130783 · 问题建议可以反馈</p>
+                <div class="button-row">
+                  <button id="settings-logout">退出网页登录</button>
+                </div>
+              </section>
+            </div>
+          </div>
+        </section>
+      </div>
+    </div>
+    <dialog id="modal">
+      <header>
+        <h2 id="modal-title"></h2>
+        <button id="modal-close" class="icon" aria-label="关闭弹窗">×</button>
+      </header>
+      <div id="modal-content"></div>
+      <footer id="modal-actions"></footer>
+    </dialog>
+    <dialog id="web-browser" class="browser-dialog">
+      <header>
+        <h2>应用内浏览页</h2>
+        <button id="browser-close" class="icon" aria-label="关闭网页">×</button>
+      </header>
+      <p class="hint">
+        网页使用当前浏览器的设备标识。部分网站禁止嵌入显示，可复制链接访问。
+      </p>
+      <div class="button-row">
+        <input id="browser-url" readonly aria-label="网页地址" /><button
+          id="browser-copy"
+        >
+          复制链接
+        </button>
+      </div>
+      <iframe
+        id="browser-frame"
+        title="链接网页"
+        referrerpolicy="no-referrer"
+        sandbox="allow-forms allow-scripts"
+      ></iframe>
+    </dialog>
+  </body>
+</html>

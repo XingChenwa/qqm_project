@@ -9,6 +9,9 @@ export function packageNames(version, build) {
     names[asset.platform + '_artifact'] = asset.directory;
   }
   names.macos_zip = `qqbotmanager-macos-v${version}-build${build}-universal.zip`;
+  names.linux_file = `qqbotmanager-linux-v${version}-build${build}-web-x64.tar.gz`;
+  names.linux_artifact = `linux-v${version}-build${build}-web-x64`;
+  names.linux_checksum = names.linux_file + '.sha256';
   return names;
 }
 

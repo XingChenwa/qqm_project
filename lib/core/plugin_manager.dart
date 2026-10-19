@@ -1,8 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
 
-import 'package:flutter/foundation.dart';
-import 'package:flutter/services.dart';
+import '../runtime/notifier.dart';
+import '../runtime/assets.dart';
 import 'package:logging/logging.dart';
 
 import '../models/plugin.dart';

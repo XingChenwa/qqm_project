@@ -1,0 +1,1138 @@
+"use strict";
+const $ = (id) => document.getElementById(id);
+const S = {
+  state: null,
+  revision: -1,
+  page: "chat",
+  session: "",
+  messages: [],
+  format: "text",
+  filter: "all",
+  reply: null,
+  logged: false,
+  polling: null,
+  logs: [],
+  drafts: new Map(),
+  notice: "",
+  newCount: 0,
+};
+function el(tag, attrs = {}, ...children) {
+  const node = document.createElement(tag);
+  for (const [key, value] of Object.entries(attrs)) {
+    if (value == null) continue;
+    if (key === "class") node.className = value;
+    else if (key === "text") node.textContent = value;
+    else if (key.startsWith("on")) node.addEventListener(key.slice(2), value);
+    else node.setAttribute(key, String(value));
+  }
+  for (const child of children.flat())
+    if (child != null)
+      node.append(
+        child instanceof Node ? child : document.createTextNode(String(child)),
+      );
+  return node;
+}
+function safeUrl(value) {
+  try {
+    const u = new URL(value);
+    return ["https:", "http:"].includes(u.protocol) &&
+      !u.username &&
+      !u.password
+      ? u.href
+      : null;
+  } catch {
+    return null;
+  }
+}
+function nowTime(value) {
+  return new Date(value).toLocaleTimeString("zh-CN", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+function showLogin() {
+  S.logged = false;
+  $("app").hidden = true;
+  $("login-view").hidden = false;
+}
+async function api(path, { method = "GET", body } = {}) {
+  const response = await fetch("/api/" + path, {
+    method,
+    credentials: "same-origin",
+    cache: "no-store",
+    headers: {
+      "X-QQM-Request": "1",
+      ...(body ? { "Content-Type": "application/json" } : {}),
+    },
+    ...(body ? { body: JSON.stringify(body) } : {}),
+  });
+  let data;
+  try {
+    data = await response.json();
+  } catch {
+    throw Error("服务器返回格式异常，请检查代理或服务日志。");
+  }
+  if (!response.ok) {
+    if (response.status === 401 && path !== "login") showLogin();
+    throw Error(data.error || "操作失败，请重试");
+  }
+  return data;
+}
+const post = (path, body = {}) => api(path, { method: "POST", body });
+function closeModal() {
+  $("modal").close();
+}
+function modal(title, content, actions = []) {
+  $("modal-title").textContent = title;
+  $("modal-content").replaceChildren(
+    ...(Array.isArray(content)
+      ? content
+      : [
+          typeof content === "string"
+            ? el("p", { class: "dialog-text", text: content })
+            : content,
+        ]),
+  );
+  $("modal-actions").replaceChildren(...actions);
+  if (!$("modal").open) $("modal").showModal();
+}
+function notice(message, title = "提示") {
+  modal(title, message, [
+    el("button", { class: "primary", onclick: closeModal }, "知道了"),
+  ]);
+}
+async function perform(action, button) {
+  if (button) button.disabled = true;
+  try {
+    return await action();
+  } catch (error) {
+    notice(error.message, "操作未完成");
+    return null;
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+function field(label, input) {
+  return el("div", { class: "field" }, el("label", {}, label), input);
+}
+function formButton(text, action, primary = true) {
+  return el(
+    "button",
+    {
+      class: primary ? "primary" : "",
+      onclick: (event) => perform(action, event.currentTarget),
+    },
+    text,
+  );
+}
+function avatar(name, url = "", group = false) {
+  const box = el(
+    "div",
+    { class: "avatar" + (group ? " group" : "") },
+    group ? "群" : (name || "?").slice(0, 1),
+  );
+  const valid = safeUrl(url);
+  if (valid && !group) {
+    const img = el("img", {
+      src: valid,
+      alt: "",
+      loading: "lazy",
+      referrerpolicy: "no-referrer",
+    });
+    img.addEventListener("error", () => img.remove(), { once: true });
+    box.append(img);
+  }
+  return box;
+}
+function draftKey() {
+  return `${S.state?.config.appId || ""}/${S.session}/${S.format}`;
+}
+function saveDraft() {
+  S.drafts.set(draftKey(), $("draft").value);
+}
+function restoreDraft() {
+  $("draft").value = S.drafts.get(draftKey()) || "";
+  updatePreview();
+}
+function setTheme(value) {
+  if (!["light", "dark", "system"].includes(value)) value = "system";
+  const dark =
+    value === "dark" ||
+    (value === "system" && matchMedia("(prefers-color-scheme: dark)").matches);
+  document.documentElement.dataset.theme = dark ? "dark" : "light";
+  $("theme").value = value;
+  try {
+    localStorage.setItem("qqm-theme", value);
+  } catch {}
+}
+let theme = "system";
+try {
+  theme = localStorage.getItem("qqm-theme") || theme;
+} catch {}
+setTheme(theme);
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
+  if ($("theme").value === "system") setTheme("system");
+});
+$("theme").addEventListener("change", (event) => setTheme(event.target.value));
+$("modal-close").onclick = closeModal;
+$("browser-close").onclick = () => {
+  $("web-browser").close();
+  $("browser-frame").removeAttribute("src");
+};
+function openBrowser(value) {
+  const url = safeUrl(value);
+  if (!url) return;
+  const parsed = new URL(url);
+  if (parsed.protocol !== "https:") {
+    notice("内嵌浏览页仅支持 HTTPS 网页。你可以复制链接：\n" + url);
+    return;
+  }
+  $("browser-url").value = url;
+  $("browser-frame").src = url;
+  if (!$("web-browser").open) $("web-browser").showModal();
+}
+document.addEventListener("click", (event) => {
+  const anchor = event.target.closest("a");
+  if (!anchor || anchor.classList.contains("brand") || anchor.download) return;
+  const url = safeUrl(anchor.href);
+  if (url) {
+    event.preventDefault();
+    openBrowser(url);
+  }
+});
+async function copyText(text) {
+  if (navigator.clipboard && isSecureContext) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  const input = el("textarea", { readonly: "" }, text);
+  document.body.append(input);
+  input.select();
+  const ok = document.execCommand("copy");
+  input.remove();
+  if (!ok) throw Error("浏览器不允许自动复制，请手动选择文字。");
+}
+$("browser-copy").onclick = (event) =>
+  perform(async () => {
+    await copyText($("browser-url").value);
+    notice("链接已复制");
+  }, event.currentTarget);
+function download(name, source, type = "text/plain") {
+  const url = URL.createObjectURL(new Blob([source], { type }));
+  const link = el("a", { href: url, download: name });
+  document.body.append(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 3000);
+}
+function inlineMarkdown(text, parent) {
+  // All rendered content is DOM text. Never interpret chat/plugin HTML.
+  const token =
+    /(<qqbot-at-user\s+id="([^"\n]+)"\s*\/>)|(`([^`]+)`)|(\*\*([^*]+)\*\*)|(!?\[([^\]]*)\]\((https?:\/\/[^\s)]+)\))/g;
+  let end = 0;
+  for (const match of text.matchAll(token)) {
+    parent.append(text.slice(end, match.index));
+    if (match[1]) {
+      const id = match[2];
+      const name = S.messages.find((m) => m.senderId === id)?.senderName || id;
+      parent.append(el("strong", {}, `@${name}（${id}）`));
+    } else if (match[3]) parent.append(el("code", {}, match[4]));
+    else if (match[5]) parent.append(el("strong", {}, match[6]));
+    else {
+      const url = safeUrl(match[9]);
+      if (url)
+        parent.append(
+          el(
+            "a",
+            { href: url, rel: "noopener noreferrer" },
+            match[8] || "图片链接",
+          ),
+        );
+      else parent.append(match[0]);
+    }
+    end = match.index + match[0].length;
+  }
+  parent.append(text.slice(end));
+}
+function markdown(source, parent) {
+  let code = null;
+  for (const line of source.split("\n")) {
+    if (/^\s*```/.test(line)) {
+      if (code) {
+        parent.append(el("pre", {}, el("code", {}, code.join("\n"))));
+        code = null;
+      } else code = [];
+      continue;
+    }
+    if (code) {
+      code.push(line);
+      continue;
+    }
+    let node;
+    const heading = /^(#{1,6})\s+(.*)/.exec(line);
+    if (heading) {
+      node = el("h" + heading[1].length);
+      inlineMarkdown(heading[2], node);
+    } else if (/^>\s?/.test(line)) {
+      node = el("blockquote");
+      inlineMarkdown(line.replace(/^>\s?/, ""), node);
+    } else {
+      node = el("p");
+      inlineMarkdown(line || "\u00a0", node);
+    }
+    parent.append(node);
+  }
+  if (code) parent.append(el("pre", {}, el("code", {}, code.join("\n"))));
+}
+function updatePreview() {
+  const md = S.format === "markdown";
+  $("preview").hidden = !md;
+  $("mention").hidden = !md;
+  $("compose-area").classList.toggle("markdown", md);
+  $("preview").replaceChildren();
+  if (md) markdown($("draft").value || "Markdown 实时预览", $("preview"));
+  $("draft").placeholder =
+    S.format === "image" ? "粘贴 HTTPS 图片链接…" : "输入消息…";
+  $("compose-hint").textContent = matchMedia("(pointer: coarse)").matches
+    ? "使用发送按钮发送 · 回车换行"
+    : "Enter 发送 · Ctrl + Enter 换行";
+}
+$("draft").addEventListener("input", () => {
+  saveDraft();
+  updatePreview();
+});
+$("draft").addEventListener("keydown", (event) => {
+  if (
+    event.key === "Enter" &&
+    !event.isComposing &&
+    !event.shiftKey &&
+    !matchMedia("(pointer: coarse)").matches
+  ) {
+    event.preventDefault();
+    if (event.ctrlKey || event.metaKey) {
+      const input = event.currentTarget;
+      input.setRangeText("\n", input.selectionStart, input.selectionEnd, "end");
+      saveDraft();
+      updatePreview();
+    } else if (!event.altKey) $("send").click();
+  }
+});
+document.querySelectorAll("[data-format]").forEach(
+  (button) =>
+    (button.onclick = () => {
+      saveDraft();
+      S.format = button.dataset.format;
+      document
+        .querySelectorAll("[data-format]")
+        .forEach((b) => b.classList.toggle("active", b === button));
+      restoreDraft();
+    }),
+);
+function clearReply() {
+  S.reply = null;
+  $("reply-bar").hidden = true;
+}
+$("cancel-reply").onclick = clearReply;
+function bottom() {
+  $("messages").scrollTop = $("messages").scrollHeight;
+  S.newCount = 0;
+  $("new-messages").hidden = true;
+}
+$("new-messages").onclick = bottom;
+$("back-sessions").onclick = () => {
+  $("app").classList.remove("chat-open");
+};
+function selectSession(id) {
+  saveDraft();
+  S.session = id;
+  S.messages = [];
+  S.newCount = 0;
+  clearReply();
+  restoreDraft();
+  $("app").classList.add("chat-open");
+  renderSessions();
+  renderChatHeader();
+  perform(async () => {
+    await loadMessages(true);
+    await post("read", { appId: S.state.config.appId, session: id });
+  });
+}
+function renderChatHeader() {
+  const session = S.state.sessions.find((s) => s.id === S.session);
+  $("chat-name").textContent = session?.name || "选择一个会话";
+  $("chat-detail").textContent = session
+    ? `${session.sessionType === 1 ? "群聊" : "单聊"} · ${session.id}`
+    : "在左侧打开聊天，或先连接机器人";
+  $("chat-avatar").replaceWith(
+    Object.assign(
+      avatar(session?.name, session?.avatarUrl, session?.sessionType === 1),
+      { id: "chat-avatar" },
+    ),
+  );
+  $("send").disabled = !session;
+}
+function renderSessions() {
+  const query = $("search").value.trim().toLowerCase();
+  const list = S.state.sessions.filter(
+    (s) =>
+      (S.filter === "all" ||
+        (S.filter === "group") === (s.sessionType === 1)) &&
+      (!query || `${s.name} ${s.id}`.toLowerCase().includes(query)),
+  );
+  $("sessions").replaceChildren(
+    ...list.map((session) => {
+      const meta = el(
+        "div",
+        {},
+        el("div", { class: "session-time" }, nowTime(session.lastMessageTime)),
+      );
+      if (session.unreadCount)
+        meta.append(
+          el("span", { class: "unread" }, Math.min(session.unreadCount, 99)),
+        );
+      return el(
+        "button",
+        {
+          class: "session-item" + (session.id === S.session ? " active" : ""),
+          onclick: () => selectSession(session.id),
+        },
+        avatar(session.name, session.avatarUrl, session.sessionType === 1),
+        el(
+          "div",
+          { class: "grow" },
+          el("div", { class: "session-name" }, session.name),
+          el(
+            "div",
+            { class: "session-summary" },
+            session.lastMessage || "暂无消息",
+          ),
+        ),
+        meta,
+      );
+    }),
+  );
+  if (!list.length)
+    $("sessions").append(
+      el(
+        "div",
+        { class: "empty" },
+        el("p", {}, "暂无会话"),
+        el("p", {}, "连接机器人后，在 QQ 中发送一条消息。"),
+      ),
+    );
+}
+$("search").oninput = () => S.state && renderSessions();
+document.querySelectorAll("[data-filter]").forEach(
+  (button) =>
+    (button.onclick = () => {
+      S.filter = button.dataset.filter;
+      document
+        .querySelectorAll("[data-filter]")
+        .forEach((b) => b.classList.toggle("active", b === button));
+      renderSessions();
+    }),
+);
+function renderReceived(body, parent) {
+  if (body.author) parent.append(el("small", { class: "muted" }, body.author));
+  if (body.text) parent.append(el("p", {}, body.text));
+  for (const a of body.attachments || []) {
+    const url = safeUrl(a.url);
+    if (!url) continue;
+    if (a.isImage) {
+      const img = el("img", {
+        src: url,
+        alt: a.filename || "图片",
+        loading: "lazy",
+        referrerpolicy: "no-referrer",
+      });
+      img.addEventListener(
+        "error",
+        () =>
+          img.replaceWith(el("a", { href: url }, "图片暂不可用，点击查看链接")),
+        { once: true },
+      );
+      parent.append(img);
+    } else parent.append(el("a", { href: url }, a.filename || "附件"));
+  }
+  if (body.card) {
+    const url = safeUrl(body.card.url);
+    parent.append(
+      url
+        ? el("a", { href: url }, body.card.title)
+        : el("strong", {}, body.card.title),
+      el("p", {}, body.card.description),
+    );
+  }
+  for (const child of body.elements || []) {
+    const details = el("details", {}, el("summary", {}, "展开引用 / 聊天记录"));
+    renderReceived(child, details);
+    parent.append(details);
+  }
+}
+function renderMessages() {
+  const area = $("messages"),
+    top = area.scrollTop;
+  area.replaceChildren();
+  for (const message of S.messages) {
+    const bubble = el("div", { class: "bubble" });
+    if (message.isRecalled)
+      bubble.append(el("span", { class: "muted" }, "这条消息已撤回"));
+    else {
+      if (message.markdownContent) markdown(message.markdownContent, bubble);
+      else if (message.body) renderReceived(message.body, bubble);
+      else bubble.append(message.content || "");
+      const image = safeUrl(message.imageUrl);
+      if (image)
+        bubble.append(
+          el("img", {
+            src: image,
+            alt: "图片",
+            loading: "lazy",
+            referrerpolicy: "no-referrer",
+          }),
+        );
+    }
+    const main = el(
+      "div",
+      { class: "message-main" },
+      el(
+        "div",
+        { class: "message-byline" },
+        el("span", {}, message.senderName || "机器人"),
+        el("time", {}, nowTime(message.time)),
+      ),
+      bubble,
+    );
+    if (!message.isRecalled)
+      main.append(
+        el(
+          "button",
+          {
+            class: "quote",
+            onclick: () => {
+              S.reply = message;
+              $("reply-label").textContent =
+                `引用 ${message.senderName}：${message.content || message.markdownContent || "消息"}`;
+              $("reply-bar").hidden = false;
+              $("draft").focus();
+            },
+          },
+          "引用",
+        ),
+      );
+    area.append(
+      el(
+        "article",
+        { class: "message" + (message.isFromBot ? " mine" : "") },
+        avatar(message.senderName, message.senderAvatarUrl),
+        main,
+      ),
+    );
+  }
+  if (!S.messages.length)
+    area.append(
+      el("div", { class: "empty" }, el("p", {}, "这里还没有聊天记录")),
+    );
+  area.scrollTop = top;
+}
+async function loadMessages(toBottom = false) {
+  if (!S.session || !S.logged) return;
+  const appId = S.state.config.appId,
+    id = S.session;
+  const data = await api(
+    `messages?appId=${encodeURIComponent(appId)}&session=${encodeURIComponent(id)}`,
+  );
+  if (S.state.config.appId !== appId || S.session !== id) return;
+  const changed = JSON.stringify(data.messages) !== JSON.stringify(S.messages);
+  if (changed) {
+    const known = new Set(S.messages.map((m) => m.id));
+    S.newCount += data.messages.filter(
+      (m) => !known.has(m.id) && !m.isFromBot,
+    ).length;
+    S.messages = data.messages;
+    renderMessages();
+    if (!toBottom && S.newCount) {
+      $("new-messages").textContent = `${S.newCount} 条新消息 ↓`;
+      $("new-messages").hidden = false;
+    }
+  }
+  if (toBottom) {
+    bottom();
+    requestAnimationFrame(bottom);
+  }
+}
+$("send").onclick = (event) =>
+  perform(async () => {
+    if (!S.session) throw Error("请先选择会话");
+    const body = {
+      appId: S.state.config.appId,
+      session: S.session,
+      format: S.format,
+      content: $("draft").value,
+      replyId: S.reply?.id || "",
+    };
+    if (!body.content.trim()) throw Error("消息不能为空");
+    await post("send", body);
+    if (body.appId === S.state.config.appId && body.session === S.session) {
+      $("draft").value = "";
+      saveDraft();
+      clearReply();
+      updatePreview();
+      await loadMessages(true);
+    }
+    await refresh(true);
+  }, event.currentTarget);
+$("mention").onclick = () => {
+  const session = S.state.sessions.find((s) => s.id === S.session);
+  if (session?.sessionType !== 1) {
+    notice("@ 成员只能用于群聊 Markdown");
+    return;
+  }
+  const members = new Map(
+    S.messages
+      .filter((m) => !m.isFromBot)
+      .map((m) => [m.senderId, m.senderName]),
+  );
+  const input = el("input", { placeholder: "成员 OpenID" }),
+    list = el(
+      "select",
+      { "aria-label": "选择群成员" },
+      el("option", { value: "" }, "选择已收到消息的群成员"),
+      ...[...members].map(([id, name]) =>
+        el("option", { value: id }, name || id),
+      ),
+    );
+  list.onchange = () => {
+    input.value = list.value;
+  };
+  modal(
+    "@ 群成员",
+    [field("已知群成员", list), field("成员 OpenID", input)],
+    [
+      formButton("插入 Markdown", async () => {
+        const id = input.value.trim();
+        if (!/^[A-Za-z0-9_-]{1,128}$/.test(id))
+          throw Error("请输入有效的成员 OpenID");
+        const textarea = $("draft");
+        textarea.setRangeText(
+          `<qqbot-at-user id="${id}" />`,
+          textarea.selectionStart,
+          textarea.selectionEnd,
+          "end",
+        );
+        saveDraft();
+        updatePreview();
+        closeModal();
+      }),
+    ],
+  );
+};
+function renderPlugins() {
+  $("plugins").replaceChildren(
+    ...S.state.plugins.map((plugin) => {
+      const toggle = el("input", {
+        type: "checkbox",
+        "aria-label": `启用${plugin.name}`,
+      });
+      toggle.checked = plugin.enabled;
+      toggle.onchange = () =>
+        perform(async () => {
+          await post("plugins/toggle", {
+            id: plugin.id,
+            enabled: toggle.checked,
+          });
+          await refresh(true);
+        }, toggle).then((result) => {
+          if (result === null) toggle.checked = plugin.enabled;
+        });
+      return el(
+        "section",
+        { class: "plugin-card" },
+        el(
+          "div",
+          { class: "plugin-top" },
+          el("div", { class: "avatar" }, "▧"),
+          el(
+            "div",
+            {},
+            el("h3", {}, plugin.name),
+            el(
+              "p",
+              { class: "muted" },
+              `${plugin.bundled ? "随附插件" : "第三方插件"} · ${plugin.version}`,
+            ),
+          ),
+          el("label", { class: "switch" }, toggle),
+        ),
+        el("p", { class: "plugin-description" }, plugin.description),
+        el(
+          "p",
+          { class: "plugin-commands" },
+          plugin.commands.join(" · ") || "按插件规则运行",
+        ),
+        ...(plugin.error ? [el("p", { class: "error" }, plugin.error)] : []),
+        el(
+          "div",
+          { class: "button-row" },
+          formButton("配置", () => configurePlugin(plugin), false),
+          formButton("编辑源码", () => editPlugin(plugin.id), false),
+          formButton(
+            "导出",
+            async () => {
+              const data = await api("plugins/source?id=" + plugin.id);
+              download(plugin.id + ".json", data.source, "application/json");
+            },
+            false,
+          ),
+        ),
+      );
+    }),
+  );
+}
+async function configurePlugin(plugin) {
+  const data = await api("plugins/source?id=" + plugin.id);
+  const input = el("textarea", { "aria-label": "插件 JSON 配置" });
+  input.value = JSON.stringify(data.config, null, 2);
+  modal(
+    plugin.name + " · 配置",
+    [
+      el(
+        "p",
+        { class: "hint" },
+        "配置 Key 仅用于对应插件。不要导出或分享含密钥的配置。",
+      ),
+      input,
+    ],
+    [
+      formButton("保存配置", async () => {
+        let config;
+        try {
+          config = JSON.parse(input.value);
+        } catch {
+          throw Error("JSON 格式无效");
+        }
+        await post("plugins/config", { id: plugin.id, config });
+        closeModal();
+        await refresh(true);
+      }),
+    ],
+  );
+}
+async function editPlugin(id) {
+  await post("workspace/seed", { id });
+  const tree = await api("workspace?id=" + encodeURIComponent(id));
+  const files = el("div", { class: "editor-files" }),
+    editor = el("textarea", {
+      class: "editor-textarea",
+      "aria-label": "插件源码",
+      spellcheck: "false",
+    }),
+    label = el("p", { class: "hint" });
+  let current = "",
+    expected = "",
+    dirty = false;
+  async function open(file) {
+    if (dirty && !confirm("当前文件尚未保存，放弃修改并打开另一个文件？"))
+      return;
+    const data = await api(
+      `workspace/read?id=${encodeURIComponent(id)}&file=${encodeURIComponent(file)}`,
+    );
+    current = file;
+    expected = data.source;
+    editor.value = expected;
+    dirty = false;
+    label.textContent = `${id} / ${file}`;
+  }
+  editor.oninput = () => {
+    dirty = true;
+  };
+  for (const file of tree.files)
+    files.append(formButton(file, () => open(file), false));
+  modal(
+    "插件文件 · " + id,
+    [
+      el(
+        "p",
+        { class: "hint" },
+        "保存只更新工作区；安装后替换插件，默认保持关闭。旧文件会保留历史，多个编辑器同时修改时拒绝覆盖。",
+      ),
+      label,
+      el("div", { class: "editor-layout" }, files, editor),
+    ],
+    [
+      formButton(
+        "保存文件",
+        async () => {
+          if (!current) throw Error("请选择文件");
+          await post("workspace/write", {
+            id,
+            file: current,
+            source: editor.value,
+            expected,
+          });
+          expected = editor.value;
+          dirty = false;
+          label.textContent = `${id} / ${current} · 已保存`;
+        },
+        false,
+      ),
+      formButton("安装 / 替换插件", async () => {
+        if (dirty) throw Error("请先保存文件");
+        await post("workspace/install", { id, replace: true });
+        closeModal();
+        await refresh(true);
+        notice("插件已安装并停用，请检查配置后手动开启。");
+      }),
+    ],
+  );
+  if (tree.files.length)
+    await open(tree.files.includes("main.ht") ? "main.ht" : tree.files[0]);
+}
+$("import-plugin").onclick = () => {
+  const input = el("textarea", {
+      "aria-label": "插件清单",
+      placeholder: "粘贴完整 JSON / YAML 插件清单，脚本插件需含 script.source",
+    }),
+    file = el("input", { type: "file", accept: ".json,.yaml,.yml" }),
+    replace = el("input", { type: "checkbox" });
+  file.onchange = () =>
+    perform(async () => {
+      const value = file.files[0];
+      if (!value) return;
+      if (value.size > 262144) throw Error("插件文件不能超过 256 KB");
+      input.value = await value.text();
+    });
+  modal(
+    "导入插件",
+    [
+      field("选择文件（JSON / YAML）", file),
+      field("完整插件定义", input),
+      el(
+        "label",
+        { class: "toggle" },
+        replace,
+        "确认替换相同 ID 的插件（默认关闭）",
+      ),
+    ],
+    [
+      formButton("导入并保持关闭", async () => {
+        await post("plugins/import", {
+          source: input.value,
+          replace: replace.checked,
+        });
+        closeModal();
+        await refresh(true);
+        notice("插件已导入。请先检查配置，再手动启用。");
+      }),
+    ],
+  );
+};
+function renderLogs() {
+  const area = $("logs"),
+    top = area.scrollTop;
+  area.replaceChildren(
+    ...S.logs.map((log) =>
+      el(
+        "span",
+        {
+          class:
+            "log-line " +
+            (/失败|异常|错误|error/i.test(log.text)
+              ? "error"
+              : /成功|已连接|已发送|在线/.test(log.text)
+                ? "success"
+                : /警告|注意|重连|未配置/.test(log.text)
+                  ? "warning"
+                  : ""),
+        },
+        `[${nowTime(log.time)}] ${log.text}`,
+      ),
+    ),
+  );
+  area.scrollTop = top;
+}
+async function loadLogs() {
+  const data = await api("logs");
+  S.logs = data.logs;
+  renderLogs();
+}
+const logText = () =>
+  S.logs
+    .map((log) => `[${new Date(log.time).toLocaleString("zh-CN")}] ${log.text}`)
+    .join("\n");
+$("copy-logs").onclick = (event) =>
+  perform(async () => {
+    await loadLogs();
+    await copyText(logText());
+    notice("全部日志已复制");
+  }, event.currentTarget);
+for (const [id, ext] of [
+  ["export-logs", "txt"],
+  ["export-log", "log"],
+])
+  $(id).onclick = (event) =>
+    perform(async () => {
+      await loadLogs();
+      download(
+        `qqm-${S.state.version}-build${S.state.build}-${new Date().toISOString().slice(0, 10)}.${ext}`,
+        logText(),
+      );
+    }, event.currentTarget);
+function changePage(page) {
+  S.page = page;
+  document
+    .querySelectorAll("[data-page]")
+    .forEach((button) =>
+      button.classList.toggle("active", button.dataset.page === page),
+    );
+  for (const name of ["chat", "plugins", "logs", "settings"])
+    $("page-" + name).hidden = name !== page;
+  $("page-title").textContent = {
+    chat: "消息工作台",
+    plugins: "插件中心",
+    logs: "运行日志",
+    settings: "应用设置",
+  }[page];
+  $("app").classList.toggle("chat-open", page === "chat" && !!S.session);
+  if (page === "logs") perform(loadLogs);
+  if (page === "settings") fillConfig(true);
+}
+document
+  .querySelectorAll("[data-page]")
+  .forEach(
+    (button) => (button.onclick = () => changePage(button.dataset.page)),
+  );
+let filledAppId = null;
+function fillConfig(force = false) {
+  const config = S.state.config;
+  if (!force && filledAppId === config.appId) return;
+  filledAppId = config.appId;
+  $("app-id").value = config.appId;
+  $("bot-secret").value = "";
+  $("auto-reconnect").checked = config.autoReconnect;
+  $("receive-all").checked = config.receiveAllGroupMessages;
+  $("respond-all").checked = config.autoReplyToAllGroupMessages;
+  $("oiapi").checked = config.enableOiapiNickname;
+  $("sandbox").checked = config.useSandbox;
+}
+$("config-form").onsubmit = (event) => {
+  event.preventDefault();
+  perform(async () => {
+    await post("config", {
+      appId: $("app-id").value,
+      clientSecret: $("bot-secret").value,
+      autoReconnect: $("auto-reconnect").checked,
+      receiveAllGroupMessages: $("receive-all").checked,
+      autoReplyToAllGroupMessages: $("respond-all").checked,
+      enableOiapiNickname: $("oiapi").checked,
+      useSandbox: $("sandbox").checked,
+    });
+    $("bot-secret").value = "";
+    await refresh(true);
+    notice("机器人配置已保存，点击顶部按钮连接。");
+  }, event.submitter);
+};
+$("bot-picker").onchange = (event) =>
+  perform(async () => {
+    saveDraft();
+    await post("switch", { appId: event.target.value });
+    await refresh(true);
+  });
+$("connect").onclick = (event) =>
+  perform(async () => {
+    if (!S.state.config.hasSecret) {
+      changePage("settings");
+      notice("请先填写 AppID 和机器人密钥");
+      return;
+    }
+    await post(S.state.connected ? "disconnect" : "connect", {
+      appId: S.state.config.appId,
+    });
+    await refresh(true);
+  }, event.currentTarget);
+$("add-session").onclick = () => {
+  const name = el("input", { placeholder: "会话名称（可选）" }),
+    id = el("input", { placeholder: "用户或群的 OpenID，不是 QQ 号" }),
+    type = el(
+      "select",
+      {},
+      el("option", { value: "private" }, "单聊"),
+      el("option", { value: "group" }, "群聊"),
+    );
+  modal(
+    "新增会话",
+    [field("类型", type), field("OpenID", id), field("名称", name)],
+    [
+      formButton("创建会话", async () => {
+        await post("session", {
+          appId: S.state.config.appId,
+          id: id.value,
+          name: name.value,
+          isGroup: type.value === "group",
+        });
+        closeModal();
+        await refresh(true);
+        selectSession(id.value.trim());
+      }),
+    ],
+  );
+};
+async function lookupIp() {
+  const data = await api("ip");
+  if (!data.ips.length)
+    throw Error(
+      "所有 IPv4 接口暂时不可用，请检查服务器 IPv4 路由或代理后重试。不会使用 IPv6 代替。",
+    );
+  return data.ips.join("\n");
+}
+$("lookup-ip").onclick = (event) =>
+  perform(
+    async () => notice(await lookupIp(), "服务器公网出口 IPv4"),
+    event.currentTarget,
+  );
+function ipProblem(problem) {
+  if (!problem) return;
+  const key = problem.appId + "|" + problem.message;
+  if (S.notice === key) return;
+  S.notice = key;
+  const output = el(
+    "p",
+    { class: "dialog-text" },
+    problem.sourceIp
+      ? `QQ 返回的源 IP：${problem.sourceIp}`
+      : "QQ 未返回源 IP。请先查询服务器 IPv4。",
+  );
+  modal(
+    "QQ 接口 IP 白名单",
+    [
+      el("p", { class: "dialog-text" }, problem.message),
+      output,
+      el(
+        "p",
+        { class: "hint" },
+        "进入当前机器人的开发设置，将实际请求出口 IP 加入白名单并保存。不同代理可能具有不同出口。",
+      ),
+    ],
+    [
+      formButton(
+        "查询服务器 IPv4",
+        async () => {
+          output.textContent = "服务器公网出口 IPv4：" + (await lookupIp());
+        },
+        false,
+      ),
+      formButton("打开机器人设置", async () => {
+        closeModal();
+        openBrowser(problem.url);
+      }),
+      formButton(
+        "已处理",
+        async () => {
+          await post("ip/dismiss");
+          closeModal();
+        },
+        false,
+      ),
+    ],
+  );
+}
+async function refresh(force = false) {
+  if (S.polling) return S.polling;
+  S.polling = (async () => {
+    const data = await api("state" + (force ? "" : "?revision=" + S.revision));
+    if (data.unchanged) {
+      if (S.page === "logs") await loadLogs();
+      return;
+    }
+    const old = S.state?.config.appId;
+    if (old !== undefined && old !== data.config.appId) {
+      saveDraft();
+      S.session = "";
+      S.messages = [];
+      clearReply();
+      $("app").classList.remove("chat-open");
+      $("messages").replaceChildren(
+        el(
+          "div",
+          { class: "empty" },
+          el("p", {}, "已切换机器人，请选择新会话"),
+        ),
+      );
+    }
+    S.state = data;
+    S.revision = data.revision;
+    $("version").textContent = `${data.version}+${data.build} · Linux 网页版`;
+    $("status").textContent = data.status;
+    $("status").classList.toggle("online", data.connected);
+    $("connect").textContent = data.connected
+      ? "断开连接"
+      : data.connecting
+        ? "连接中…"
+        : "连接机器人";
+    $("connect").disabled = data.connecting;
+    const picker = $("bot-picker");
+    picker.replaceChildren(
+      ...data.bots.map((bot) =>
+        el(
+          "option",
+          { value: bot.appId },
+          bot.appId === data.config.appId && data.botName
+            ? data.botName
+            : bot.appId,
+        ),
+      ),
+    );
+    picker.value = data.config.appId;
+    picker.hidden = data.bots.length === 0;
+    renderSessions();
+    renderChatHeader();
+    renderPlugins();
+    fillConfig();
+    if (old !== data.config.appId) restoreDraft();
+    if (S.session) await loadMessages();
+    if (S.page === "logs") await loadLogs();
+    if (data.ipProblem && !$("modal").open) ipProblem(data.ipProblem);
+    $("network-banner").hidden = true;
+  })().finally(() => {
+    S.polling = null;
+  });
+  return S.polling;
+}
+async function enter() {
+  S.logged = true;
+  $("login-view").hidden = true;
+  $("app").hidden = false;
+  await refresh(true);
+  updatePreview();
+}
+$("login-form").onsubmit = (event) => {
+  event.preventDefault();
+  perform(async () => {
+    await post("login", { password: $("password").value });
+    $("password").value = "";
+    S.revision = -1;
+    await enter();
+  }, event.submitter);
+};
+$("logout").onclick = (event) =>
+  perform(async () => {
+    await post("logout");
+    showLogin();
+  }, event.currentTarget);
+$("settings-logout").onclick = $("logout").onclick;
+setInterval(() => {
+  if (!S.logged || document.hidden) return;
+  refresh()
+    .then(() => {
+      $("network-banner").hidden = true;
+    })
+    .catch(() => {
+      if (S.logged) $("network-banner").hidden = false;
+    });
+}, 1500);
+api("state")
+  .then((data) => {
+    S.state = data;
+    return enter();
+  })
+  .catch(() => showLogin());

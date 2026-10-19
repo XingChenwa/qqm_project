@@ -1,8 +1,6 @@
 import 'dart:convert';
 import 'package:hive/hive.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import 'package:flutter/foundation.dart';
-import 'package:flutter/services.dart';
+import '../runtime/storage_platform.dart';
 import '../models/message.dart';
 import '../models/config.dart';
 import '../models/plugin.dart';
@@ -22,19 +20,11 @@ class StorageService {
   Future<void> init({void Function(String)? report}) async {
     try {
       await _initialize(report);
-    } on PlatformException catch (error, stack) {
-      if (kIsWeb ||
-          defaultTargetPlatform != TargetPlatform.android ||
-          !{'channel-error', 'missing-plugin'}.contains(error.code)) {
-        rethrow;
-      }
+    } catch (error, stack) {
+      if (!needsPreferenceRepair(error)) rethrow;
       report?.call('恢复 Android 偏好设置通道（保留本地数据）');
       try {
-        await const MethodChannel(
-          'cn.uuze.botmanager/runtime',
-        ).invokeMethod<bool>('repairPreferences');
-        final preferences = await SharedPreferences.getInstance();
-        await preferences.reload();
+        await repairPreferences();
       } catch (_) {
         Error.throwWithStackTrace(error, stack);
       }

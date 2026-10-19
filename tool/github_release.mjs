@@ -6,6 +6,7 @@ import {tmpdir} from 'node:os';
 import {repository, pagesUrl, websiteBranch, manifestName, base64, signingKeys, readVersion, sha256, assetDefinitions, signManifest, verifyManifest, releaseChannel, manifestChannel, versionPattern} from './github_release_core.mjs';
 import {mirrorRelease, uploadGitCodeFile} from './gitcode_release.mjs';
 import {syncWebsiteMetadata} from './github_site_sync.mjs';
+import {packageNames} from './package_names.mjs';
 
 const command = process.argv[2];
 const publicKey = process.env.UPDATE_PUBLIC_KEY ?? '';
@@ -116,6 +117,19 @@ try {
     }
     const windows=await json(join(packages,definitions.find(a=>a.platform==='windows').directory,'qqbotmanager-windows-v'+info.version+'-build'+info.build+'-build-info.json'));
     assert(windows.build===info.build&&windows.version===info.version&&windows.update_public_key===publicKey&&windows.update_server===pagesUrl,'Windows 包版本或更新配置不一致');
+    // Linux is a separately deployed web service, not a fifth client updater
+    // target. Keep the signed four-client format compatible with old clients.
+    const linuxNames = packageNames(info.version, info.build);
+    const linuxDirectory = join(packages, linuxNames.linux_artifact);
+    await mkdir(linuxDirectory, {recursive:true});
+    gh('run','download',process.env.GITHUB_RUN_ID,'--repo',repository,'--dir',linuxDirectory,'--name',linuxNames.linux_artifact);
+    const linuxPath = join(linuxDirectory, linuxNames.linux_file);
+    const linuxHash = sha256(await readFile(linuxPath));
+    const linuxChecksum = join(linuxDirectory, linuxNames.linux_checksum);
+    const checksumText = (await readFile(linuxChecksum,'utf8')).trim();
+    assert(checksumText === linuxHash+'  '+linuxNames.linux_file, 'Linux 服务包摘要不匹配');
+    files.push({file:linuxPath,name:linuxNames.linux_file,hash:linuxHash},
+      {file:linuxChecksum,name:linuxNames.linux_checksum,hash:sha256(await readFile(linuxChecksum))});
     let envelope=signManifest(data,secret,publicKey);
     const existingManifest=release.assets.find(a=>a.name===manifestName);
     if(existingManifest) {
@@ -138,7 +152,9 @@ try {
     }
     await syncAndBuildWebsite({data,envelope});
     if (process.env.GITCODE_TOKEN) {
-      await mirrorRelease({token:process.env.GITCODE_TOKEN,envelope,publicKey,files,uploader:uploadGitCodeFile,onProgress:message=>console.log(message)});
+      await mirrorRelease({token:process.env.GITCODE_TOKEN,envelope,publicKey,
+        files:files.filter(file=>file.name===manifestName||definitions.some(asset=>asset.name===file.name)),
+        uploader:uploadGitCodeFile,onProgress:message=>console.log(message)});
       console.log('GitCode 国内节点已同步并完成公共下载校验。');
     } else {
       console.warn('::warning::尚未配置 GITCODE_TOKEN，本次仅发布 GitHub 国际线路。');

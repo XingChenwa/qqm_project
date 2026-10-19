@@ -10,7 +10,7 @@ on:
         required: true
         default: all
         type: choice
-        options: [all, android, ios, macos, windows]
+        options: [all, android, ios, macos, windows, linux]
 
 permissions:
   contents: read
@@ -205,8 +205,48 @@ jobs:
           retention-days: 7
 
 
+  linux:
+    needs: preflight
+    if: github.event_name == 'release' || inputs.platform == 'all' || inputs.platform == 'linux'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: 准备含版本号的服务包名称
+        id: packages
+        run: node tool/package_names.mjs github-output
+      - name: 安装固定版本 Flutter / Dart SDK
+        run: |
+          git clone --depth 1 --branch "$FLUTTER_VERSION" https://github.com/flutter/flutter.git "$RUNNER_TEMP/flutter"
+          printf '%s/bin\n' "$RUNNER_TEMP/flutter" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/flutter/bin/flutter" --version
+      - run: flutter pub get
+      - name: 验证无桌面环境内核与网页登录安全
+        run: dart run tool/server_smoke.dart
+      - name: 安装固定版本浏览器测试工具
+        run: |
+          npm install --prefix "$RUNNER_TEMP/qqm-browser" --no-audit --no-fund --ignore-scripts playwright@1.62.1
+          node "$RUNNER_TEMP/qqm-browser/node_modules/playwright/cli.js" install --with-deps chromium --only-shell
+      - name: 验证电脑和手机网页的真实交互
+        run: node tool/tests/server_browser.mjs
+        env:
+          QQM_PLAYWRIGHT: ${{ runner.temp }}/qqm-browser/node_modules/playwright
+      - name: 在 Ubuntu 22.04 编译并验证服务包
+        run: bash scripts/build_linux_server.sh
+      - name: 保存 Linux 网页服务包
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ${{ steps.packages.outputs.linux_artifact }}
+          path: |
+            dist/${{ steps.packages.outputs.linux_file }}
+            dist/${{ steps.packages.outputs.linux_checksum }}
+          if-no-files-found: error
+          retention-days: 7
+
   publish:
-    needs: [preflight, android, ios, macos, windows]
+    needs: [preflight, android, ios, macos, windows, linux]
     if: github.event_name == 'release'
     runs-on: ubuntu-24.04
     timeout-minutes: 25
