@@ -488,7 +488,12 @@ class AppUpdateService extends ChangeNotifier {
       ),
     );
     await directory.create(recursive: true);
-    return File(p.join(directory.path, 'package.${selected.format}'));
+    final target = File(p.join(directory.path, selected.installerFileName));
+    final legacy = File(p.join(directory.path, 'package.${selected.format}'));
+    if (!await target.exists() && await validFile(legacy, selected)) {
+      await legacy.rename(target.path);
+    }
+    return target;
   }
 
   static Future<bool> validFile(File file, AppRelease selected) async {

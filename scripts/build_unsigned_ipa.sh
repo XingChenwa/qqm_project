@@ -33,6 +33,11 @@ cleanup() {
 trap cleanup EXIT
 mkdir -p "$package_dir/Payload" "$project_dir/dist"
 ditto "$app_path" "$package_dir/Payload/Runner.app"
-ditto -c -k --norsrc --keepParent "$package_dir/Payload" "$project_dir/dist/qq_bot_manager-unsigned.ipa"
-unzip -l "$project_dir/dist/qq_bot_manager-unsigned.ipa" | tail -n 3
-printf '%s\n' '已生成 dist/qq_bot_manager-unsigned.ipa。此包尚未签名，不能直接安装。'
+ipa="$project_dir/dist/$(node tool/package_names.mjs ios_file)"
+if [[ -e "$ipa" ]]; then
+  printf '%s\n' '安装包已存在，请使用干净的构建目录。' >&2
+  exit 1
+fi
+ditto -c -k --norsrc --keepParent "$package_dir/Payload" "$ipa"
+unzip -l "$ipa" | tail -n 3
+printf '已生成 %s。此包尚未签名，不能直接安装。\n' "$ipa"

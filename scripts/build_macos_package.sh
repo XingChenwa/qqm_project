@@ -28,8 +28,8 @@ codesign --verify --deep --strict "$app_path"
 test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app_path/Contents/Info.plist")" = cn.uuze.botmanager
 
 mkdir -p "$project_dir/dist"
-dmg="$project_dir/dist/qqbotmanager-macos-universal.dmg"
-archive="$project_dir/dist/qqbotmanager-macos-universal.zip"
+dmg="$project_dir/dist/$(node tool/package_names.mjs macos_file)"
+archive="$project_dir/dist/$(node tool/package_names.mjs macos_zip)"
 if [[ -e "$dmg" || -e "$archive" ]]; then
   printf '%s\n' '安装包已存在，请保留旧产物并使用干净的构建目录。' >&2
   exit 1

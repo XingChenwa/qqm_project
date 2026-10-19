@@ -75,10 +75,13 @@ export function verifyManifest(envelope, publicKey, minimumBuild = 0, channel) {
   return validateManifest(JSON.parse(bytes.toString('utf8')), minimumBuild, Date.now(), channel);
 }
 export function assetDefinitions(version, build) {
+  requireThat(typeof version === 'string' && version.length <= 80 && versionPattern.test(version) &&
+    Number.isSafeInteger(build) && build > 0 && build <= 2147483647, '安装包文件名版本或构建号无效');
+  const stamp = `v${version}-build${build}`;
   return [
-    {platform: 'windows', arch: 'x64', format: 'exe', name: `qqbotmanager-windows-v${version}-build${build}-setup.exe`, directory: 'windows-x64-packages'},
-    {platform: 'android', arch: 'universal', format: 'apk', name: 'app-release.apk', directory: 'android-release-apk'},
-    {platform: 'ios', arch: 'arm64', format: 'ipa', name: 'qq_bot_manager-unsigned.ipa', directory: 'ios-unsigned-ipa'},
-    {platform: 'macos', arch: 'universal', format: 'dmg', name: 'qqbotmanager-macos-universal.dmg', directory: 'macos-universal-packages'},
+    {platform: 'windows', arch: 'x64', format: 'exe', name: `qqbotmanager-windows-${stamp}-setup.exe`, directory: `windows-${stamp}-x64-packages`},
+    {platform: 'android', arch: 'universal', format: 'apk', name: `qqbotmanager-android-${stamp}.apk`, directory: `android-${stamp}-apk`},
+    {platform: 'ios', arch: 'arm64', format: 'ipa', name: `qqbotmanager-ios-${stamp}-unsigned.ipa`, directory: `ios-${stamp}-unsigned-ipa`},
+    {platform: 'macos', arch: 'universal', format: 'dmg', name: `qqbotmanager-macos-${stamp}-universal.dmg`, directory: `macos-${stamp}-universal-packages`},
   ];
 }

@@ -114,7 +114,7 @@ try {
         package_id:'cn.uuze.botmanager',size,sha256:hash,url:'https://github.com/'+repository+'/releases/download/'+info.tag+'/'+asset.name,notes,force_update:false});
       files.push({file,name:asset.name,hash});
     }
-    const windows=await json(join(packages,'windows-x64-packages','qqbotmanager-windows-v'+info.version+'-build'+info.build+'-build-info.json'));
+    const windows=await json(join(packages,definitions.find(a=>a.platform==='windows').directory,'qqbotmanager-windows-v'+info.version+'-build'+info.build+'-build-info.json'));
     assert(windows.build===info.build&&windows.version===info.version&&windows.update_public_key===publicKey&&windows.update_server===pagesUrl,'Windows 包版本或更新配置不一致');
     let envelope=signManifest(data,secret,publicKey);
     const existingManifest=release.assets.find(a=>a.name===manifestName);

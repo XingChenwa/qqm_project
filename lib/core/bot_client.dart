@@ -12,6 +12,7 @@ import '../services/oiapi_service.dart';
 import '../services/ip_whitelist_service.dart';
 import '../utils/profile_helpers.dart';
 import '../utils/helpers.dart';
+import '../utils/qq_mentions.dart';
 
 enum ConnectStep { idle, gettingToken, gettingGateway, connecting, done }
 
@@ -1319,6 +1320,7 @@ class BotClient extends ChangeNotifier {
     bool isGroup = false,
     MessageModel? replyTo,
   }) async {
+    message = message.withMarkdownMentions();
     final epoch = _accountEpoch;
     final error = message.validate(isGroup: isGroup);
     if (error != null) {
@@ -1482,6 +1484,14 @@ class BotClient extends ChangeNotifier {
     bool isGroup = false,
     MessageModel? replyTo,
   }) async {
+    if (containsQqUserMention(content)) {
+      return sendMarkdownMessage(
+        targetId,
+        content,
+        isGroup: isGroup,
+        replyTo: replyTo,
+      );
+    }
     final epoch = _accountEpoch;
     final token = await _prepareSend(targetId);
     if (token == null || _disposed || epoch != _accountEpoch) return false;

@@ -5,6 +5,7 @@ import 'package:flutter_markdown/flutter_markdown.dart';
 
 import '../screens/browser_screen.dart';
 import 'composer_keyboard.dart';
+import 'qq_mention_preview.dart';
 
 /// An independent Markdown draft, with a live preview that never sends messages.
 class MarkdownWorkbench extends StatefulWidget {
@@ -13,6 +14,7 @@ class MarkdownWorkbench extends StatefulWidget {
   final VoidCallback onSend;
   final bool sending;
   final bool templateMode;
+  final Map<String, String> mentionNames;
   const MarkdownWorkbench({
     super.key,
     required this.controller,
@@ -20,6 +22,7 @@ class MarkdownWorkbench extends StatefulWidget {
     required this.onSend,
     required this.sending,
     this.templateMode = false,
+    this.mentionNames = const {},
   });
 
   @override
@@ -85,27 +88,39 @@ class _MarkdownWorkbenchState extends State<MarkdownWorkbench> {
     valueListenable: widget.controller,
     builder: (context, value, _) => value.text.trim().isEmpty
         ? const Center(child: Text('预览会随编辑内容实时更新'))
-        : Markdown(
-            key: const ValueKey('markdown-live-preview'),
-            data: value.text,
-            selectable: true,
-            styleSheet: MarkdownStyleSheet.fromTheme(Theme.of(context))
-                .copyWith(
-                  code: const TextStyle(
-                    fontFamily: 'Consolas',
-                    fontFamilyFallback: [
-                      'Microsoft YaHei',
-                      'PingFang SC',
-                      'Noto Sans CJK SC',
-                      'sans-serif',
-                    ],
-                    fontSize: 13,
-                  ),
+        : KeyedSubtree(
+            key: ValueKey(
+              Object.hashAll(
+                widget.mentionNames.entries.map(
+                  (entry) => Object.hash(entry.key, entry.value),
                 ),
-            padding: const EdgeInsets.all(12),
-            onTapLink: (_, href, _) {
-              if (href != null) openInAppBrowser(context, href);
-            },
+              ),
+            ),
+            child: Markdown(
+              key: const ValueKey('markdown-live-preview'),
+              data: value.text,
+              inlineSyntaxes: [QqMentionPreviewSyntax(widget.mentionNames)],
+              blockSyntaxes: [QqMentionPreviewBlockSyntax()],
+              builders: {'qqmention': QqMentionPreviewBuilder()},
+              selectable: true,
+              styleSheet: MarkdownStyleSheet.fromTheme(Theme.of(context))
+                  .copyWith(
+                    code: const TextStyle(
+                      fontFamily: 'Consolas',
+                      fontFamilyFallback: [
+                        'Microsoft YaHei',
+                        'PingFang SC',
+                        'Noto Sans CJK SC',
+                        'sans-serif',
+                      ],
+                      fontSize: 13,
+                    ),
+                  ),
+              padding: const EdgeInsets.all(12),
+              onTapLink: (_, href, _) {
+                if (href != null) openInAppBrowser(context, href);
+              },
+            ),
           ),
   );
 

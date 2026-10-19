@@ -97,9 +97,9 @@
 
 ### @ 群成员
 
-文本或 Markdown 正文使用 `<qqbot-at-user id="成员OpenID" />`，不要继续使用将弃用的 `<@userid>`。群聊不支持 @ 全体；`<qqbot-at-everyone />` 仅文字子频道可用，本客户端不会在 QQ 群提供该入口。[官方文本交互说明](https://bot.q.qq.com/wiki/develop/api-v2/server-inter/message/trans/text-chain.html)
+本客户端的 @ 能力仅以 Markdown 发送，正文使用 `<qqbot-at-user id="成员OpenID" />`，不要继续使用将弃用的 `<@userid>`。群聊不支持 @ 全体；`<qqbot-at-everyone />` 仅文字子频道可用，本客户端不会在 QQ 群提供该入口。[官方文本交互说明](https://bot.q.qq.com/wiki/develop/api-v2/server-inter/message/trans/text-chain.html)
 
-例如规则回复 `{"format":"text","content":"<qqbot-at-user id=\"{{sender_id}}\" /> 收到你的指令了。"}`，配合 `"scope":"group"` 即可 @ 触发命令的成员。完整示例见 [群成员 @ 插件](../plugins/examples/group_mentions/plugin.json)。成员 OpenID 必须来自**当前 AppID**，不能用 QQ 号或另一机器人的 OpenID；HTTP 服务也应校验返回的 ID，不能将用户输入直接拼成标签。
+例如规则回复 `{"format":"markdown","content":"<qqbot-at-user id=\"{{sender_id}}\" /> 收到你的指令了。"}`，配合 `"scope":"group"` 即可 @ 触发命令的成员。完整示例见 [群成员 @ 插件](../plugins/examples/group_mentions/plugin.json)。成员 OpenID 必须来自**当前 AppID**，不能用 QQ 号或另一机器人的 OpenID；HTTP 服务也应校验返回的 ID，不能将用户输入直接拼成标签。
 
 切换机器人后，会话、头像／昵称缓存、回复序号和玩法数据按 AppID 隔离。尚未完成的旧机器人插件结果不会发到新机器人；Dart 插件内 `host.store` 固定使用本次执行开始时的 AppID，不会因异步等待后切换而写错归属。
 
@@ -216,6 +216,7 @@ class CounterPlugin extends BotPlugin {
 
 - `commands` 返回 `PluginCommand` 列表，动态帮助和插件卡片自动显示。`acceptsUnmentioned` 决定是否接收未 @ 全量消息，默认仅 `/`、`#` 命令；不能突破平台接收权限。
 - `PluginMessage` 还提供 senderRole、isFullGroupMessage、eventType、callbackData、attachments；回调通过 `execute` 或默认 `onInteraction` 处理。
+- `host.appId` 返回本次插件执行所属的 AppID（异步执行期间保持归属），不包含密钥或 Token。
 - `host.store.update` 串行原子读改写；按当前 AppID + 插件 ID 隔离，开发者再用会话/发送者组成键。必须使用 JSON 数据；整个插件最多 256 个数据键、512 KB。不放密钥，不在 action 内启动异步工作。
 - `host.store.read`、`snapshot` 读取；`clear` 清空。宿主在插件菜单提供数据导出/清理，清理需先停用。卸载不自动擦除玩法数据；应用“清除全部数据”会清除。
 - `executionTimeout` 默认 10 秒，启停 5 秒；异步操作自己取消和限时。超时不代表任意 Dart 工作能被强行中止。`onTick` 仅保留接口，目前无自动调度，不承诺定时推送。

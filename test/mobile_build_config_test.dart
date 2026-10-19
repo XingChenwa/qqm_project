@@ -117,8 +117,22 @@ void main() {
       iosSteps.any((s) => s['run'] == 'bash scripts/build_unsigned_ipa.sh'),
       isTrue,
     );
-    expect(androidSteps.last['with']['path'], endsWith('app-release.apk'));
-    expect(iosSteps.last['with']['path'], 'dist/qq_bot_manager-unsigned.ipa');
+    expect(
+      androidSteps.last['with']['path'],
+      r'dist/${{ steps.packages.outputs.android_file }}',
+    );
+    expect(
+      iosSteps.last['with']['path'],
+      r'dist/${{ steps.packages.outputs.ios_file }}',
+    );
+    expect(
+      androidSteps.any(
+        (s) =>
+            s['id'] == 'packages' &&
+            s['run'] == 'node tool/package_names.mjs github-output',
+      ),
+      true,
+    );
     expect(
       workflow['env']['UPDATE_PUBLIC_KEY'],
       contains('vars.UPDATE_PUBLIC_KEY'),

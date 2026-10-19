@@ -5,6 +5,7 @@ import '../utils/constants.dart';
 import '../models/outgoing_message.dart';
 import 'image_upload_service.dart';
 import 'ip_whitelist_service.dart';
+import '../utils/qq_mentions.dart';
 
 class ApiResult<T> {
   final T? data;
@@ -229,6 +230,7 @@ class ApiService {
     int? msgSeq,
     String? referenceId,
   }) async {
+    message = message.withMarkdownMentions();
     final error = message.validate(isGroup: isGroup);
     if (error != null) return ApiResult.failure(error);
     if ((msgId?.isNotEmpty ?? false) && (eventId?.isNotEmpty ?? false)) {
@@ -306,6 +308,17 @@ class ApiService {
     String? msgId,
     int? msgSeq,
   }) async {
+    if (containsQqUserMention(content)) {
+      return sendQQMarkdown(
+        baseUrl: baseUrl,
+        accessToken: accessToken,
+        targetId: targetId,
+        markdownContent: content,
+        isGroup: isGroup,
+        msgId: msgId,
+        msgSeq: msgSeq,
+      );
+    }
     if (content.trim().isEmpty) return ApiResult.failure('消息内容不能为空');
     try {
       final endpoint = isGroup

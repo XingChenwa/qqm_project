@@ -23,6 +23,29 @@ class AppRelease {
     this.forceUpdate = false,
   });
 
+  /// Derive a safe local name from verified metadata, never HTTP headers.
+  String get installerFileName {
+    if (version.length > 80 ||
+        !RegExp(r'^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$').hasMatch(version) ||
+        build < 1 ||
+        !(const {
+              'windows': {'exe', 'zip'},
+              'android': {'apk'},
+              'ios': {'ipa'},
+              'macos': {'dmg'},
+            }[platform]?.contains(format) ??
+            false)) {
+      throw const FormatException('安装包文件名参数无效');
+    }
+    final suffix = switch (platform) {
+      'windows' when format == 'exe' => '-setup',
+      'ios' => '-unsigned',
+      'macos' => '-universal',
+      _ => '',
+    };
+    return 'qqbotmanager-$platform-v$version-build$build$suffix.$format';
+  }
+
   static Future<AppRelease?> verifyEnvelope(
     Map<String, dynamic> envelope, {
     required String publicKey,

@@ -282,7 +282,10 @@ void main() {
     expect(updates.phase, UpdatePhase.available, reason: updates.error);
     await updates.download();
     expect(updates.phase, UpdatePhase.ready);
-    expect(updates.downloadedFile!.path, endsWith('package.exe'));
+    expect(
+      updates.downloadedFile!.path,
+      endsWith(updates.release!.installerFileName),
+    );
     expect(
       await AppUpdateService.validFile(
         updates.downloadedFile!,
@@ -382,6 +385,40 @@ void main() {
           .where((request) => request.uri.path.startsWith('/packages/'))
           .length,
       1,
+    );
+  });
+  test('旧 package 缓存校验后改为版本文件名，不重新下载或改写包内容', () async {
+    final directory = await Directory.systemTemp.createTemp(
+      'qqm-cache-name-test-',
+    );
+    addTearDown(() => directory.delete(recursive: true));
+    final selected = (await verify(await envelope(release())))!;
+    final cache = await Directory(
+      '${directory.path}/updates/${selected.build}-${selected.sha256.substring(0, 12)}',
+    ).create(recursive: true);
+    final legacy = File('${cache.path}/package.${selected.format}');
+    await legacy.writeAsBytes(package);
+    final adapter = UpdateAdapter(
+      (options) async => jsonResponse(
+        await envelope(
+          release(),
+          requestNonce: options.uri.queryParameters['nonce']!,
+        ),
+      ),
+    );
+    final updates = service(adapter, directory: directory);
+    await updates.check();
+    await updates.download();
+    expect(updates.phase, UpdatePhase.ready);
+    expect(
+      updates.downloadedFile!.path,
+      endsWith('qqbotmanager-windows-v1.3.2-build13.zip'),
+    );
+    expect(await updates.downloadedFile!.readAsBytes(), package);
+    expect(await legacy.exists(), false);
+    expect(
+      adapter.requests.where((r) => r.uri.path.startsWith('/packages/')),
+      isEmpty,
     );
   });
   test('下载篡改、过大或 HTTP 重定向均不能进入安装就绪', () async {

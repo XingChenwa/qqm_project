@@ -32,7 +32,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-      - run: node --test tool/tests/github_release.test.mjs tool/tests/github_site_sync.test.mjs tool/tests/gitcode_release.test.mjs
+      - run: node --test tool/tests/github_release.test.mjs tool/tests/github_site_sync.test.mjs tool/tests/gitcode_release.test.mjs tool/tests/package_names.test.mjs
       - name: 检查标签、构建号和更新密钥
         run: node tool/github_release.mjs preflight
         env:
@@ -48,6 +48,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
+      - name: 准备含版本号的安装包名称
+        id: packages
+        run: node tool/package_names.mjs github-output
       - name: 安装固定版本 Flutter
         shell: bash
         run: |
@@ -81,11 +84,13 @@ jobs:
       - name: 构建安卓 APK（固定签名，V1/V2/V3）
         run: |
           flutter build apk --release --no-pub --build-name="$(sed -nE 's/^version: ([0-9]+\.[0-9]+\.[0-9]+).*/\1/p' pubspec.yaml)" --dart-define="UPDATE_PUBLIC_KEY=$UPDATE_PUBLIC_KEY" --dart-define="UPDATE_BASE_URL=$UPDATE_BASE_URL" --dart-define="UPDATE_CHANNEL=$UPDATE_CHANNEL"
+          mkdir -p dist
+          cp -- build/app/outputs/flutter-apk/app-release.apk "dist/${{ steps.packages.outputs.android_file }}"
       - name: 保存 APK
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: android-release-apk
-          path: build/app/outputs/flutter-apk/app-release.apk
+          name: ${{ steps.packages.outputs.android_artifact }}
+          path: dist/${{ steps.packages.outputs.android_file }}
           if-no-files-found: error
           retention-days: 7
 
@@ -98,6 +103,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
+      - name: 准备含版本号的安装包名称
+        id: packages
+        run: node tool/package_names.mjs github-output
       - name: 安装固定版本 Flutter
         shell: bash
         run: |
@@ -113,10 +121,10 @@ jobs:
       - name: 保存 macOS 安装包（临时签名，未公证）
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: macos-universal-packages
+          name: ${{ steps.packages.outputs.macos_artifact }}
           path: |
-            dist/qqbotmanager-macos-universal.dmg
-            dist/qqbotmanager-macos-universal.zip
+            dist/${{ steps.packages.outputs.macos_file }}
+            dist/${{ steps.packages.outputs.macos_zip }}
           if-no-files-found: error
           retention-days: 7
 
@@ -129,6 +137,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
+      - name: 准备含版本号的安装包名称
+        id: packages
+        run: node tool/package_names.mjs github-output
       - name: 安装固定版本 Flutter
         shell: bash
         run: |
@@ -144,8 +155,8 @@ jobs:
       - name: 保存未签名 IPA（安装前必须重新签名）
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: ios-unsigned-ipa
-          path: dist/qq_bot_manager-unsigned.ipa
+          name: ${{ steps.packages.outputs.ios_artifact }}
+          path: dist/${{ steps.packages.outputs.ios_file }}
           if-no-files-found: error
           retention-days: 7
 
@@ -158,6 +169,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
+      - name: 准备含版本号的安装包名称
+        id: packages
+        run: node tool/package_names.mjs github-output
       - name: 安装固定版本 Flutter
         shell: pwsh
         run: |
@@ -182,7 +196,7 @@ jobs:
       - name: 保存 Windows 安装包
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: windows-x64-packages
+          name: ${{ steps.packages.outputs.windows_artifact }}
           path: |
             dist/qqbotmanager-windows-*.zip
             dist/qqbotmanager-windows-*-setup.exe

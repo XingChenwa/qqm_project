@@ -51,13 +51,12 @@ void main() {
               child: ChatInput(
                 isGroup: true,
                 mentionCandidates: const {'member-1': '离线测试用户'},
-                onSendText: (text) async {
-                  sent = text;
-                  return true;
-                },
+                onSendText: (_) async => throw StateError('@ 不应走纯文本'),
                 onSendMarkdown:
-                    (_, {useTemplate, templateId, templateParams}) async =>
-                        true,
+                    (text, {useTemplate, templateId, templateParams}) async {
+                      sent = text;
+                      return true;
+                    },
                 onSendImage: (_) async => true,
               ),
             ),
@@ -72,7 +71,9 @@ void main() {
       expect(sent, isNull);
       await tester.tap(find.text('离线测试用户'));
       await tester.pumpAndSettle();
-      final field = tester.widget<TextField>(find.byType(TextField));
+      final field = tester.widget<TextField>(
+        find.byKey(const ValueKey('markdown-editor')),
+      );
       expect(field.controller!.text, '<qqbot-at-user id="member-1" /> ');
       expect(sent, isNull);
       await tester.tap(find.byTooltip('发送'));

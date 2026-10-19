@@ -8,6 +8,7 @@ import 'package:image_picker/image_picker.dart';
 import '../../models/message.dart';
 import '../../models/outgoing_message.dart';
 import '../../utils/helpers.dart';
+import '../../utils/qq_mentions.dart';
 import '../themes/app_theme.dart';
 import 'message_settings_dialog.dart';
 import 'markdown_workbench.dart';
@@ -88,7 +89,9 @@ class _ChatInputState extends State<ChatInput> {
           widget.replyTo?.isFromBot == true);
 
   OutgoingMessage _request(String text) {
-    final type = _sendSettings.explicitType
+    final type = containsQqUserMention(text)
+        ? 2
+        : _sendSettings.explicitType
         ? _sendSettings.type
         : (_sendSettings.type == 7
               ? 7
@@ -149,6 +152,12 @@ class _ChatInputState extends State<ChatInput> {
       ),
     );
     if (result == null || !mounted) return;
+    if (_isMarkdownMode &&
+        containsQqUserMention(_markdownController.text) &&
+        result.type != 2) {
+      _showSendError('@ 群成员只能用 Markdown 发送，请先移除 @ 标签再更改消息类型。');
+      return;
+    }
     setState(() {
       if (!_isMarkdownMode &&
           result.type == 2 &&
@@ -175,7 +184,18 @@ class _ChatInputState extends State<ChatInput> {
       _showSendError('请输入有效的成员 OpenID，不能包含空格、引号或标签。');
       return;
     }
-    final draft = _activeController;
+    if (!_isMarkdownMode) {
+      if (_markdownController.text.isEmpty) {
+        _markdownController.value = _textController.value;
+      }
+    }
+    setState(() {
+      _isMarkdownMode = true;
+      _isTemplateMode = false;
+      _showTemplateEditor = false;
+      _sendSettings = _sendSettings.withType(2);
+    });
+    final draft = _markdownController;
     final selection = draft.selection;
     final start = selection.isValid ? selection.start : draft.text.length;
     final end = selection.isValid ? selection.end : start;
@@ -208,6 +228,10 @@ class _ChatInputState extends State<ChatInput> {
   Future<void> _sendMessage() async {
     final controller = _activeController;
     final text = controller.text;
+    if (!_isMarkdownMode && containsQqUserMention(text)) {
+      _showSendError('@ 群成员只能用 Markdown 发送，请先切换到 Markdown 工作区。');
+      return;
+    }
     if ((text.trim().isEmpty && !_isTemplateMode && _sendSettings.type != 7) ||
         _isSending) {
       return;
@@ -433,6 +457,15 @@ class _ChatInputState extends State<ChatInput> {
                             tooltip: '自定义 Markdown',
                             onPressed: () {
                               if (_isMarkdownMode &&
+                                  containsQqUserMention(
+                                    _markdownController.text,
+                                  )) {
+                                _showSendError(
+                                  '@ 群成员只能用 Markdown 发送，请先移除 @ 标签再切换为普通文本。',
+                                );
+                                return;
+                              }
+                              if (_isMarkdownMode &&
                                   (_sendSettings.options.keyboard != null ||
                                       _sendSettings.options.forceVerifyImage)) {
                                 _showSendError(
@@ -500,6 +533,7 @@ class _ChatInputState extends State<ChatInput> {
               const SizedBox(height: 8),
             if (_isMarkdownMode)
               MarkdownWorkbench(
+                mentionNames: widget.mentionCandidates,
                 controller: _markdownController,
                 focusNode: _focusNode,
                 sending: _isSending,

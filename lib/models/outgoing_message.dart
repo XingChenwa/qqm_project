@@ -1,3 +1,5 @@
+import '../utils/qq_mentions.dart';
+
 enum ReplyMode { automatic, active, message, event }
 
 class MessageComposerSettings {
@@ -250,7 +252,21 @@ class OutgoingMessage {
     this.options = const MessageSendOptions(),
   });
 
+  OutgoingMessage withMarkdownMentions() =>
+      type == 0 && containsQqUserMention(content)
+      ? OutgoingMessage(
+          type: 2,
+          content: content,
+          markdownTemplateId: markdownTemplateId,
+          templateParams: templateParams,
+          options: options,
+        )
+      : this;
+
   String? validate({required bool isGroup}) {
+    if (type != 2 && containsQqUserMention(content)) {
+      return '@ 群成员只能使用 Markdown 消息';
+    }
     final optionsError = options.validate(isGroup: isGroup);
     if (optionsError != null) return optionsError;
     if (![0, 2, 7].contains(type)) return '仅支持文本、Markdown 和富媒体消息';
