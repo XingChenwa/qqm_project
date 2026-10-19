@@ -4,7 +4,16 @@ for (const block of document.querySelectorAll('.code-example')) {
   button.type = 'button';
   button.className = 'copy-code';
   button.textContent = '复制代码';
-  block.querySelector('.code-heading').append(button);
+  let heading = block.querySelector('.code-heading');
+  if (!heading) {
+    heading = document.createElement('div');
+    heading.className = 'code-heading';
+    const title = document.createElement('span');
+    title.textContent = '终端命令';
+    heading.append(title);
+    block.prepend(heading);
+  }
+  heading.append(button);
   button.addEventListener('click', async () => {
     const status = document.querySelector('#copy-status');
     try {
