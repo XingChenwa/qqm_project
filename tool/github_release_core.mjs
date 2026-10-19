@@ -4,6 +4,9 @@ export const repository = 'XingChenwa/qqm_project';
 export const pagesUrl = 'https://xingchenwa.github.io/qqm_project';
 export const websiteBranch = 'docs';
 export const manifestName = 'update-manifest.json';
+export const versionPattern = /^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/;
+export const releaseChannel = release => release.prerelease === true ? 'beta' : 'stable';
+export const manifestChannel = data => data.channel ?? 'stable';
 const seedPrefix = Buffer.from('302e020100300506032b657004220420', 'hex');
 const publicPrefix = Buffer.from('302a300506032b6570032100', 'hex');
 export const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
@@ -23,8 +26,8 @@ export function signingKeys(secret, expectedPublicKey) {
   return {privateKey, publicBytes};
 }
 export function readVersion(pubspec, constants) {
-  const match = /^version:\s*(\d+\.\d+\.\d+)\+([1-9]\d*)\s*$/m.exec(pubspec);
-  requireThat(match && Number.isSafeInteger(Number(match[2])) && Number(match[2]) <= 2147483647, 'pubspec.yaml 必须包含 正式版本+递增构建号');
+  const match = /^version:\s*(\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?)\+([1-9]\d*)\s*$/m.exec(pubspec);
+  requireThat(match && Number.isSafeInteger(Number(match[2])) && Number(match[2]) <= 2147483647, 'pubspec.yaml 必须包含 版本+递增构建号');
   const version = match[1], build = Number(match[2]);
   requireThat(constants.includes(`appVersion = '${version}'`) && new RegExp(`appBuild\\s*=\\s*${build}\\s*;`).test(constants), 'AppConstants 与 pubspec.yaml 的版本不一致');
   return {version, build, tag: `v${version}`};
@@ -37,8 +40,10 @@ export function trustedAsset(value, tag) {
       /^[A-Za-z0-9][A-Za-z0-9._-]{0,180}$/.test(url.pathname.slice(`/${repository}/releases/download/${tag}/`.length));
   } catch { return false; }
 }
-export function validateManifest(data, minimumBuild = 0, now = Date.now()) {
-  requireThat(data?.schema === 2 && data.repository === repository && /^\d+\.\d+\.\d+$/.test(data.version) && data.tag === `v${data.version}`, '清单版本或仓库不匹配');
+export function validateManifest(data, minimumBuild = 0, now = Date.now(), channel) {
+  requireThat(data?.schema === 2 && data.repository === repository && versionPattern.test(data.version) && data.tag === `v${data.version}`, '清单版本或仓库不匹配');
+  requireThat(['stable', 'beta'].includes(manifestChannel(data)) && (!channel || manifestChannel(data) === channel) &&
+    (data.channel != null || !data.version.includes('-')), '更新渠道不匹配');
   requireThat(Number.isSafeInteger(data.build) && data.build > 0 && data.build <= 2147483647 && data.build >= minimumBuild, '构建号无效或回退');
   requireThat(Number.isSafeInteger(data.published_at) && data.published_at >= 1735689600 && data.published_at <= Math.floor(now / 1000) + 86400, '发布时间无效');
   requireThat(Array.isArray(data.releases) && data.releases.length === 4, '必须齐备四个平台的安装包');
@@ -62,12 +67,12 @@ export function signManifest(data, secret, publicKey) {
   requireThat(JSON.stringify(envelope).length <= 65536, '清单过大');
   return envelope;
 }
-export function verifyManifest(envelope, publicKey, minimumBuild = 0) {
+export function verifyManifest(envelope, publicKey, minimumBuild = 0, channel) {
   requireThat(envelope && JSON.stringify(envelope).length <= 65536, '清单过大或为空');
   const bytes = base64(envelope.payload, [Buffer.from(envelope.payload ?? '', 'base64').length]);
   const key = createPublicKey({key: Buffer.concat([publicPrefix, base64(publicKey, [32])]), type: 'spki', format: 'der'});
   requireThat(verify(null, bytes, key, base64(envelope.signature, [64])), '更新清单签名校验失败');
-  return validateManifest(JSON.parse(bytes.toString('utf8')), minimumBuild);
+  return validateManifest(JSON.parse(bytes.toString('utf8')), minimumBuild, Date.now(), channel);
 }
 export function assetDefinitions(version, build) {
   return [

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {generateKeyPairSync} from 'node:crypto';
 import {readFile} from 'node:fs/promises';
 import {join} from 'node:path';
-import {repository, readVersion, signingKeys, assetDefinitions, sha256, signManifest, verifyManifest, validateManifest, trustedAsset} from '../github_release_core.mjs';
+import {repository, readVersion, signingKeys, assetDefinitions, sha256, signManifest, verifyManifest, validateManifest, trustedAsset, releaseChannel, manifestChannel} from '../github_release_core.mjs';
 
 const keys = generateKeyPairSync('ed25519');
 const seed = keys.privateKey.export({type: 'pkcs8', format: 'der'}).subarray(-32);
@@ -43,7 +43,7 @@ test('拒绝缺平台、重复平台、跨仓库、恶意跳转、无效包身�
 test('清单体积限制及源码版本一致性', async () => {
   const data = fixture(); data.releases[0].notes = 'x'.repeat(4001); assert.throws(() => signManifest(data, secret, publicKey));
   const info = readVersion(await readFile('pubspec.yaml', 'utf8'), await readFile('lib/utils/constants.dart', 'utf8'));
-  assert.match(info.tag, /^v\d+\.\d+\.\d+$/);
+  assert.match(info.tag, /^v\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/);
   assert.throws(() => readVersion('version: 1.3.7+18', "appVersion = '1.3.7'; appBuild = 17;"));
 });
 test('GitHub 发布需要四端完成、签名并部署 Pages；手动构建不直接发布', async () => {
@@ -83,4 +83,19 @@ test('静态首页有原项目链接、Star、插件和四平台下载，无管�
   assert.equal((guide.match(/<h2 id="section-/g) ?? []).length, 9);
   assert.ok(guide.includes('HTTP 插件') && guide.includes('Dart SDK'));
   assert.ok(!guide.includes('href="../'));
+});
+test('Pre-release 标记决定渠道，Beta 与正式签名清单不能混用', () => {
+  const data=fixture();
+  data.channel='beta';
+  data.version='1.3.8-beta.1'; data.tag='v'+data.version; data.build=20;
+  data.releases=assetDefinitions(data.version,data.build).map(asset=>({
+    ...fixture().releases.find(r=>r.platform===asset.platform),version:data.version,build:data.build,
+    url:'https://github.com/'+repository+'/releases/download/'+data.tag+'/'+asset.name}));
+  const envelope=signManifest(data,secret,publicKey);
+  assert.equal(verifyManifest(envelope,publicKey,0,'beta').channel,'beta');
+  assert.throws(()=>verifyManifest(envelope,publicKey,0,'stable'),/渠道/);
+  assert.throws(()=>verifyManifest(signManifest(fixture(),secret,publicKey),publicKey,0,'beta'),/渠道/);
+  assert.equal(manifestChannel(fixture()),'stable');
+  assert.equal(releaseChannel({prerelease:true,tag_name:'v1.3.8'}),'beta');
+  assert.equal(releaseChannel({prerelease:false,tag_name:'v1.3.8-beta.1'}),'stable');
 });

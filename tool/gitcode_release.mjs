@@ -2,7 +2,9 @@
 // mirrored: never rebuild, re-sign, replace an existing attachment, or expose a
 // publisher token in the client. URLs returned by the service are allowlisted.
 import {readFile} from 'node:fs/promises';
-import {manifestName, verifyManifest, sha256} from './github_release_core.mjs';
+import {spawn} from 'node:child_process';
+import {fileURLToPath} from 'node:url';
+import {manifestName, verifyManifest, sha256, manifestChannel, versionPattern} from './github_release_core.mjs';
 
 export const gitCodeRepository = 'xiaoshutiaoya/QQm_project';
 const apiBase = `https://api.gitcode.com/api/v5/repos/${gitCodeRepository}/releases`;
@@ -29,7 +31,25 @@ async function bytes(response, maximum) {
   return Buffer.concat(chunks);
 }
 
-export async function mirrorRelease({token, envelope, publicKey, files, request = fetch, onProgress = () => {}}) {
+export async function uploadGitCodeFile(upload, content) {
+  requireThat(trustedMirrorUrl(upload.url, {upload: true}), 'GitCode 上传地址不可信');
+  await new Promise((resolve, reject) => {
+    const child = spawn(process.platform === 'win32' ? 'python' : 'python3',
+      [fileURLToPath(new URL('./gitcode_upload.py', import.meta.url))],
+      {stdio: ['pipe','pipe','pipe'], windowsHide: true});
+    let diagnostic = '';
+    child.stdout.resume();
+    child.stderr.on('data', chunk => { if (diagnostic.length < 500) diagnostic += chunk; });
+    child.on('error', () => reject(new Error('GitCode 上传辅助程序无法启动')));
+    child.stdin.on('error', () => {});
+    child.on('exit', code => code === 0 ? resolve() : reject(new Error(
+      'GitCode 附件上传失败：' + (diagnostic.match(/Upload (?:HTTP \d+|transport: [A-Za-z]+Error)/)?.[0] ?? '传输中断'))));
+    child.stdin.write(JSON.stringify({url:upload.url,headers:upload.headers,size:content.length})+'\n');
+    child.stdin.end(content);
+  });
+}
+
+export async function mirrorRelease({token, envelope, publicKey, files, request = fetch, uploader, onProgress = () => {}}) {
   requireThat(typeof token === 'string' && token.trim(), '缺少 GITCODE_TOKEN');
   const data = verifyManifest(envelope, publicKey);
   const expected = new Map(data.releases.map(release => [
@@ -66,7 +86,7 @@ export async function mirrorRelease({token, envelope, publicKey, files, request 
     return json;
   }
   async function publicAsset(name, maximum, tag = data.tag) {
-    requireThat(/^v\d+\.\d+\.\d+$/.test(tag), 'GitCode 标签无效');
+    requireThat(tag.startsWith('v') && versionPattern.test(tag.slice(1)), 'GitCode 标签无效');
     let url = new URL(`${apiBase}/${tag}/attach_files/${name}/download`);
     for (let hop = 0; hop < 6; hop++) {
       requireThat(trustedMirrorUrl(url), 'GitCode 下载跳转不可信');
@@ -82,11 +102,17 @@ export async function mirrorRelease({token, envelope, publicKey, files, request 
   }
 
   const latest = await api('/latest', {missing: true});
-  // GitCode's latest API can return an unfinished PRE release. A retry must be
-  // able to resume it even before the final signed manifest exists.
-  if (latest && latest.prerelease !== true && latest.release_status !== 'pre') {
-    const previous = verifyManifest(JSON.parse((await publicAsset(manifestName, 65536, latest.tag_name)).toString('utf8')), publicKey);
-    requireThat(previous.tag === latest.tag_name && data.build >= previous.build, '拒绝将 GitCode 最新版本回退');
+  // latest can refer to a Beta or unfinished PRE. Check every complete release
+  // in this channel before moving the mirror's published pointer.
+  const sameChannel = release =>
+    (release.prerelease === true || release.release_status === 'pre') === (manifestChannel(data) === 'beta');
+  const previousReleases = !latest ? [] : sameChannel(latest) ? [latest] :
+    await api('?per_page=100&direction=desc');
+  requireThat(Array.isArray(previousReleases), 'GitCode 版本列表格式无效');
+  for (const entry of previousReleases.filter(release => sameChannel(release) &&
+    release.assets?.some(asset => asset.type === 'attach' && asset.name === manifestName))) {
+    const previous = verifyManifest(JSON.parse((await publicAsset(manifestName, 65536, entry.tag_name)).toString('utf8')), publicKey,0,manifestChannel(data));
+    requireThat(previous.tag === entry.tag_name && data.build >= previous.build, '拒绝将 GitCode 最新版本回退');
     requireThat(previous.build !== data.build || previous.tag === data.tag,
       '同一构建号不可发布到不同版本标签');
   }
@@ -117,10 +143,13 @@ export async function mirrorRelease({token, envelope, publicKey, files, request 
       requireThat(trustedMirrorUrl(upload.url, {upload: true}), 'GitCode 上传地址不可信');
       requireThat(upload.headers && Object.keys(upload.headers).every(header =>
         /^x-obs-/i.test(header) || header.toLowerCase() === 'content-type'), 'GitCode 上传请求头不可信');
-      const uploaded = await request(upload.url, {method: 'PUT', headers: upload.headers,
-        body: file.content, redirect: 'manual', signal: AbortSignal.timeout(600000)});
-      requireThat(uploaded.ok, `GitCode 附件上传失败（HTTP ${uploaded.status}）`);
-      await uploaded.body?.cancel();
+      if (uploader) await uploader(upload, file.content);
+      else {
+        const uploaded = await request(upload.url, {method: 'PUT', headers: upload.headers,
+          body: file.content, redirect: 'manual', signal: AbortSignal.timeout(600000)});
+        requireThat(uploaded.ok, `GitCode 附件上传失败（HTTP ${uploaded.status}）`);
+        await uploaded.body?.cancel();
+      }
     }
     onProgress(`读回校验 GitCode 附件：${file.name}`);
     const remote = await publicAsset(file.name, file.content.length);
@@ -128,7 +157,7 @@ export async function mirrorRelease({token, envelope, publicKey, files, request 
       'GitCode 已有附件内容不同或上传校验失败；不会覆盖，请使用新版本');
   }
   await api('/' + data.tag, {method: 'PATCH', body: {
-    name: `QQ机器人管理器 ${data.tag}`, body, release_status: 'latest',
+    name: `QQ机器人管理器 ${data.tag}`, body, release_status: manifestChannel(data) === 'beta' ? 'pre' : 'latest',
   }});
   return data.tag;
 }

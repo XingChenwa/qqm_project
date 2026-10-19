@@ -19,10 +19,10 @@ env:
   FLUTTER_VERSION: '3.44.3'
   UPDATE_PUBLIC_KEY: ${{ vars.UPDATE_PUBLIC_KEY || 'EmpeSLtZms6Uz7D61o6E3gQzBytIPqsNU+dSq47M9ko=' }}
   UPDATE_BASE_URL: ${{ vars.UPDATE_BASE_URL || 'https://xingchenwa.github.io/qqm_project' }}
+  UPDATE_CHANNEL: ${{ github.event_name == 'release' && (github.event.release.prerelease && 'beta' || 'stable') || '' }}
 
 jobs:
   preflight:
-    if: github.event_name != 'release' || !github.event.release.prerelease
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -79,7 +79,8 @@ jobs:
           keyPassword=$ANDROID_KEYSTORE_PASSWORD
           EOF
       - name: 构建安卓 APK（固定签名，V1/V2/V3）
-        run: flutter build apk --release --no-pub --dart-define="UPDATE_PUBLIC_KEY=$UPDATE_PUBLIC_KEY" --dart-define="UPDATE_BASE_URL=$UPDATE_BASE_URL"
+        run: |
+          flutter build apk --release --no-pub --build-name="$(sed -nE 's/^version: ([0-9]+\.[0-9]+\.[0-9]+).*/\1/p' pubspec.yaml)" --dart-define="UPDATE_PUBLIC_KEY=$UPDATE_PUBLIC_KEY" --dart-define="UPDATE_BASE_URL=$UPDATE_BASE_URL" --dart-define="UPDATE_CHANNEL=$UPDATE_CHANNEL"
       - name: 保存 APK
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:

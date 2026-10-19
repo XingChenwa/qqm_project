@@ -15,6 +15,9 @@
 #ifndef AppIcon
   #error AppIcon is required.
 #endif
+#ifndef NativeVersion
+  #define NativeVersion AppVersion
+#endif
 #ifdef QaIdentity
   ; Test-only registry identity: never register tests as the user's real application.
   #define ProductIdentity "cn.uuze.botmanager.qa-" + QaIdentity
@@ -52,7 +55,7 @@ WizardStyle=modern
 CloseApplications=no
 RestartApplications=no
 SetupLogging=yes
-VersionInfoVersion={#AppVersion}.{#BuildNumber}
+VersionInfoVersion={#NativeVersion}.{#BuildNumber}
 
 [Languages]
 Name: "chinesesimplified"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"

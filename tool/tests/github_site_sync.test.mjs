@@ -82,3 +82,18 @@ test('docs 分支只包含静态网页，不携带工作流、源码或私密配
   const html=await readFile(join(process.env.WEBSITE_DIRECTORY,'index.html'),'utf8');
   assert.ok(html.includes('https://github.com/'+repository));
 });
+test('发布 Beta 只更新 Beta 清单，不改写正式安装包索引及清单',async t=>{
+  const f=await fixture(t),options={directory:f.checkout,publicKey,push:false};
+  await syncWebsiteMetadata({...options,selected:selected(18)});
+  const stable=await readFile(join(f.checkout,'updates','stable.json'),'utf8');
+  const index=await readFile(join(f.checkout,'releases.json'),'utf8');
+  const beta=selected(20); beta.data.channel='beta';
+  beta.envelope=signManifest(beta.data,secret,publicKey);
+  await syncWebsiteMetadata({...options,selected:beta});
+  assert.equal(await readFile(join(f.checkout,'updates','stable.json'),'utf8'),stable);
+  assert.equal(await readFile(join(f.checkout,'releases.json'),'utf8'),index);
+  assert.deepEqual(JSON.parse(await readFile(join(f.checkout,'updates','beta.json'),'utf8')),beta.envelope);
+  assert.deepEqual(JSON.parse(await readFile(join(f.checkout,'releases-beta.json'),'utf8')),beta.data);
+  await assert.rejects(syncWebsiteMetadata({...options,selected:beta,channel:'stable'}),/渠道/);
+  assert.equal(git(f.checkout,'status','--porcelain'),'');
+});

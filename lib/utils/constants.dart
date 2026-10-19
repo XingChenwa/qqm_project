@@ -1,7 +1,9 @@
 class AppConstants {
   static const String projectUrl = 'https://github.com/XingChenwa/qqm_project';
-  static const String appVersion = '1.3.8';
-  static const int appBuild = 19;
+  static const String appVersion = '1.3.8-beta.1';
+  static const int appBuild = 20;
+  // CI supplies the GitHub Pre-release flag; a source run follows its version.
+  static const String releaseChannel = String.fromEnvironment('UPDATE_CHANNEL');
   // QQ Bot API endpoints
   static const String qqBaseUrl = 'https://api.bot.qq.com';
   static const String qqTokenUrl = '$qqBaseUrl/app/getAppAccessToken';

@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'services/app_update_service.dart';
 import 'services/update_preferences.dart';
+import 'utils/constants.dart';
 import 'services/onboarding_preferences.dart';
 import 'services/desktop_window_controller.dart';
 import 'app.dart';
@@ -37,7 +38,17 @@ void main() async {
   // Initialize bot client
   final botClient = BotClient(storageService);
   final preferences = await SharedPreferences.getInstance();
-  final updates = AppUpdateService(UpdatePreferences(preferences));
+  final updates = AppUpdateService(
+    UpdatePreferences(
+      preferences,
+      defaultChannel:
+          (AppConstants.releaseChannel == 'beta' ||
+              (AppConstants.releaseChannel.isEmpty &&
+                  AppConstants.appVersion.contains('-')))
+          ? UpdateChannel.beta
+          : UpdateChannel.stable,
+    ),
+  );
   final onboarding = OnboardingPreferences(preferences);
 
   DesktopWindowController? desktopWindow;

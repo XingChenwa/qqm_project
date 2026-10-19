@@ -206,6 +206,8 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(find.text('自动优选'), findsOneWidget);
+      expect(find.text('正式版'), findsOneWidget);
+      expect(find.text('Beta 测试版'), findsOneWidget);
       expect(find.text('45 ms'), findsOneWidget);
       await captureUi(tester, 'updates-revision-${width.toInt()}');
       expect(tester.takeException(), isNull);

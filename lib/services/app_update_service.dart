@@ -16,6 +16,8 @@ import '../utils/constants.dart';
 import 'update_preferences.dart';
 import 'update_node.dart';
 export 'update_node.dart';
+import 'update_channel.dart';
+export 'update_channel.dart';
 
 enum UpdatePhase {
   idle,
@@ -60,6 +62,21 @@ class AppUpdateService extends ChangeNotifier {
   final Set<CancelToken> _probes = {};
   String get activeNodeLabel => activeNode?.label ?? preferences.node.label;
 
+  Future<void> setChannel(UpdateChannel channel) async {
+    if (busy || channel == preferences.channel) return;
+    await preferences.setChannel(channel);
+    activeNode = null;
+    release = null;
+    downloadedFile = null;
+    dismissedBuild = 0;
+    nodeStatuses.clear();
+    _nodeReleases.clear();
+    phase = UpdatePhase.idle;
+    error = '';
+    _changed();
+    await check();
+  }
+
   Future<void> setNode(UpdateNode node) async {
     if (busy) return;
     await preferences.setNode(node);
@@ -73,7 +90,7 @@ class AppUpdateService extends ChangeNotifier {
   }
 
   static Uri gitCodeAsset(String tag, String name) {
-    if (!RegExp(r'^v\d+\.\d+\.\d+$').hasMatch(tag) ||
+    if (!RegExp(r'^v\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$').hasMatch(tag) ||
         !RegExp(r'^[A-Za-z0-9][A-Za-z0-9._-]{0,180}$').hasMatch(name)) {
       throw const FormatException('GitCode 资源参数无效');
     }
@@ -209,10 +226,11 @@ class AppUpdateService extends ChangeNotifier {
     throw const FormatException('GitCode 资源跳转次数过多');
   }
 
-  Future<Map<String, dynamic>> _jsonUri(
+  Future<dynamic> _jsonValue(
     Uri uri, {
     bool gitcode = false,
     CancelToken? cancel,
+    int maximum = 65536,
   }) async {
     final response = await _staticResponse(
       uri,
@@ -223,16 +241,99 @@ class AppUpdateService extends ChangeNotifier {
     final body = response.data;
     if (body == null) throw const FormatException('接口响应为空');
     await for (final chunk in body.stream.timeout(const Duration(seconds: 8))) {
-      if (bytes.length + chunk.length > 65536) {
+      if (bytes.length + chunk.length > maximum) {
         throw const FormatException('接口响应过大');
       }
       bytes.add(chunk);
     }
     final decoded = jsonDecode(utf8.decode(bytes.takeBytes()));
-    if (decoded is! Map<String, dynamic>) {
+    return decoded;
+  }
+
+  Future<Map<String, dynamic>> _jsonUri(
+    Uri uri, {
+    bool gitcode = false,
+    CancelToken? cancel,
+  }) async {
+    final value = await _jsonValue(uri, gitcode: gitcode, cancel: cancel);
+    if (value is! Map<String, dynamic>) {
       throw const FormatException('接口没有返回有效清单');
     }
-    return decoded;
+    return value;
+  }
+
+  Future<AppRelease> _verifyStatic(Map<String, dynamic> envelope) async {
+    final found = await AppRelease.verifyGitHubEnvelope(
+      envelope,
+      publicKey: publicKey,
+      platform: platform,
+      arch: arch,
+      minimumBuild: preferences.highestGitHubBuild,
+      channel: preferences.channel,
+    );
+    if (found == null) throw const FormatException('清单缺少当前平台');
+    return found;
+  }
+
+  Future<AppRelease> _mirrorRelease(CancelToken cancel) async {
+    Future<AppRelease> candidate(Map<String, dynamic> release) async {
+      final tag = release['tag_name'];
+      final beta =
+          release['prerelease'] == true || release['release_status'] == 'pre';
+      if (tag is! String ||
+          beta != (preferences.channel == UpdateChannel.beta)) {
+        throw const FormatException('节点版本渠道不匹配');
+      }
+      final found = await _verifyStatic(
+        await _jsonUri(
+          gitCodeAsset(tag, 'update-manifest.json'),
+          gitcode: true,
+          cancel: cancel,
+        ),
+      );
+      if (tag != 'v${found.version}') {
+        throw const FormatException('节点版本与签名清单不一致');
+      }
+      return found;
+    }
+
+    // /latest may point to a Beta or an incomplete upload. Never let that
+    // hide the last complete stable release, or leak Beta into stable.
+    try {
+      return await candidate(
+        await _jsonUri(Uri.parse('$gitCodeApi/latest'), cancel: cancel),
+      );
+    } catch (_) {
+      if (cancel.isCancelled) rethrow;
+    }
+    final list = await _jsonValue(
+      gitCodeApi.replace(
+        queryParameters: {'per_page': '10', 'direction': 'desc'},
+      ),
+      cancel: cancel,
+      maximum: 262144,
+    );
+    if (list is! List) throw const FormatException('国内节点版本列表无效');
+    final candidates = list
+        .whereType<Map<String, dynamic>>()
+        .where(
+          (entry) =>
+              (entry['prerelease'] == true ||
+                  entry['release_status'] == 'pre') ==
+              (preferences.channel == UpdateChannel.beta),
+        )
+        .take(5);
+    AppRelease? newest;
+    for (final entry in candidates) {
+      try {
+        final found = await candidate(entry);
+        if (newest == null || found.build > newest.build) newest = found;
+      } catch (_) {
+        if (cancel.isCancelled) rethrow;
+      }
+    }
+    if (newest == null) throw const FormatException('国内节点尚无此渠道的完整签名版本');
+    return newest;
   }
 
   Future<Map<String, dynamic>> _json(
@@ -249,42 +350,14 @@ class AppUpdateService extends ChangeNotifier {
       () => cancel.cancel('probe timeout'),
     );
     try {
-      Map<String, dynamic> envelope;
-      String? mirrorTag;
-      if (node == UpdateNode.github) {
-        envelope = await _jsonUri(
-          _url('/qqm_project/updates/stable.json'),
-          cancel: cancel,
-        );
-      } else {
-        final latest = await _jsonUri(
-          Uri.parse('$gitCodeApi/latest'),
-          cancel: cancel,
-        );
-        final tag = latest['tag_name'];
-        if (latest['prerelease'] == true ||
-            tag is! String ||
-            !RegExp(r'^v\d+\.\d+\.\d+$').hasMatch(tag)) {
-          throw const FormatException('国内节点尚未发布正式版本');
-        }
-        mirrorTag = tag;
-        envelope = await _jsonUri(
-          gitCodeAsset(tag, 'update-manifest.json'),
-          gitcode: true,
-          cancel: cancel,
-        );
-      }
-      final found = await AppRelease.verifyGitHubEnvelope(
-        envelope,
-        publicKey: publicKey,
-        platform: platform,
-        arch: arch,
-        minimumBuild: preferences.highestGitHubBuild,
-      );
-      if (found == null ||
-          (mirrorTag != null && mirrorTag != 'v${found.version}')) {
-        throw const FormatException('节点版本与签名清单不一致');
-      }
+      final found = node == UpdateNode.github
+          ? await _verifyStatic(
+              await _jsonUri(
+                _url('/qqm_project/updates/${preferences.channel.name}.json'),
+                cancel: cancel,
+              ),
+            )
+          : await _mirrorRelease(cancel);
       if (_disposed) return;
       _nodeReleases[node] = found;
       nodeStatuses[node] = UpdateNodeStatus(

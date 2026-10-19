@@ -3,8 +3,8 @@ import {readFile, writeFile, mkdir, stat, mkdtemp} from 'node:fs/promises';
 import {execFileSync} from 'node:child_process';
 import {join, resolve} from 'node:path';
 import {tmpdir} from 'node:os';
-import {repository, pagesUrl, websiteBranch, manifestName, base64, signingKeys, readVersion, sha256, assetDefinitions, signManifest, verifyManifest} from './github_release_core.mjs';
-import {mirrorRelease} from './gitcode_release.mjs';
+import {repository, pagesUrl, websiteBranch, manifestName, base64, signingKeys, readVersion, sha256, assetDefinitions, signManifest, verifyManifest, releaseChannel, manifestChannel, versionPattern} from './github_release_core.mjs';
+import {mirrorRelease, uploadGitCodeFile} from './gitcode_release.mjs';
 import {syncWebsiteMetadata} from './github_site_sync.mjs';
 
 const command = process.argv[2];
@@ -41,14 +41,14 @@ async function publicFetch(url,maximum=65536) {
   throw new Error('资源跳转次数过多');
 }
 
-async function newestSignedRelease() {
+async function newestSignedRelease(channel = 'stable') {
   const releases = await publicFetch('https://api.github.com/repos/'+repository+'/releases?per_page=100',4*1024*1024);
   assert(Array.isArray(releases),'版本列表格式无效');
   let newest=null;
-  for (const release of releases.filter(r=>!r.draft&&!r.prerelease&&Array.isArray(r.assets)&&r.assets.some(a=>a.name===manifestName))) {
-    assert(/^v\d+\.\d+\.\d+$/.test(release.tag_name),'版本标签无效');
+  for (const release of releases.filter(r=>!r.draft&&releaseChannel(r)===channel&&Array.isArray(r.assets)&&r.assets.some(a=>a.name===manifestName))) {
+    assert(versionPattern.test(release.tag_name?.slice(1)) && release.tag_name.startsWith('v'),'版本标签无效');
     const envelope = await publicFetch('https://github.com/'+repository+'/releases/download/'+release.tag_name+'/'+manifestName);
-    const data = verifyManifest(envelope,publicKey);
+    const data = verifyManifest(envelope,publicKey,0,channel);
     assert(data.tag === release.tag_name,'Release 标签与签名清单不匹配');
     assert(data.releases.every(r=>release.assets.some(a=>a.name===new URL(r.url).pathname.split('/').at(-1)&&a.size===r.size)),'已签名 Release 的安装包缺失或大小变化');
     if (newest?.data.build===data.build) assert(newest.envelope.payload===envelope.payload,'同一构建号存在不同清单');
@@ -57,9 +57,9 @@ async function newestSignedRelease() {
   return newest;
 }
 
-async function syncAndBuildWebsite(selected) {
+async function syncAndBuildWebsite(selected, channel = selected ? manifestChannel(selected.data) : 'stable') {
   assert(process.env.WEBSITE_DIRECTORY,'缺少 docs 分支 checkout');
-  await syncWebsiteMetadata({directory:process.env.WEBSITE_DIRECTORY,publicKey,selected});
+  await syncWebsiteMetadata({directory:process.env.WEBSITE_DIRECTORY,publicKey,selected,channel});
   // GITHUB_TOKEN pushes do not trigger Pages. Explicitly request a branch build.
   const pages = api('pages');
   assert(pages.build_type==='legacy' && pages.source?.branch===websiteBranch && pages.source?.path==='/',
@@ -69,7 +69,7 @@ async function syncAndBuildWebsite(selected) {
 }
 
 function releaseMatches(release,info) {
-  assert(release && !release.draft && !release.prerelease && release.tag_name===info.tag,'正式 Release 标签必须与源码版本一致');
+  assert(release && !release.draft && release.tag_name===info.tag,'Release 标签必须与源码版本一致');
   assert(!release.immutable,'此流程需在构建后上传附件；请勿对该版本启用 Release 不可变锁定');
 }
 
@@ -82,11 +82,12 @@ try {
     if(process.env.GITHUB_EVENT_NAME==='release') {
       const {release}=await json(process.env.GITHUB_EVENT_PATH);releaseMatches(release,info);
       assert(!api('').private,'公开下载需要先由仓库所有者将项目设为公开；流程不会自动改变可见性');
-      releaseMatches(api('releases/'+release.id),info);
+      const live = api('releases/'+release.id); releaseMatches(live,info);
+      assert(releaseChannel(live)===releaseChannel(release),'构建时 Release 渠道发生变化，请重新发布');
       assert(secret,'请先配置 UPDATE_SIGNING_PRIVATE_KEY，不要把私钥发到聊天');signingKeys(secret,publicKey);
       const pages=api('pages');
       assert(pages.build_type==='legacy'&&pages.source?.branch===websiteBranch&&pages.source?.path==='/', '请先配置 Pages 从 docs 分支根目录发布');
-      const previous=await newestSignedRelease();
+      const previous=await newestSignedRelease(releaseChannel(release));
       assert(!previous||info.build>previous.data.build||(info.build===previous.data.build&&info.tag===previous.data.tag),'构建号必须递增');
     }
     console.log('版本 '+info.version+' ('+info.build+') 校验通过，未输出私钥或令牌。');
@@ -95,14 +96,15 @@ try {
     const info=readVersion(await readFile('pubspec.yaml','utf8'),await readFile('lib/utils/constants.dart','utf8'));
     const {release:eventRelease}=await json(process.env.GITHUB_EVENT_PATH);releaseMatches(eventRelease,info);
     const release=api('releases/'+eventRelease.id);releaseMatches(release,info);
+    assert(releaseChannel(release)===releaseChannel(eventRelease),'构建时 Release 渠道发生变化，拒绝混用安装包');
     signingKeys(secret,publicKey);
-    const previous=await newestSignedRelease();
+    const previous=await newestSignedRelease(releaseChannel(release));
     assert(!previous||info.build>previous.data.build||(info.build===previous.data.build&&info.tag===previous.data.tag),'拒绝发布更低版本或重复构建号');
     const packages=resolve('build/release-packages');await mkdir(packages,{recursive:true});
     const definitions=assetDefinitions(info.version,info.build);
     gh('run','download',process.env.GITHUB_RUN_ID,'--repo',repository,'--dir',packages,...definitions.flatMap(a=>['--name',a.directory]));
     const notes=(eventRelease.body??'').slice(0,2000);
-    const data={schema:2,repository,tag:info.tag,version:info.version,build:info.build,
+    const data={schema:2,repository,tag:info.tag,version:info.version,build:info.build,channel:releaseChannel(release),
       published_at:Math.floor(Date.parse(eventRelease.published_at)/1000),releases:[]};
     const files=[];
     for(const asset of definitions) {
@@ -136,14 +138,17 @@ try {
     }
     await syncAndBuildWebsite({data,envelope});
     if (process.env.GITCODE_TOKEN) {
-      await mirrorRelease({token:process.env.GITCODE_TOKEN,envelope,publicKey,files,onProgress:message=>console.log(message)});
+      await mirrorRelease({token:process.env.GITCODE_TOKEN,envelope,publicKey,files,uploader:uploadGitCodeFile,onProgress:message=>console.log(message)});
       console.log('GitCode 国内节点已同步并完成公共下载校验。');
     } else {
       console.warn('::warning::尚未配置 GITCODE_TOKEN，本次仅发布 GitHub 国际线路。');
     }
     console.log('四端安装包与签名清单已发布到 '+repository+' '+info.tag+'。');
   } else if(command==='pages') {
-    await syncAndBuildWebsite(await newestSignedRelease());
+    for (const channel of ['stable','beta']) {
+      const selected=await newestSignedRelease(channel);
+      if (selected || channel==='stable') await syncAndBuildWebsite(selected,channel);
+    }
   } else throw new Error('用法：node tool/github_release.mjs preflight|publish|pages');
 } catch(error) {
   console.error('GitHub 发布未完成：'+(error instanceof Error?error.message.split('\n')[0]:'未知错误'));

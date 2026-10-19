@@ -17,7 +17,8 @@ if [[ -n "${UPDATE_PUBLIC_KEY:-}" ]]; then
   update_args+=("--dart-define=UPDATE_PUBLIC_KEY=$UPDATE_PUBLIC_KEY")
   update_args+=("--dart-define=UPDATE_BASE_URL=${UPDATE_BASE_URL:-https://xingchenwa.github.io/qqm_project}")
 fi
-flutter build ios --release --no-codesign --no-pub "${update_args[@]}"
+update_args+=("--dart-define=UPDATE_CHANNEL=${UPDATE_CHANNEL:-}")
+flutter build ios --release --no-codesign --no-pub --build-name="$(sed -nE 's/^version: ([0-9]+\.[0-9]+\.[0-9]+).*/\1/p' pubspec.yaml)" "${update_args[@]}"
 app_path="$project_dir/build/ios/iphoneos/Runner.app"
 test -f "$app_path/Runner"
 lipo -archs "$app_path/Runner" | grep -q arm64

@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:cryptography/cryptography.dart';
+import '../services/update_channel.dart';
 
 class AppRelease {
   static const repository = 'XingChenwa/qqm_project';
@@ -60,6 +61,7 @@ class AppRelease {
     required String platform,
     required String arch,
     int minimumBuild = 0,
+    UpdateChannel channel = UpdateChannel.stable,
     DateTime? now,
   }) async {
     final data = await _verifiedPayload(envelope, publicKey);
@@ -71,8 +73,10 @@ class AppRelease {
     final seconds = (now ?? DateTime.now()).millisecondsSinceEpoch ~/ 1000;
     if (data['schema'] != 2 ||
         data['repository'] != repository ||
+        (data['channel'] ?? 'stable') != channel.name ||
         version is! String ||
-        !RegExp(r'^\d+\.\d+\.\d+$').hasMatch(version) ||
+        !RegExp(r'^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$').hasMatch(version) ||
+        (data['channel'] == null && version.contains('-')) ||
         tag != 'v$version' ||
         build is! int ||
         build < 1 ||

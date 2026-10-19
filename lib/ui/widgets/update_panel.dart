@@ -98,6 +98,33 @@ class _UpdateNodeCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          const Text(
+            '更新渠道',
+            style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16),
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final channel in UpdateChannel.values)
+                ChoiceChip(
+                  label: Text(channel.label),
+                  selected: updates.preferences.channel == channel,
+                  onSelected: updates.busy
+                      ? null
+                      : (_) => updates.setChannel(channel),
+                ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            updates.preferences.channel == UpdateChannel.beta
+                ? '仅接收 GitHub 标记为 Pre-release 的测试更新，可能包含尚未稳定的功能。'
+                : '仅接收正式更新，不推送 Beta。切换渠道不会自动降级安装。',
+            style: const TextStyle(fontSize: 12, height: 1.5),
+          ),
+          const Divider(height: 28),
           Row(
             children: [
               const Icon(Icons.alt_route_rounded, size: 22),

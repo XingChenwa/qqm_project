@@ -285,11 +285,12 @@ void main() {
             request.data == null &&
             (request.uri.path.endsWith('/updates/stable.json') ||
                 request.uri ==
-                    Uri.parse('${AppUpdateService.gitCodeApi}/latest')),
+                    Uri.parse('${AppUpdateService.gitCodeApi}/latest') ||
+                request.uri.path.endsWith('/releases')),
       ),
       isTrue,
     );
-    expect(adapter.requests.length, 2);
+    expect(adapter.requests.length, 3);
   });
 
   for (final mode in [UpdateNode.auto, UpdateNode.github, UpdateNode.gitcode]) {
@@ -480,6 +481,102 @@ void main() {
     expect(
       adapter.requests.every((r) => !r.headers.containsKey('Authorization')),
       isTrue,
+    );
+  });
+
+  test('Beta 与正式签名互斥；旧版没有 channel 的清单只属于正式', () async {
+    final beta = manifest(build: 20)..['channel'] = 'beta';
+    final envelope = await sign(beta);
+    await expectLater(verify(envelope), throwsFormatException);
+    expect(
+      (await AppRelease.verifyGitHubEnvelope(
+        envelope,
+        publicKey: publicKey,
+        platform: 'windows',
+        arch: 'x64',
+        channel: UpdateChannel.beta,
+      ))!.build,
+      20,
+    );
+    await expectLater(
+      AppRelease.verifyGitHubEnvelope(
+        await sign(manifest()),
+        publicKey: publicKey,
+        platform: 'windows',
+        arch: 'x64',
+        channel: UpdateChannel.beta,
+      ),
+      throwsFormatException,
+    );
+  });
+  test('渠道选择和防回退记录相互独立，显式选择覆盖构建默认值', () async {
+    await preferences.rememberGitHubBuild(19);
+    final betaDefault = UpdatePreferences(
+      preferences.preferences,
+      defaultChannel: UpdateChannel.beta,
+    );
+    expect(betaDefault.channel, UpdateChannel.beta);
+    expect(betaDefault.highestGitHubBuild, 0);
+    await preferences.setChannel(UpdateChannel.beta);
+    await preferences.rememberGitHubBuild(25);
+    expect(UpdatePreferences(preferences.preferences).highestGitHubBuild, 25);
+    await preferences.setChannel(UpdateChannel.stable);
+    expect(preferences.highestGitHubBuild, 19);
+    expect(betaDefault.channel, UpdateChannel.stable);
+  });
+  test('Beta 清单路径和切换后正式防回退互不影响', () async {
+    final beta = await sign(manifest(build: 25)..['channel'] = 'beta');
+    final stable = await sign(manifest(build: 19));
+    final adapter = UpdateAdapter((request) async {
+      if (request.uri.host == 'api.gitcode.com') {
+        return ResponseBody.fromString('', 503);
+      }
+      return ResponseBody.fromString(
+        jsonEncode(request.uri.path.endsWith('beta.json') ? beta : stable),
+        200,
+      );
+    });
+    final updates = service(adapter);
+    await updates.setChannel(UpdateChannel.beta);
+    expect(updates.release!.build, 25);
+    expect(preferences.highestGitHubBuild, 25);
+    expect(
+      adapter.requests.any((r) => r.uri.path.endsWith('/updates/beta.json')),
+      isTrue,
+    );
+    await updates.setChannel(UpdateChannel.stable);
+    expect(updates.release!.build, 19);
+    expect(preferences.highestGitHubBuild, 19);
+  });
+  test('GitCode latest 指向 Beta 时，正式渠道从列表选择完整正式清单', () async {
+    final envelope = await sign(manifest());
+    final adapter = UpdateAdapter((request) async {
+      if (request.uri.host == 'xingchenwa.github.io') {
+        return ResponseBody.fromString('', 503);
+      }
+      if (request.uri.path.endsWith('/latest')) {
+        return ResponseBody.fromString(
+          '{"tag_name":"v1.3.8-beta.1","prerelease":true}',
+          200,
+        );
+      }
+      if (request.uri.path.endsWith('/releases')) {
+        return ResponseBody.fromString(
+          '[{"tag_name":"v1.3.8-beta.1","prerelease":true},{"tag_name":"v1.3.7","prerelease":false}]',
+          200,
+        );
+      }
+      return ResponseBody.fromString(jsonEncode(envelope), 200);
+    });
+    final updates = service(adapter);
+    await updates.check();
+    expect(updates.activeNode, UpdateNode.gitcode);
+    expect(updates.release!.build, 18);
+    expect(
+      adapter.requests.any(
+        (r) => r.uri.path.contains('v1.3.8-beta.1/attach_files'),
+      ),
+      isFalse,
     );
   });
   test('GitHub Actions YAML 可解析，发布任务受四端依赖与 Pages 权限保护', () {

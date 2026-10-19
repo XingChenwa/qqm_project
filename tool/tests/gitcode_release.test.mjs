@@ -29,11 +29,11 @@ test('GitCode 上传和公共下载分别限定主机，拒绝 HTTP / 私网 / �
   }
 });
 
-async function fixture(t, {corrupt = false, redirect = false, badUpload = false} = {}) {
+async function fixture(t, {corrupt = false, redirect = false, badUpload = false, releaseData = data} = {}) {
   const directory = await mkdtemp(join(tmpdir(), 'qqm-gitcode-unit-'));
   t.after(() => rm(directory, {recursive: true}));
   const files = [];
-  for (const asset of assetDefinitions('1.3.8', 19)) {
+  for (const asset of assetDefinitions(releaseData.version, releaseData.build)) {
     const file = join(directory, asset.name);
     await writeFile(file, content); files.push({file, name: asset.name});
   }
@@ -59,12 +59,12 @@ async function fixture(t, {corrupt = false, redirect = false, badUpload = false}
     }
     if (options.method === 'PATCH') {
       assert.equal(uploaded.size, 5);
-      assert.equal(JSON.parse(options.body).release_status, 'latest');
+      assert.equal(JSON.parse(options.body).release_status, releaseData.channel === 'beta' ? 'pre' : 'latest');
       return json({});
     }
     if (options.method === 'POST') {
       assert.equal(JSON.parse(options.body).release_status, 'pre');
-      return json({tag_name: 'v1.3.8', assets: []});
+      return json({tag_name: releaseData.tag, assets: []});
     }
     if (url.pathname.endsWith('/upload_url')) {
       return json({url: `https://${badUpload ? 'evil.invalid' : 'file.gitcode.com'}/${url.searchParams.get('file_name')}`,
@@ -109,4 +109,11 @@ test('缺令牌、源包不匹配或签名错误时不会开始网络发布', as
   await writeFile(state.files[0].file, 'tampered local package');
   await assert.rejects(mirrorRelease({token: 'test-publisher-token', envelope, publicKey, ...state}));
   assert.equal(state.calls.length, 0);
+});
+test('完整 Beta 镜像读回后仍为 PRE，不占用正式 latest',async t=>{
+  const beta=structuredClone(data);beta.channel='beta';
+  const state=await fixture(t,{releaseData:beta});
+  await mirrorRelease({token:'test-publisher-token',envelope:signManifest(beta,secret,publicKey),publicKey,...state});
+  assert.equal(state.uploaded.size,5);
+  assert.equal(JSON.parse(state.calls.at(-1).options.body).release_status,'pre');
 });

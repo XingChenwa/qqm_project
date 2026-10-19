@@ -404,12 +404,20 @@ class _MainScreenState extends State<MainScreen> {
                         : Icons.dark_mode_rounded,
                   ),
                 ),
-                const Spacer(),
-                Text(
-                  'v${AppConstants.appVersion}',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: Theme.of(context).hintColor,
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Tooltip(
+                    message: 'v${AppConstants.appVersion}',
+                    child: Text(
+                      'v${AppConstants.appVersion}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.end,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Theme.of(context).hintColor,
+                      ),
+                    ),
                   ),
                 ),
               ],

@@ -17,8 +17,9 @@ if ($Installer) {
   if (-not (Test-Path -LiteralPath (Join-Path $compilerDirectory 'Languages\ChineseSimplified.isl'))) { throw 'Simplified Chinese language file missing. Run tool/prepare_inno.ps1 and pass its ISCC path.' }
 }
 $versionText = Get-Content -LiteralPath (Join-Path $workspace 'pubspec.yaml') -Raw
-if ($versionText -notmatch '(?m)^version:\s*(\d+\.\d+\.\d+)\+(\d+)\s*$') { throw 'Cannot read the release version.' }
+if ($versionText -notmatch '(?m)^version:\s*(\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?)\+(\d+)\s*$') { throw 'Cannot read the release version.' }
 $version = $Matches[1]; $buildNumber = $Matches[2]
+$nativeVersion = $version.Split('-')[0]
 $dist = Join-Path $workspace 'dist'
 $output = Join-Path $dist ("qqbotmanager-windows-v$version-build$buildNumber.zip")
 $setup = Join-Path $dist ("qqbotmanager-windows-v$version-build$buildNumber-setup.exe")
@@ -27,7 +28,7 @@ if ((Test-Path -LiteralPath $output) -or (Test-Path -LiteralPath $buildInfo) -or
 Push-Location $workspace
 try {
   # Explicit production entrypoint: never accidentally package the native smoke-test app.
-  & $Flutter build windows --release --target=lib/main.dart "--dart-define=UPDATE_BASE_URL=$UpdateBaseUrl" "--dart-define=UPDATE_PUBLIC_KEY=$UpdatePublicKey"
+  & $Flutter build windows --release --target=lib/main.dart "--dart-define=UPDATE_BASE_URL=$UpdateBaseUrl" "--dart-define=UPDATE_PUBLIC_KEY=$UpdatePublicKey" "--dart-define=UPDATE_CHANNEL=$env:UPDATE_CHANNEL"
   if ($LASTEXITCODE -ne 0) { throw 'Flutter build failed.' }
   $source = [IO.Path]::GetFullPath((Join-Path $workspace 'build\windows\x64\runner\Release'))
   $stage = Join-Path $workspace ('build\windows-package-' + [Guid]::NewGuid().ToString('N'))
@@ -59,7 +60,7 @@ try {
   Get-FileHash -LiteralPath $output -Algorithm SHA256
   if ($Installer) {
     $icon = Join-Path $workspace 'windows\runner\resources\app_icon.ico'
-    & $Iscc "/DAppFiles=$stage" "/DAppOutput=$dist" "/DAppVersion=$version" "/DBuildNumber=$buildNumber" "/DAppIcon=$icon" (Join-Path $workspace 'scripts\windows-installer.iss')
+    & $Iscc "/DAppFiles=$stage" "/DAppOutput=$dist" "/DAppVersion=$version" "/DNativeVersion=$nativeVersion" "/DBuildNumber=$buildNumber" "/DAppIcon=$icon" (Join-Path $workspace 'scripts\windows-installer.iss')
     if ($LASTEXITCODE -ne 0) { throw 'Installer compilation failed; ZIP remains available.' }
     Get-FileHash -LiteralPath $setup -Algorithm SHA256
   }
