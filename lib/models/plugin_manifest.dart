@@ -276,7 +276,13 @@ class PluginManifest {
           raw['label'] is! String ||
           (raw['label'] as String).trim().isEmpty ||
           (raw['label'] as String).length > 80 ||
-          !['string', 'secret', 'boolean', 'integer'].contains(raw['type'])) {
+          ![
+            'string',
+            'multiline',
+            'secret',
+            'boolean',
+            'integer',
+          ].contains(raw['type'])) {
         invalid('config_schema 包含无效或重复的配置项。');
       }
       if (raw['required'] != null && raw['required'] is! bool) {

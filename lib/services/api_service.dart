@@ -4,6 +4,7 @@ import 'package:dio/dio.dart';
 import '../utils/constants.dart';
 import '../models/outgoing_message.dart';
 import 'image_upload_service.dart';
+import 'ip_whitelist_service.dart';
 
 class ApiResult<T> {
   final T? data;
@@ -424,6 +425,7 @@ class ApiService {
           statusCode: mediaResult.statusCode,
           errorCode: mediaResult.errorCode,
           traceId: mediaResult.traceId,
+          metadata: mediaResult.metadata,
         );
       }
 
@@ -582,8 +584,9 @@ class ApiService {
 
   // --- helpers ---
 
-  int? _businessCode(dynamic data) =>
-      data is Map ? int.tryParse(data['code']?.toString() ?? '') : null;
+  int? _businessCode(dynamic data) => data is Map
+      ? int.tryParse((data['err_code'] ?? data['code'])?.toString() ?? '')
+      : null;
 
   bool _isSuccessfulResponse(Response response) {
     final status = response.statusCode ?? 0;
@@ -595,7 +598,8 @@ class ApiService {
     final code = _businessCode(response.data);
     final traceId =
         response.headers.value('x-tps-trace-id') ??
-        response.headers.value('x-trace-id');
+        response.headers.value('x-trace-id') ??
+        (response.data is Map ? response.data['trace_id']?.toString() : null);
     final hint = switch (code) {
       11253 => '应用无资料查询权限，该接口需要 QQ 平台白名单授权',
       100007 || 10004 => 'AppID 无效或机器人不存在，请检查开放平台配置',
@@ -639,6 +643,7 @@ class ApiService {
       statusCode: response.statusCode,
       errorCode: code,
       traceId: traceId,
+      metadata: {'sourceIp': reportedSourceIp(response.data)},
     );
   }
 

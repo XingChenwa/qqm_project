@@ -1,3 +1,4 @@
+import 'utils/platforms.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:provider/provider.dart';
@@ -116,11 +117,17 @@ class _QQBotManagerAppState extends State<QQBotManagerApp> {
           _desktopWindow = desktop;
           desktop?.confirmClose = _confirmWindowClose;
         }
-        final content = UpdateNotice(
+        Widget content = UpdateNotice(
           enabled: !_showOnboarding,
           child: child!,
           dialogContext: () => _navigatorKey.currentState!.overlay!.context,
         );
+        if (usePhoneLayout(context)) {
+          content = Theme(
+            data: AppTheme.phoneTheme(Theme.of(context)),
+            child: content,
+          );
+        }
         return desktop == null || !desktop.supported
             ? content
             : DesktopWindowFrame(controller: desktop, child: content);

@@ -1,3 +1,4 @@
+import 'support/ui_actions.dart';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:ui' as ui;
@@ -219,6 +220,7 @@ void main() {
         ),
       );
       await tester.enterText(find.byType(TextField), '普通文本草稿');
+      await revealComposerTools(tester);
       await tester.tap(find.byTooltip('自定义 Markdown'));
       await tester.pumpAndSettle();
       const body =
@@ -257,12 +259,14 @@ void main() {
             .text,
         body,
       );
+      await revealComposerTools(tester);
       await tester.tap(find.byTooltip('自定义 Markdown'));
       await tester.pumpAndSettle();
       expect(
         tester.widget<TextField>(find.byType(TextField)).controller!.text,
         '普通文本草稿',
       );
+      await revealComposerTools(tester);
       await tester.tap(find.byTooltip('自定义 Markdown'));
       await tester.pumpAndSettle();
       failSend = false;
@@ -374,6 +378,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('测试聊天').first);
       await tester.pumpAndSettle();
+      await revealComposerTools(tester);
       await tester.tap(find.byTooltip('自定义 Markdown'));
       await tester.pumpAndSettle();
       await tester.enterText(

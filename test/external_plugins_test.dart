@@ -49,7 +49,7 @@ void main() {
     // 此文件只访问自建回环服务器，不使用 Flutter 的 HTTP 400 占位器。
     HttpOverrides.global = null;
   });
-  test('六个内置实现来自独立 plugins 包，旧 ID、启用状态和密钥配置保留', () async {
+  test('七个内置实现来自独立 plugins 包，旧 ID、启用状态和密钥配置保留', () async {
     final storage = MemoryStorage();
     storage.storedPlugins['weather_plugin'] = PluginInfo(
       id: 'weather_plugin',
@@ -68,6 +68,7 @@ void main() {
       'translate_comment',
       'daily_club',
       'group_games',
+      'group_authorization',
     ]);
     final weather = manager.plugins.singleWhere(
       (p) => p.info.id == 'weather_plugin',
@@ -154,7 +155,7 @@ void main() {
     );
     expect(await restored.uninstallPlugin(info.id), true);
     final afterUninstall = await pluginManager(storage);
-    expect(afterUninstall.plugins, hasLength(6));
+    expect(afterUninstall.plugins, hasLength(7));
   });
 
   test('不能导入 Dart 执行代码、覆盖内置 ID 或声明未知权限', () async {
@@ -189,7 +190,7 @@ void main() {
       () => PluginManifest.parse('not: [valid'),
       throwsA(isA<PluginManifestException>()),
     );
-    expect(manager.plugins, hasLength(6));
+    expect(manager.plugins, hasLength(7));
   });
 
   test('HTTP 只在匹配后请求；保留事件上下文，不泄露 QQ 凭据或插件密钥到请求体', () async {

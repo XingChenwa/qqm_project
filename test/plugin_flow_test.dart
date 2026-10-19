@@ -10,6 +10,7 @@ void main() {
     final manager = PluginManager(MemoryStorage());
     addTearDown(manager.dispose);
     await manager.init();
+    await manager.enablePlugin('translate_comment');
     const code =
         '/translate ```python\n# comment\nif True:\n    print("hello")\n```';
     final responses = await manager.processMessage(

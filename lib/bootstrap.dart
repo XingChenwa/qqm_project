@@ -1,0 +1,94 @@
+import 'package:flutter/material.dart';
+import 'package:hive_flutter/hive_flutter.dart';
+import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'services/app_update_service.dart';
+import 'services/update_preferences.dart';
+import 'utils/constants.dart';
+import 'services/onboarding_preferences.dart';
+import 'services/desktop_window_controller.dart';
+import 'app.dart';
+import 'models/message.dart';
+import 'models/plugin.dart';
+import 'models/config.dart';
+import 'services/storage_service.dart';
+import 'core/bot_client.dart';
+import 'core/plugin_manager.dart';
+import 'utils/platforms.dart';
+
+Future<Widget> initializeApplication(
+  void Function(String) report, {
+  Future<void> Function()? prepareStorage,
+}) async {
+  // Initialize Hive for local storage
+  report('准备本地存储');
+  await (prepareStorage?.call() ?? Hive.initFlutter());
+  _registerAdapter<MessageModel>(MessageModelAdapter());
+  _registerAdapter<ChatSession>(ChatSessionAdapter());
+  _registerAdapter<EmojiItem>(EmojiItemAdapter());
+  _registerAdapter<PluginInfo>(PluginConfigAdapter());
+  _registerAdapter<BotConfig>(BotConfigAdapter());
+
+  // Initialize storage service
+  final storageService = StorageService();
+  report('读取本地配置和聊天记录');
+  await storageService.init();
+
+  // 从 plugins/ 清单加载内置实现，并恢复已安装的 JSON/YAML/HTTP 插件。
+  final pluginManager = PluginManager(storageService);
+  report('加载内置插件');
+  await pluginManager.init();
+
+  // Initialize bot client
+  report('准备机器人工作台');
+  final botClient = BotClient(storageService);
+  final preferences = await SharedPreferences.getInstance();
+  final updates = AppUpdateService(
+    UpdatePreferences(
+      preferences,
+      channel:
+          (AppConstants.releaseChannel == 'beta' ||
+              (AppConstants.releaseChannel.isEmpty &&
+                  AppConstants.appVersion.contains('-')))
+          ? UpdateChannel.beta
+          : UpdateChannel.stable,
+    ),
+  );
+  final onboarding = OnboardingPreferences(preferences);
+
+  DesktopWindowController? desktopWindow;
+  if (isDesktopPlatform) {
+    report('准备桌面窗口');
+    desktopWindow = DesktopWindowController(
+      storageService,
+      beforeExit: () async {
+        await storageService.flush();
+        updates.dispose();
+        botClient.dispose();
+        pluginManager.dispose();
+      },
+    );
+    await desktopWindow.initialize();
+  }
+
+  return MultiProvider(
+    providers: [
+      Provider<StorageService>.value(value: storageService),
+      Provider<OnboardingPreferences>.value(value: onboarding),
+      ChangeNotifierProvider<PluginManager>.value(value: pluginManager),
+      ChangeNotifierProvider<BotClient>.value(value: botClient),
+      ChangeNotifierProvider<AppUpdateService>.value(value: updates),
+      if (desktopWindow != null)
+        ChangeNotifierProvider<DesktopWindowController>.value(
+          value: desktopWindow,
+        ),
+    ],
+    child: const QQBotManagerApp(),
+  );
+}
+
+void _registerAdapter<T>(TypeAdapter<T> adapter) {
+  if (!Hive.isAdapterRegistered(adapter.typeId)) {
+    Hive.registerAdapter<T>(adapter);
+  }
+}

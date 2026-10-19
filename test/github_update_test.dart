@@ -509,45 +509,57 @@ void main() {
       throwsFormatException,
     );
   });
-  test('渠道选择和防回退记录相互独立，显式选择覆盖构建默认值', () async {
+
+  test('安装包决定渠道，忽略上版保存的切换偏好；版本记录相互独立', () async {
+    await preferences.preferences.setString('updates_channel', 'beta');
+    expect(preferences.channel, UpdateChannel.stable);
     await preferences.rememberGitHubBuild(19);
-    final betaDefault = UpdatePreferences(
+    final beta = UpdatePreferences(
       preferences.preferences,
-      defaultChannel: UpdateChannel.beta,
+      channel: UpdateChannel.beta,
     );
-    expect(betaDefault.channel, UpdateChannel.beta);
-    expect(betaDefault.highestGitHubBuild, 0);
-    await preferences.setChannel(UpdateChannel.beta);
-    await preferences.rememberGitHubBuild(25);
-    expect(UpdatePreferences(preferences.preferences).highestGitHubBuild, 25);
-    await preferences.setChannel(UpdateChannel.stable);
+    expect(beta.channel, UpdateChannel.beta);
+    expect(beta.highestGitHubBuild, 0);
+    await beta.rememberGitHubBuild(25);
+    await preferences.preferences.setString('updates_channel', 'stable');
+    expect(beta.channel, UpdateChannel.beta);
+    expect(beta.highestGitHubBuild, 25);
     expect(preferences.highestGitHubBuild, 19);
-    expect(betaDefault.channel, UpdateChannel.stable);
   });
-  test('Beta 清单路径和切换后正式防回退互不影响', () async {
-    final beta = await sign(manifest(build: 25)..['channel'] = 'beta');
-    final stable = await sign(manifest(build: 19));
-    final adapter = UpdateAdapter((request) async {
-      if (request.uri.host == 'api.gitcode.com') {
-        return ResponseBody.fromString('', 503);
-      }
-      return ResponseBody.fromString(
-        jsonEncode(request.uri.path.endsWith('beta.json') ? beta : stable),
-        200,
+  for (final channel in UpdateChannel.values) {
+    test('安装的 ${channel.name} 只读取对应清单并拒绝另一渠道', () async {
+      final beta = await sign(manifest(build: 25)..['channel'] = 'beta');
+      final stable = await sign(manifest(build: 19));
+      preferences = UpdatePreferences(
+        preferences.preferences,
+        channel: channel,
       );
+      var wrongChannel = false;
+      final adapter = UpdateAdapter((request) async {
+        if (request.uri.host == 'api.gitcode.com') {
+          return ResponseBody.fromString('', 503);
+        }
+        final expected = channel == UpdateChannel.beta ? beta : stable;
+        final wrong = channel == UpdateChannel.beta ? stable : beta;
+        return ResponseBody.fromString(
+          jsonEncode(wrongChannel ? wrong : expected),
+          200,
+        );
+      });
+      final updates = service(adapter);
+      await updates.check();
+      expect(updates.release!.build, channel == UpdateChannel.beta ? 25 : 19);
+      expect(
+        adapter.requests.any(
+          (r) => r.uri.path.endsWith('/updates/${channel.name}.json'),
+        ),
+        isTrue,
+      );
+      wrongChannel = true;
+      await updates.check();
+      expect(updates.phase, UpdatePhase.failed);
     });
-    final updates = service(adapter);
-    await updates.setChannel(UpdateChannel.beta);
-    expect(updates.release!.build, 25);
-    expect(preferences.highestGitHubBuild, 25);
-    expect(
-      adapter.requests.any((r) => r.uri.path.endsWith('/updates/beta.json')),
-      isTrue,
-    );
-    await updates.setChannel(UpdateChannel.stable);
-    expect(updates.release!.build, 19);
-    expect(preferences.highestGitHubBuild, 19);
-  });
+  }
   test('GitCode latest 指向 Beta 时，正式渠道从列表选择完整正式清单', () async {
     final envelope = await sign(manifest());
     final adapter = UpdateAdapter((request) async {

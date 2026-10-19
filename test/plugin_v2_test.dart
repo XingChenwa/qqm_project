@@ -222,6 +222,8 @@ void main() {
     final manager = PluginManager(MemoryStorage());
     addTearDown(manager.dispose);
     await manager.init();
+    await manager.enablePlugin('example_plugin');
+    await manager.enablePlugin('group_games');
     final raw = definition(
       rules: [
         {
@@ -291,6 +293,7 @@ void main() {
     final storage = MemoryStorage(config: validConfig());
     final manager = PluginManager(storage);
     await manager.init();
+    await manager.enablePlugin('daily_club');
     await manager.processMessage(event('/签到'));
     storage.config.appId = 'different-bot';
     expect(

@@ -11,6 +11,7 @@ class AppDialogs {
     required WidgetBuilder builder,
     String? key,
     bool barrierDismissible = true,
+    bool Function()? stillRelevant,
   }) {
     final navigator = Navigator.of(context, rootNavigator: true);
     final queue = _queues[navigator] ??= _DialogQueue();
@@ -20,7 +21,7 @@ class AppDialogs {
     if (key != null) queue.pending[key] = result.future;
     queue.tail = queue.tail.then((_) async {
       try {
-        if (!navigator.mounted) {
+        if (!navigator.mounted || stillRelevant?.call() == false) {
           result.complete(null);
           return;
         }

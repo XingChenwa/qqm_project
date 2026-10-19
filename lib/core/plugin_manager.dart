@@ -47,6 +47,8 @@ class PluginManager extends ChangeNotifier {
   void _bind(BotPlugin plugin) {
     plugin.host = PluginHost(
       help: commandHelp,
+      appId: () =>
+          Zone.current[_botScope] as String? ?? _storage.activeBotAppId,
       store: () {
         final scope = jsonEncode([
           Zone.current[_botScope] as String? ?? _storage.activeBotAppId,
@@ -83,7 +85,7 @@ class PluginManager extends ChangeNotifier {
       );
       final info = definition.toInfo(
         saved: savedConfigs[definition.id],
-        enabledByDefault: true,
+        enabledByDefault: false,
       );
       final plugin = BuiltInPluginRegistry.create(info.id, info);
       if (plugin == null) {

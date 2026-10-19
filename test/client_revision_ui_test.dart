@@ -1,3 +1,4 @@
+import 'support/ui_actions.dart';
 import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
@@ -64,6 +65,7 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
+      await revealComposerTools(tester);
       await tester.tap(find.byTooltip('@ 群成员'));
       await tester.pumpAndSettle();
       expect(find.text('离线测试用户'), findsOneWidget);
@@ -206,8 +208,9 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(find.text('自动优选'), findsOneWidget);
-      expect(find.text('正式版'), findsOneWidget);
-      expect(find.text('Beta 测试版'), findsOneWidget);
+      expect(find.text('更新渠道'), findsNothing);
+      expect(find.text('正式版'), findsNothing);
+      expect(find.text('Beta 测试版'), findsNothing);
       expect(find.text('45 ms'), findsOneWidget);
       await captureUi(tester, 'updates-revision-${width.toInt()}');
       expect(tester.takeException(), isNull);

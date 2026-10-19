@@ -46,6 +46,21 @@ void main() {
     );
   });
 
+  test('识别官方 err_code、Body trace_id 和源 IP，不将业务拒绝当作成功', () async {
+    adapter.response = {
+      'err_code': 11298,
+      'message': '接口访问源IP不在白名单',
+      'source_ip': '9.8.7.6',
+    };
+    final result = await api.getGatewayUrl(
+      baseUrl: 'https://api.bot.qq.com',
+      accessToken: 'fixture-token',
+    );
+    expect(result.isSuccess, isFalse);
+    expect(result.errorCode, 11298);
+    expect(result.metadata?['sourceIp'], '9.8.7.6');
+  });
+
   test('群资料、成员和机器人资料使用官方 GET 地址和鉴权，白名单错误保留业务码', () async {
     adapter.response = {'group_openid': 'g', 'group_name': '读书分享会'};
     final group = await api.getGroupInfo(

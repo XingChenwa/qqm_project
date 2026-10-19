@@ -5,20 +5,9 @@ import 'update_channel.dart';
 /// Update options only. No device identity, statistics consent or telemetry token.
 class UpdatePreferences {
   final SharedPreferences preferences;
-  final UpdateChannel defaultChannel;
-  UpdatePreferences(
-    this.preferences, {
-    this.defaultChannel = UpdateChannel.stable,
-  });
-  UpdateChannel get channel => UpdateChannel.values.firstWhere(
-    (channel) => channel.name == preferences.getString('updates_channel'),
-    orElse: () => defaultChannel,
-  );
-  Future<void> setChannel(UpdateChannel channel) async {
-    if (!await preferences.setString('updates_channel', channel.name)) {
-      throw StateError('无法保存更新渠道');
-    }
-  }
+  // Fixed by the installed package, never by a saved UI preference.
+  final UpdateChannel channel;
+  UpdatePreferences(this.preferences, {this.channel = UpdateChannel.stable});
 
   UpdateNode get node => UpdateNode.values.firstWhere(
     (node) => node.name == preferences.getString('updates_node'),

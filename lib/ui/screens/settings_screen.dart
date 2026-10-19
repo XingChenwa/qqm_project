@@ -9,6 +9,8 @@ import 'package:provider/provider.dart';
 import '../../core/bot_client.dart';
 import '../../core/plugin_manager.dart';
 import '../../services/api_service.dart';
+import '../../services/ip_whitelist_service.dart';
+import '../widgets/ip_whitelist_dialog.dart';
 import '../../utils/constants.dart';
 import '../../models/config.dart';
 import '../../services/storage_service.dart';
@@ -220,8 +222,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _isTestingCredentials = true;
       _credentialTestStatus = '';
     });
+    final appId = _appIdController.text.trim();
     final result = await ApiService().getAccessToken(
-      appId: _appIdController.text.trim(),
+      appId: appId,
       clientSecret: _clientSecretController.text.trim(),
     );
     if (!mounted) return;
@@ -229,7 +232,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _isTestingCredentials = false;
       _credentialTestStatus = result.isSuccess ? '验证成功' : '验证失败';
     });
-    if (!result.isSuccess) _showError(result.error ?? '凭据验证失败');
+    if (!result.isSuccess) {
+      if (isIpWhitelistError(result.error ?? '')) {
+        await showDialog<void>(
+          context: context,
+          builder: (_) => IpWhitelistDialog(
+            trackBotProblem: false,
+            problem: IpWhitelistProblem(
+              appId: appId,
+              message: result.error!,
+              sourceIp: result.metadata?['sourceIp'] as String?,
+            ),
+          ),
+        );
+      } else {
+        _showError(result.error ?? '凭据验证失败');
+      }
+    }
   }
 
   Future<void> _exportConfig() async {
@@ -288,7 +307,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   Widget build(BuildContext context) {
     final bot = context.watch<BotClient>();
-    final compact = MediaQuery.sizeOf(context).width < 700;
+    final compact = usePhoneLayout(context);
+    if (compact) {
+      return Scaffold(
+        appBar: AppBar(
+          leading: IconButton(
+            tooltip: '关闭设置',
+            onPressed: () => Navigator.pop(context),
+            icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 20),
+          ),
+          title: const Text('设置'),
+        ),
+        body: SafeArea(top: false, child: _settingsShell(bot)),
+      );
+    }
     return Scaffold(
       body: SafeArea(
         child: Row(
@@ -488,6 +520,42 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Widget _settingsShell(BotClient bot) {
+    if (usePhoneLayout(context)) {
+      return Column(
+        children: [
+          Material(
+            color: Theme.of(context).colorScheme.surface,
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+              child: Row(
+                children: [
+                  for (final item in const [
+                    ('常规', 0, Icons.smart_toy_outlined),
+                    ('连接', 1, Icons.link_rounded),
+                    ('数据', 3, Icons.folder_outlined),
+                    ('数据清理', 4, Icons.cleaning_services_outlined),
+                    ('关于', 5, Icons.info_outline_rounded),
+                    ('更新', 6, Icons.system_update_rounded),
+                  ])
+                    Padding(
+                      padding: const EdgeInsets.only(right: 8),
+                      child: ChoiceChip(
+                        showCheckmark: false,
+                        avatar: Icon(item.$3, size: 17),
+                        label: Text(item.$1),
+                        selected: _tabIndex == item.$2,
+                        onSelected: (_) => setState(() => _tabIndex = item.$2),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+          Expanded(child: _tabBody(bot)),
+        ],
+      );
+    }
     return Container(
       decoration: BoxDecoration(
         color: Theme.of(context).colorScheme.surface,
@@ -1030,7 +1098,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     TextEditingController controller, {
     bool obscure = false,
   }) {
-    if (MediaQuery.sizeOf(context).width < 700) {
+    if (usePhoneLayout(context)) {
       return Padding(
         padding: const EdgeInsets.only(bottom: 12),
         child: TextField(

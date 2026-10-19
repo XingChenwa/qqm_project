@@ -1,3 +1,4 @@
+import '../../utils/platforms.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 
@@ -30,9 +31,13 @@ class MessageBubble extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isBot = message.isFromBot;
+    final mobile = usePhoneLayout(context);
 
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 7),
+      padding: EdgeInsets.symmetric(
+        horizontal: mobile ? 14 : 18,
+        vertical: mobile ? 9 : 7,
+      ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisAlignment: isBot
@@ -46,7 +51,7 @@ class MessageBubble extends StatelessWidget {
                   ? CrossAxisAlignment.end
                   : CrossAxisAlignment.start,
               children: [
-                if (showSender) ...[
+                if (showSender && (!mobile || !isBot)) ...[
                   _senderLine(context),
                   const SizedBox(height: 5),
                 ],
@@ -56,7 +61,10 @@ class MessageBubble extends StatelessWidget {
               ],
             ),
           ),
-          if (isBot) ...[const SizedBox(width: 10), _avatar(context)],
+          if (isBot && !mobile) ...[
+            const SizedBox(width: 10),
+            _avatar(context),
+          ],
         ],
       ),
     );
@@ -256,7 +264,7 @@ class MessageBubble extends StatelessWidget {
             message.extra?['mentions'] as List? ??
             message.receivedBody.mentions,
         style: TextStyle(
-          fontSize: 14,
+          fontSize: usePhoneLayout(context) ? 15 : 14,
           height: 1.45,
           color: isBot ? Colors.white : Theme.of(context).colorScheme.onSurface,
           fontStyle: message.isRecalled ? FontStyle.italic : FontStyle.normal,
@@ -323,6 +331,7 @@ class MessageBubble extends StatelessWidget {
 
   BoxDecoration _bubbleDecoration(BuildContext context, bool isBot) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final radius = usePhoneLayout(context) ? 17.0 : 8.0;
     return BoxDecoration(
       color: isBot
           ? AppTheme.qqBlue
@@ -330,19 +339,21 @@ class MessageBubble extends StatelessWidget {
           ? const Color(0xFF202A36)
           : Colors.white,
       borderRadius: BorderRadius.only(
-        topLeft: const Radius.circular(8),
-        topRight: const Radius.circular(8),
-        bottomLeft: Radius.circular(isBot ? 8 : 3),
-        bottomRight: Radius.circular(isBot ? 3 : 8),
+        topLeft: Radius.circular(radius),
+        topRight: Radius.circular(radius),
+        bottomLeft: Radius.circular(isBot ? radius : 5),
+        bottomRight: Radius.circular(isBot ? 5 : radius),
       ),
       border: isBot ? null : Border.all(color: Theme.of(context).dividerColor),
-      boxShadow: [
-        BoxShadow(
-          color: Colors.black.withValues(alpha: isDark ? 0.16 : 0.05),
-          blurRadius: 10,
-          offset: const Offset(0, 3),
-        ),
-      ],
+      boxShadow: usePhoneLayout(context)
+          ? []
+          : [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: isDark ? 0.16 : 0.05),
+                blurRadius: 10,
+                offset: const Offset(0, 3),
+              ),
+            ],
     );
   }
 
@@ -413,7 +424,9 @@ class MessageBubble extends StatelessWidget {
 
   double _maxWidth(BuildContext context, double fraction) {
     final width = MediaQuery.sizeOf(context).width;
-    return width < 700 ? width - 96 : width * fraction;
+    return usePhoneLayout(context)
+        ? (width - 90).clamp(80, 480).toDouble()
+        : width * fraction;
   }
 
   String _roleLabel(String role) {

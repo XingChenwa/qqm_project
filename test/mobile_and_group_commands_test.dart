@@ -1,3 +1,4 @@
+import 'support/ui_actions.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -100,6 +101,7 @@ void main() {
     addTearDown(bot.dispose);
     addTearDown(plugins.dispose);
     await tester.runAsync(() => plugins.init());
+    await plugins.enablePlugin('weather_plugin');
     await tester.pumpWidget(appShell(storage, bot, plugins));
     await tester.pumpAndSettle();
     expect(bot.config.autoReplyToAllGroupMessages, isFalse);
@@ -169,6 +171,7 @@ void main() {
       expect(find.byTooltip('发送'), findsOneWidget);
       tester.view.resetViewInsets();
       await tester.pumpAndSettle();
+      await revealComposerTools(tester);
       await tester.tap(find.byTooltip('消息设置'));
       await tester.pumpAndSettle();
       expect(find.text('应用设置'), findsOneWidget);
@@ -212,8 +215,12 @@ void main() {
       expect(find.text('自动回复'), findsNothing);
       expect(find.text('关键词回复'), findsNothing);
       for (final label in ['常规', '连接', '数据', '数据清理', '关于']) {
-        await tester.ensureVisible(find.text(label));
-        await tester.tap(find.text(label));
+        final tab = find.ancestor(
+          of: find.text(label),
+          matching: find.byType(ChoiceChip),
+        );
+        await tester.ensureVisible(tab);
+        await tester.tap(tab);
         await tester.pumpAndSettle();
         expect(tester.takeException(), isNull);
       }

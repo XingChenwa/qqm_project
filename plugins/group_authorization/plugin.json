@@ -1,0 +1,20 @@
+{
+  "schema_version": 2,
+  "id": "group_authorization",
+  "name": "主动消息权限",
+  "version": "1.0.0",
+  "description": "群内 @机器人 /主动消息，群主通过按钮填写本群群号，再获取专属授权按钮。需按 AppID 配置机器人 QQ 与 UID，并具备 Markdown／自定义按钮权限。",
+  "author": "QQ机器人管理器",
+  "runtime": "builtin",
+  "entrypoint": "lib/group_authorization/plugin.dart",
+  "permissions": ["message:read", "message:send"],
+  "cooldown_ms": 1000,
+  "config_schema": [
+    {
+      "key": "robots_json",
+      "label": "机器人资料 JSON（按 AppID；示例见开发文档）",
+      "type": "multiline",
+      "default": "{}"
+    }
+  ]
+}

@@ -1,3 +1,4 @@
+import '../../utils/platforms.dart';
 import 'dart:convert';
 import 'dart:io';
 
@@ -107,6 +108,7 @@ class _PluginPanelState extends State<PluginPanel> {
   @override
   Widget build(BuildContext context) {
     final manager = context.watch<PluginManager>();
+    final mobile = usePhoneLayout(context);
     final plugins = manager.plugins
         .where(
           (p) =>
@@ -117,56 +119,59 @@ class _PluginPanelState extends State<PluginPanel> {
                   .contains(_query.toLowerCase()),
         )
         .toList();
+    if (mobile) return _mobilePanel(manager, plugins);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(20, 18, 16, 12),
-          child: Row(
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      '插件中心',
-                      style: TextStyle(
-                        fontSize: 22,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: -.5,
+        if (mobile) _mobileActions(manager),
+        if (!mobile)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 18, 16, 12),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        '插件中心',
+                        style: TextStyle(
+                          fontSize: 22,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: -.5,
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 5),
-                    Text(
-                      '${manager.enabledCount} 个运行中 · ${manager.plugins.length} 个已安装',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Theme.of(context).hintColor,
+                      const SizedBox(height: 5),
+                      Text(
+                        '${manager.enabledCount} 个运行中 · ${manager.plugins.length} 个已安装',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Theme.of(context).hintColor,
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
-              ),
-              IconButton(
-                tooltip: '开发者文档与示例',
-                onPressed: _developer,
-                icon: const Icon(Icons.code_rounded),
-              ),
-              const SizedBox(width: 4),
-              OutlinedButton.icon(
-                onPressed: _workshop,
-                icon: const Icon(Icons.edit_note, size: 18),
-                label: const Text('写插件'),
-              ),
-              const SizedBox(width: 8),
-              FilledButton.icon(
-                onPressed: _import,
-                icon: const Icon(Icons.add, size: 18),
-                label: const Text('导入'),
-              ),
-            ],
+                IconButton(
+                  tooltip: '开发者文档与示例',
+                  onPressed: _developer,
+                  icon: const Icon(Icons.code_rounded),
+                ),
+                const SizedBox(width: 4),
+                OutlinedButton.icon(
+                  onPressed: _workshop,
+                  icon: const Icon(Icons.edit_note, size: 18),
+                  label: const Text('写插件'),
+                ),
+                const SizedBox(width: 8),
+                FilledButton.icon(
+                  onPressed: _import,
+                  icon: const Icon(Icons.add, size: 18),
+                  label: const Text('导入'),
+                ),
+              ],
+            ),
           ),
-        ),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 20),
           child: TextField(
@@ -208,48 +213,49 @@ class _PluginPanelState extends State<PluginPanel> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Container(
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: AppTheme.qqBlue.withValues(alpha: .06),
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Icon(
-                            Icons.integration_instructions_outlined,
-                            color: AppTheme.qqBlue,
-                            size: 22,
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const Text(
-                                  '为机器人添加你自己的能力',
-                                  style: TextStyle(
-                                    fontWeight: FontWeight.w700,
-                                    fontSize: 13,
-                                  ),
-                                ),
-                                const SizedBox(height: 5),
-                                Text(
-                                  '用「写插件」按命令和回复生成清单，也可以管理插件文件夹里的文本。导入 JSON / YAML 仍然可用。',
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    height: 1.6,
-                                    color: Theme.of(context).hintColor,
-                                  ),
-                                ),
-                              ],
+                    if (!mobile)
+                      Container(
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: AppTheme.qqBlue.withValues(alpha: .06),
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Icon(
+                              Icons.integration_instructions_outlined,
+                              color: AppTheme.qqBlue,
+                              size: 22,
                             ),
-                          ),
-                        ],
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Text(
+                                    '为机器人添加你自己的能力',
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.w700,
+                                      fontSize: 13,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 5),
+                                  Text(
+                                    '用「写插件」按命令和回复生成清单，也可以管理插件文件夹里的文本。导入 JSON / YAML 仍然可用。',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      height: 1.6,
+                                      color: Theme.of(context).hintColor,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 16),
+                    if (!mobile) const SizedBox(height: 16),
                     if (plugins.isEmpty)
                       const Padding(
                         padding: EdgeInsets.all(28),
@@ -279,6 +285,133 @@ class _PluginPanelState extends State<PluginPanel> {
       ],
     );
   }
+
+  Widget _mobilePanel(PluginManager manager, List<BotPlugin> plugins) =>
+      ListView(
+        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+        children: [
+          _mobileActions(manager),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: TextField(
+              onChanged: (value) => setState(() => _query = value),
+              decoration: const InputDecoration(
+                hintText: '搜索插件或功能',
+                prefixIcon: Icon(Icons.search_rounded, size: 21),
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
+            child: Wrap(
+              spacing: 8,
+              runSpacing: 6,
+              children: [
+                for (final entry in const {
+                  0: '全部插件',
+                  1: '内置',
+                  2: '第三方',
+                }.entries)
+                  ChoiceChip(
+                    label: Text(entry.value),
+                    selected: _filter == entry.key,
+                    showCheckmark: false,
+                    onSelected: (_) => setState(() => _filter = entry.key),
+                  ),
+              ],
+            ),
+          ),
+          if (plugins.isEmpty)
+            const Padding(
+              padding: EdgeInsets.all(32),
+              child: Center(child: Text('没有匹配的插件')),
+            )
+          else
+            for (final plugin in plugins)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                child: _PluginCard(plugin: plugin, manager: manager),
+              ),
+          const SizedBox(height: 12),
+        ],
+      );
+
+  Widget _mobileActions(PluginManager manager) => Padding(
+    padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                '${manager.enabledCount} 个运行中 · ${manager.plugins.length} 个已安装',
+                style: TextStyle(
+                  fontSize: 13,
+                  color: Theme.of(context).hintColor,
+                ),
+              ),
+            ),
+            const Icon(
+              Icons.extension_rounded,
+              color: AppTheme.qqBlue,
+              size: 18,
+            ),
+          ],
+        ),
+        const SizedBox(height: 14),
+        Row(
+          children: [
+            _mobileAction(Icons.edit_note_rounded, '写插件', '插件文件管理', _workshop),
+            const SizedBox(width: 8),
+            _mobileAction(Icons.file_download_outlined, '导入', '导入插件', _import),
+            const SizedBox(width: 8),
+            _mobileAction(
+              Icons.menu_book_outlined,
+              '开发文档',
+              '开发者文档与示例',
+              _developer,
+            ),
+          ],
+        ),
+      ],
+    ),
+  );
+
+  Widget _mobileAction(
+    IconData icon,
+    String label,
+    String tooltip,
+    VoidCallback onTap,
+  ) => Expanded(
+    child: Tooltip(
+      message: tooltip,
+      child: Material(
+        color: Theme.of(context).colorScheme.surface,
+        borderRadius: BorderRadius.circular(16),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(16),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 4),
+            child: Column(
+              children: [
+                Icon(icon, color: AppTheme.qqBlue, size: 24),
+                const SizedBox(height: 8),
+                Text(
+                  label,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
 }
 
 class _PluginCard extends StatelessWidget {
@@ -347,7 +480,7 @@ class _PluginCard extends StatelessWidget {
                   ),
                 ),
                 Transform.scale(
-                  scale: .82,
+                  scale: usePhoneLayout(context) ? 1 : .82,
                   child: Switch(
                     value: info.isEnabled,
                     onChanged: (value) async {

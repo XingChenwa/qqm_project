@@ -9,6 +9,7 @@ import '../services/websocket_service.dart';
 import '../services/storage_service.dart';
 import '../services/profile_request_queue.dart';
 import '../services/oiapi_service.dart';
+import '../services/ip_whitelist_service.dart';
 import '../utils/profile_helpers.dart';
 import '../utils/helpers.dart';
 
@@ -44,6 +45,44 @@ class BotClient extends ChangeNotifier {
   Future<String?>? _tokenRequest;
   int _configRevision = 0;
   int _accountEpoch = 0;
+  IpWhitelistProblem? _ipWhitelistProblem;
+  DateTime? _lastIpWhitelistNotice;
+  IpWhitelistProblem? get ipWhitelistProblem => _ipWhitelistProblem;
+
+  void dismissIpWhitelistProblem(IpWhitelistProblem problem) {
+    if (!identical(problem, _ipWhitelistProblem)) return;
+    _ipWhitelistProblem = null;
+    if (!_disposed) notifyListeners();
+  }
+
+  Future<ApiResult<T>> _checkedApi<T>(
+    Future<ApiResult<T>> Function() request,
+  ) async {
+    final epoch = _accountEpoch;
+    final appId = _config.appId;
+    final result = await request();
+    if (!_disposed &&
+        epoch == _accountEpoch &&
+        appId.isNotEmpty &&
+        !result.isSuccess &&
+        isIpWhitelistError(result.error ?? '') &&
+        _ipWhitelistProblem == null &&
+        (_lastIpWhitelistNotice == null ||
+            DateTime.now().difference(_lastIpWhitelistNotice!) >=
+                const Duration(minutes: 1))) {
+      _lastIpWhitelistNotice = DateTime.now();
+      _ipWhitelistProblem = IpWhitelistProblem(
+        appId: appId,
+        message: result.error!,
+        sourceIp:
+            validPublicIp(result.metadata?['sourceIp']?.toString()) ??
+            reportedSourceIp(result.error),
+      );
+      notifyListeners();
+    }
+    return result;
+  }
+
   Future<void> _configWrites = Future<void>.value();
   int get accountEpoch => _accountEpoch;
   List<BotConfig> get botProfiles => _storage.getBotProfiles();
@@ -167,9 +206,11 @@ class BotClient extends ChangeNotifier {
 
     final requestedConfig = _config;
     final requestedRevision = _configRevision;
-    final result = await _apiService.getAccessToken(
-      appId: requestedConfig.appId,
-      clientSecret: requestedConfig.clientSecret,
+    final result = await _checkedApi(
+      () => _apiService.getAccessToken(
+        appId: requestedConfig.appId,
+        clientSecret: requestedConfig.clientSecret,
+      ),
     );
     if (_disposed ||
         requestedRevision != _configRevision ||
@@ -234,6 +275,8 @@ class BotClient extends ChangeNotifier {
     final attempt = ++_connectionAttempt;
     _isConnecting = true;
     _connectionError = '';
+    _ipWhitelistProblem = null;
+    _lastIpWhitelistNotice = null;
     _connectStep = ConnectStep.idle;
     notifyListeners();
 
@@ -253,9 +296,11 @@ class BotClient extends ChangeNotifier {
     notifyListeners();
     _addLog('正在获取网关地址...');
 
-    final gwResult = await _apiService.getGatewayUrl(
-      baseUrl: _config.resolvedApiBaseUrl,
-      accessToken: token,
+    final gwResult = await _checkedApi(
+      () => _apiService.getGatewayUrl(
+        baseUrl: _config.resolvedApiBaseUrl,
+        accessToken: token,
+      ),
     );
     if (_disposed || attempt != _connectionAttempt) return false;
 
@@ -461,10 +506,12 @@ class BotClient extends ChangeNotifier {
     final epoch = _accountEpoch;
     final token = await _getAccessToken();
     if (token == null || _disposed || epoch != _accountEpoch) return;
-    final result = await _apiService.acknowledgeInteraction(
-      baseUrl: _config.resolvedApiBaseUrl,
-      accessToken: token,
-      interactionId: interactionId,
+    final result = await _checkedApi(
+      () => _apiService.acknowledgeInteraction(
+        baseUrl: _config.resolvedApiBaseUrl,
+        accessToken: token,
+        interactionId: interactionId,
+      ),
     );
     if (_disposed || epoch != _accountEpoch) return;
     if (!result.isSuccess) _acknowledgedInteractions.remove(interactionId);
@@ -579,10 +626,12 @@ class BotClient extends ChangeNotifier {
         if (token == null || _disposed || generation != _profileGeneration) {
           return ApiResult.failure('暂时无法获取访问凭证');
         }
-        return _apiService.getGroupInfo(
-          baseUrl: _config.resolvedApiBaseUrl,
-          accessToken: token,
-          groupId: id,
+        return _checkedApi(
+          () => _apiService.getGroupInfo(
+            baseUrl: _config.resolvedApiBaseUrl,
+            accessToken: token,
+            groupId: id,
+          ),
         );
       },
     );
@@ -821,11 +870,13 @@ class BotClient extends ChangeNotifier {
         if (token == null || _disposed || generation != _profileGeneration) {
           return ApiResult.failure('暂时无法获取访问凭证');
         }
-        return _apiService.getGroupMemberInfo(
-          baseUrl: _config.resolvedApiBaseUrl,
-          accessToken: token,
-          groupId: groupId,
-          memberId: memberId,
+        return _checkedApi(
+          () => _apiService.getGroupMemberInfo(
+            baseUrl: _config.resolvedApiBaseUrl,
+            accessToken: token,
+            groupId: groupId,
+            memberId: memberId,
+          ),
         );
       },
     );
@@ -902,9 +953,11 @@ class BotClient extends ChangeNotifier {
           if (token == null || _disposed || generation != _profileGeneration) {
             return;
           }
-          final result = await _apiService.getBotProfile(
-            baseUrl: _config.resolvedApiBaseUrl,
-            accessToken: token,
+          final result = await _checkedApi(
+            () => _apiService.getBotProfile(
+              baseUrl: _config.resolvedApiBaseUrl,
+              accessToken: token,
+            ),
           );
           if (_disposed ||
               generation != _profileGeneration ||
@@ -1282,16 +1335,18 @@ class BotClient extends ChangeNotifier {
       reserve: true,
     );
     if (context == null) return false;
-    final result = await _apiService.sendConfiguredMessage(
-      baseUrl: _config.resolvedApiBaseUrl,
-      accessToken: token,
-      targetId: targetId,
-      message: message,
-      isGroup: isGroup,
-      msgId: context.messageId,
-      eventId: context.eventId,
-      msgSeq: context.sequence,
-      referenceId: context.referenceId,
+    final result = await _checkedApi(
+      () => _apiService.sendConfiguredMessage(
+        baseUrl: _config.resolvedApiBaseUrl,
+        accessToken: token,
+        targetId: targetId,
+        message: message,
+        isGroup: isGroup,
+        msgId: context.messageId,
+        eventId: context.eventId,
+        msgSeq: context.sequence,
+        referenceId: context.referenceId,
+      ),
     );
     if (_disposed || epoch != _accountEpoch) return false;
     if (!result.isSuccess) {
@@ -1432,14 +1487,16 @@ class BotClient extends ChangeNotifier {
     if (token == null || _disposed || epoch != _accountEpoch) return false;
     final reply = _replyContext(targetId, isGroup, replyTo);
     if (reply == null) return false;
-    final result = await _apiService.sendQQMessage(
-      baseUrl: _config.resolvedApiBaseUrl,
-      accessToken: token,
-      targetId: targetId,
-      content: content,
-      isGroup: isGroup,
-      msgId: reply.messageId,
-      msgSeq: reply.sequence,
+    final result = await _checkedApi(
+      () => _apiService.sendQQMessage(
+        baseUrl: _config.resolvedApiBaseUrl,
+        accessToken: token,
+        targetId: targetId,
+        content: content,
+        isGroup: isGroup,
+        msgId: reply.messageId,
+        msgSeq: reply.sequence,
+      ),
     );
     if (_disposed || epoch != _accountEpoch) return false;
     if (result.isSuccess) {
@@ -1481,16 +1538,18 @@ class BotClient extends ChangeNotifier {
         ? (templateParams ?? _config.markdownTemplateParams)
         : null;
 
-    final result = await _apiService.sendQQMarkdown(
-      baseUrl: _config.resolvedApiBaseUrl,
-      accessToken: token,
-      targetId: targetId,
-      markdownContent: useTemplate ? null : markdown,
-      templateId: effectiveTemplateId,
-      templateParams: effectiveParams,
-      isGroup: isGroup,
-      msgId: reply.messageId,
-      msgSeq: reply.sequence,
+    final result = await _checkedApi(
+      () => _apiService.sendQQMarkdown(
+        baseUrl: _config.resolvedApiBaseUrl,
+        accessToken: token,
+        targetId: targetId,
+        markdownContent: useTemplate ? null : markdown,
+        templateId: effectiveTemplateId,
+        templateParams: effectiveParams,
+        isGroup: isGroup,
+        msgId: reply.messageId,
+        msgSeq: reply.sequence,
+      ),
     );
     if (_disposed || epoch != _accountEpoch) return false;
     if (result.isSuccess) {
@@ -1533,14 +1592,16 @@ class BotClient extends ChangeNotifier {
     if (token == null || _disposed || epoch != _accountEpoch) return false;
     final reply = _replyContext(targetId, isGroup, replyTo);
     if (reply == null) return false;
-    final result = await _apiService.sendQQImage(
-      baseUrl: _config.resolvedApiBaseUrl,
-      accessToken: token,
-      targetId: targetId,
-      imageUrl: imageUrl,
-      isGroup: isGroup,
-      msgId: reply.messageId,
-      msgSeq: reply.sequence,
+    final result = await _checkedApi(
+      () => _apiService.sendQQImage(
+        baseUrl: _config.resolvedApiBaseUrl,
+        accessToken: token,
+        targetId: targetId,
+        imageUrl: imageUrl,
+        isGroup: isGroup,
+        msgId: reply.messageId,
+        msgSeq: reply.sequence,
+      ),
     );
     if (_disposed || epoch != _accountEpoch) return false;
     if (result.isSuccess) {
@@ -1654,12 +1715,14 @@ class BotClient extends ChangeNotifier {
         break;
       }
     }
-    final result = await _apiService.recallMessage(
-      baseUrl: _config.resolvedApiBaseUrl,
-      accessToken: token,
-      targetId: message.sessionId,
-      messageId: message.id,
-      isGroup: session?.sessionType == 1,
+    final result = await _checkedApi(
+      () => _apiService.recallMessage(
+        baseUrl: _config.resolvedApiBaseUrl,
+        accessToken: token,
+        targetId: message.sessionId,
+        messageId: message.id,
+        isGroup: session?.sessionType == 1,
+      ),
     );
     if (_disposed || epoch != _accountEpoch) return false;
     if (result.isSuccess) {
@@ -1810,6 +1873,8 @@ class BotClient extends ChangeNotifier {
     final accountChanged = _config.appId != newConfig.appId;
     if (credentialsChanged) {
       _accountEpoch++;
+      _ipWhitelistProblem = null;
+      _lastIpWhitelistNotice = null;
       _messages.clear();
       _sessions.clear();
       _lastInboundMessageIds.clear();
@@ -1931,6 +1996,8 @@ class BotClient extends ChangeNotifier {
   void resetLocalState() {
     _accountEpoch++;
     _configRevision++;
+    _ipWhitelistProblem = null;
+    _lastIpWhitelistNotice = null;
     _resetProfileLookups();
     _messages.clear();
     _lastInboundMessageIds.clear();

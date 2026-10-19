@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 
 class AppTheme {
   static const Color qqBlue = Color(0xFF3268F4);
@@ -17,6 +18,53 @@ class AppTheme {
   static const Color darkPanel = Color(0xFF171D26);
   static const Color darkSidebar = Color(0xFF131922);
   static const Color darkDivider = Color(0xFF263140);
+
+  static ThemeData phoneTheme(ThemeData base) {
+    final dark = base.brightness == Brightness.dark;
+    final outline = OutlineInputBorder(
+      borderRadius: BorderRadius.circular(14),
+      borderSide: BorderSide(color: base.dividerColor),
+    );
+    return base.copyWith(
+      inputDecorationTheme: base.inputDecorationTheme.copyWith(
+        fillColor: dark ? darkBg : const Color(0xFFF5F7FB),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 16,
+          vertical: 15,
+        ),
+        border: outline,
+        enabledBorder: outline,
+        focusedBorder: outline.copyWith(
+          borderSide: const BorderSide(color: qqBlue, width: 1.5),
+        ),
+      ),
+      filledButtonTheme: FilledButtonThemeData(
+        style: FilledButton.styleFrom(
+          minimumSize: const Size(44, 46),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
+          ),
+        ),
+      ),
+      outlinedButtonTheme: OutlinedButtonThemeData(
+        style: OutlinedButton.styleFrom(
+          minimumSize: const Size(44, 46),
+          side: BorderSide(color: base.dividerColor),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
+          ),
+        ),
+      ),
+      navigationBarTheme: base.navigationBarTheme.copyWith(
+        height: 70,
+        elevation: 0,
+        surfaceTintColor: Colors.transparent,
+        indicatorShape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(14),
+        ),
+      ),
+    );
+  }
 
   static ThemeData get lightTheme => _buildTheme(
     brightness: Brightness.light,
@@ -45,6 +93,10 @@ class AppTheme {
     required Color onSurface,
   }) {
     final isDark = brightness == Brightness.dark;
+    final fontFamily = switch (defaultTargetPlatform) {
+      TargetPlatform.windows || TargetPlatform.linux => 'Microsoft YaHei',
+      _ => null,
+    };
     final scheme = ColorScheme.fromSeed(
       seedColor: qqBlue,
       brightness: brightness,
@@ -67,7 +119,12 @@ class AppTheme {
         secondary: qqGreen,
         error: qqRed,
       ),
-      fontFamily: 'Microsoft YaHei',
+      fontFamily: fontFamily,
+      fontFamilyFallback: const [
+        'PingFang SC',
+        'Noto Sans CJK SC',
+        'Microsoft YaHei',
+      ],
       visualDensity: VisualDensity.standard,
       navigationBarTheme: NavigationBarThemeData(
         height: 68,
@@ -94,7 +151,11 @@ class AppTheme {
         foregroundColor: onSurface,
         surfaceTintColor: Colors.transparent,
         titleTextStyle: TextStyle(
-          fontFamily: 'Microsoft YaHei',
+          fontFamily:
+              fontFamily ??
+              (defaultTargetPlatform == TargetPlatform.iOS
+                  ? 'CupertinoSystemDisplay'
+                  : 'Roboto'),
           fontSize: 17,
           fontWeight: FontWeight.w700,
           color: onSurface,

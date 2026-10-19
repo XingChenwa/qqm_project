@@ -92,24 +92,37 @@ class PluginCommand {
 class PluginHost {
   final PluginStore Function() _store;
   final String Function() help;
+  final String Function() _appId;
   factory PluginHost({
     required PluginStore Function() store,
     required String Function() help,
-  }) => PluginHost._(store, help);
-  PluginHost._(this._store, this.help);
+    String Function()? appId,
+  }) => PluginHost._(store, help, appId ?? (() => ''));
+  PluginHost._(this._store, this.help, this._appId);
   PluginStore get store => _store();
+  String get appId => _appId();
 }
 
 class PluginButton {
   final String label;
   final String data;
   final bool callback;
-  const PluginButton(this.label, this.data, {this.callback = false});
+  final bool url;
+  final List<String> userIds;
+  const PluginButton(
+    this.label,
+    this.data, {
+    this.callback = false,
+    this.url = false,
+    this.userIds = const [],
+  });
 
   Map<String, dynamic> toMap() => {
     'label': label,
     'data': data,
     'callback': callback,
+    if (url) 'url': true,
+    if (userIds.isNotEmpty) 'user_ids': userIds,
   };
 }
 
@@ -164,7 +177,8 @@ class PluginReply {
       for (final button in row) {
         if (button is! Map ||
             button.keys.any(
-              (k) => !['label', 'data', 'callback'].contains(k),
+              (k) =>
+                  !['label', 'data', 'callback', 'url', 'user_ids'].contains(k),
             ) ||
             button['label'] is! String ||
             (button['label'] as String).isEmpty ||
@@ -172,14 +186,37 @@ class PluginReply {
             button['data'] is! String ||
             (button['data'] as String).isEmpty ||
             (button['data'] as String).length > 512 ||
-            button['callback'] != null && button['callback'] is! bool) {
+            button['callback'] != null && button['callback'] is! bool ||
+            button['url'] != null && button['url'] is! bool) {
           throw const FormatException('按钮文字或指令无效。');
+        }
+        final users = button['user_ids'] ?? <String>[];
+        if (users is! List ||
+            users.length > 100 ||
+            users.any(
+              (id) =>
+                  id is! String ||
+                  !RegExp(r'^[A-Za-z0-9_-]{1,128}$').hasMatch(id),
+            )) {
+          throw const FormatException('按钮指定用户 OpenID 无效。');
+        }
+        if (button['url'] == true) {
+          final target = Uri.tryParse(button['data']);
+          if (button['callback'] == true ||
+              target == null ||
+              target.scheme != 'https' ||
+              target.host.isEmpty ||
+              target.userInfo.isNotEmpty) {
+            throw const FormatException('跳转按钮必须使用无凭据的 HTTPS URL，且不能同时回调。');
+          }
         }
         values.add(
           PluginButton(
             button['label'],
             button['data'],
             callback: button['callback'] == true,
+            url: button['url'] == true,
+            userIds: List<String>.from(users),
           ),
         );
       }

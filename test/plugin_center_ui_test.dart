@@ -124,12 +124,12 @@ void main() {
           .onPressed,
       isNull,
     );
-    expect(manager.plugins, hasLength(6));
+    expect(manager.plugins, hasLength(7));
     await tester.tap(find.byKey(const ValueKey('plugin-import-consent')));
     await tester.pumpAndSettle();
     await tester.tap(find.text('确认导入'));
     await tester.pumpAndSettle();
-    expect(manager.plugins, hasLength(7));
+    expect(manager.plugins, hasLength(8));
     expect(manager.plugins.last.info.isEnabled, false);
     await tester.tap(find.text('知道了'));
     await tester.pumpAndSettle();
@@ -159,7 +159,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.widgetWithText(FilledButton, '卸载'));
     await tester.pumpAndSettle();
-    expect(manager.plugins, hasLength(6));
+    expect(manager.plugins, hasLength(7));
     expect(storage.storedPlugins.containsKey('custom_hello'), false);
     expect(tester.takeException(), isNull);
   });
@@ -206,7 +206,7 @@ void main() {
           .text,
       contains('custom_hello'),
     );
-    expect(manager.plugins, hasLength(6));
+    expect(manager.plugins, hasLength(7));
     await tester.tap(find.byTooltip('关闭插件导入'));
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
@@ -287,10 +287,15 @@ void main() {
             : find.text('插件'),
       );
       await tester.pumpAndSettle();
-      expect(find.text('插件中心'), findsOneWidget);
+      expect(find.text('插件中心'), width < 700 ? findsNothing : findsOneWidget);
+      if (width < 700) expect(find.byTooltip('插件文件管理'), findsOneWidget);
       expect(tester.takeException(), isNull);
       await capture(tester, key, 'plugins-${width.toInt()}');
-      await tester.tap(find.widgetWithText(FilledButton, '导入'));
+      await tester.tap(
+        width < 700
+            ? find.byTooltip('导入插件')
+            : find.widgetWithText(FilledButton, '导入'),
+      );
       await tester.pumpAndSettle();
       tester.view.viewInsets = const FakeViewPadding(bottom: 240);
       await tester.pumpAndSettle();

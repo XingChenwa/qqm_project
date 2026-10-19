@@ -6,6 +6,7 @@
     "plugins/dice_plugin/plugin.json",
     "plugins/translate_comment/plugin.json",
     "plugins/daily_club/plugin.json",
-    "plugins/group_games/plugin.json"
+    "plugins/group_games/plugin.json",
+    "plugins/group_authorization/plugin.json"
   ]
 }

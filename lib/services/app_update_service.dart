@@ -62,21 +62,6 @@ class AppUpdateService extends ChangeNotifier {
   final Set<CancelToken> _probes = {};
   String get activeNodeLabel => activeNode?.label ?? preferences.node.label;
 
-  Future<void> setChannel(UpdateChannel channel) async {
-    if (busy || channel == preferences.channel) return;
-    await preferences.setChannel(channel);
-    activeNode = null;
-    release = null;
-    downloadedFile = null;
-    dismissedBuild = 0;
-    nodeStatuses.clear();
-    _nodeReleases.clear();
-    phase = UpdatePhase.idle;
-    error = '';
-    _changed();
-    await check();
-  }
-
   Future<void> setNode(UpdateNode node) async {
     if (busy) return;
     await preferences.setNode(node);

@@ -2,7 +2,7 @@
 
 这套插件系统让开发者在四端共享命令与玩法。宿主负责 QQ 连接、凭据、回复上下文、序号和发送；插件只返回结果。可使用 JSON/YAML 规则、HTTP 服务或随应用编译的 Dart SDK 开发插件。
 
-内置六个插件，覆盖基础助手、天气与 IP、随机游乐场、翻译、每日小会馆和群互动。需要固定回复时，也可以编写可独立启停的规则插件。
+内置七个插件，覆盖基础助手、天气与 IP、随机游乐场、翻译、每日小会馆、群互动和主动消息权限。新安装的插件默认关闭，需在插件中心手动启用；已经手动保存的启停选择会保留。需要固定回复时，也可以编写可独立启停的规则插件。
 
 ## 1. 先选运行方式
 
@@ -58,6 +58,29 @@
 
 翻译最多 12000 字、4 个代码块、120 段注释；请求 35 秒、响应 128 KB 上限。代码模式仅提交识别出的注释列表，再按原位置替换，不让模型重写整个代码。支持常见 Python、C/C++、Java、Dart、Go、C#、Rust 与基础 JS/TS；复杂原始字符串、JS 正则/模板等保守拒绝。字符串、Python 文档字符串不翻译。结果仍应人工审核，注释可能影响工具或编译配置；不保证语义级解析所有语言。普通文本翻译会把命令参数发给 DeepSeek。
 
+### 主动消息权限插件
+
+在「插件 → 主动消息权限 → 配置」填写机器人资料 JSON，手动启用插件。按 **AppID** 分别配置，切换机器人不会取用另一 AppID 的资料：
+
+```json
+{
+  "当前机器人的AppID": {
+    "bot_qq": "987654321",
+    "bot_uid": "u_替换为机器人的实际UID"
+  }
+}
+```
+
+这是格式示例，请替换真实机器人资料；AppID 不是机器人 QQ 号，机器人 UID 也不是群 OpenID。
+
+1. 群内 **@机器人 /主动消息**，收到「填写群号(群主)」指令按钮。
+2. 群主点击按钮，在预填的 `/主动消息 ` 后补上本群真实群号发送，例如 `/主动消息 123456789`。也可直接发送完整命令，不需要预先在插件里配置群号。
+3. 本次 QQ 事件的 `author.member_role` 必须为 `owner`；普通成员、管理员、未知角色均不能生成授权链接。填写按钮本身只是指令入口，不是授权操作；未知群主时其他人也能打开该输入入口，但提交后仍会严格校验身份。
+4. 返回 Markdown **主动权限(群主使用)** 跳转按钮，使用指定用户权限 `permission.type=0`，仅允许本次群主 OpenID 点击。
+5. 群主在 QQ 页面核对群号并完成授权。每次命令使用当前消息所在群、机器人 AppID 和发送者，不保存跨群或跨机器人的待填写状态。
+
+不能将群 OpenID 或普通文字作为群号。链接仅在点击时打开你指定的 QQ 页面，不代替授权、不预先访问链接、不将这些资料上传第三方。是否支持开通、真实群号与群主关系、最终身份校验及授权结果由 QQ 决定；输入数字不表示客户端已验证群号归属。机器人仍需平台 Markdown 和自定义键盘权限；按钮发出不表示已经获得主动发送能力。[官方按钮说明](https://bot.q.qq.com/wiki/develop/api-v2/server-inter/message/trans/msg-btn.html)
+
 ## 4. 群消息、优先级与权限
 
 群内免 @ 的前提是 QQ 平台已开通「接收所有消息」，且应用允许接收全量群消息；代码不能绕过平台权限。[全量群事件文档](https://bot.q.qq.com/wiki/develop/api-v2/autogen/event/group_message_create.html)
@@ -101,13 +124,13 @@
 }
 ```
 
-`format` 为 `text/markdown/media`。正文最多 16000 字符；文本/Markdown 必须非空。按钮只用于 Markdown，最多 5 行、每行 5 个；文字 1–10 字、data 最多 512 字符。普通按钮填命令；回调按钮须声明 `interaction:read`，data 必须以 `qqm:<本插件ID>:` 开头，再写一条 `callback` 规则处理。群按钮不设置仅 C2C 支持的自动发送参数。
+`format` 为 `text/markdown/media`。正文最多 16000 字符；文本/Markdown 必须非空。按钮只用于 Markdown，最多 5 行、每行 5 个；文字 1–10 字、data 最多 512 字符。普通按钮填命令；跳转按钮额外设置 `\"url\":true`，data 必须是无凭据 HTTPS URL；可选 `user_ids:[\"当前AppID的用户OpenID\"]` 限定点击用户（不填则不限用户）。回调按钮须声明 `interaction:read`，data 必须以 `qqm:<本插件ID>:` 开头，再写一条 `callback` 规则处理。群按钮不设置仅 C2C 支持的自动发送参数。
 
 媒体格式例：`{"format":"media","content":"图片说明","media_url":"https://cdn.example.com/pic.png","media_type":1}`。需声明 `message:media` 和 `media_hosts:["cdn.example.com"]`，类型 1 图片 / 2 视频 / 3 语音 / 4 文件。URL 仅 HTTPS、无凭据和片段；域名严格匹配，不允许通过模板换到其他主机。QQ 服务器还需能够访问该媒体。不是本地任意文件上传接口。
 
 权限基础为 `message:read`、`message:send`；HTTP 增加 `network:http`。可选 `message:media`、`interaction:read`、`events:group-all`。`network:amap/deepseek` 仅可信内置插件使用；清单不是原生代码的 OS 沙箱。
 
-配置项由 `config_schema` 定义，类型 `string/secret/boolean/integer`，支持 `key/label/type/default/required`。key 字母开头，最多 64 字符；字符串最多 8192 字符。`config` 仅存声明过的默认值。分享清单会清除 secret 默认值，不带本机密钥；不要把密钥写进规则正文或普通配置。
+配置项由 `config_schema` 定义，类型 `string/multiline/secret/boolean/integer`（`multiline` 使用多行文本编辑器），支持 `key/label/type/default/required`。key 字母开头，最多 64 字符；字符串最多 8192 字符。`config` 仅存声明过的默认值。分享清单会清除 secret 默认值，不带本机密钥；不要把密钥写进规则正文或普通配置。
 
 ## 6. 用 JavaScript / Python 编写 HTTP 插件
 

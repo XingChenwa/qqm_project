@@ -362,6 +362,7 @@ void main() {
     final manager = PluginManager(MemoryStorage());
     addTearDown(manager.dispose);
     await manager.init();
+    await manager.enablePlugin('weather_plugin');
     for (final command in [
       '天气 北京',
       '查询天气 北京',

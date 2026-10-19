@@ -1,4 +1,6 @@
+import '../../utils/platforms.dart';
 import 'dart:math' as math;
+import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -10,8 +12,10 @@ import '../../models/message.dart';
 import '../../models/plugin.dart';
 import '../../utils/helpers.dart';
 import '../../utils/constants.dart';
+import '../../services/ip_whitelist_service.dart';
 import '../themes/app_theme.dart';
 import '../widgets/chat_input.dart';
+import '../widgets/mobile_workspace.dart';
 import '../widgets/emoji_picker.dart';
 import '../widgets/message_bubble.dart';
 import '../widgets/chat_timeline.dart';
@@ -21,6 +25,7 @@ import '../widgets/log_panel.dart';
 import '../widgets/app_logo.dart';
 import '../widgets/profile_avatar.dart';
 import '../widgets/app_dialogs.dart';
+import '../widgets/ip_whitelist_dialog.dart';
 import 'settings_screen.dart';
 
 class MainScreen extends StatefulWidget {
@@ -58,6 +63,7 @@ class _MainScreenState extends State<MainScreen> {
   int _chatOpenRevision = 0;
   int _chatSentRevision = 0;
   int _accountEpoch = -1;
+  IpWhitelistProblem? _shownIpWhitelistProblem;
 
   @override
   void initState() {
@@ -124,6 +130,25 @@ class _MainScreenState extends State<MainScreen> {
     }
     _selectFirstSessionIfNeeded(_botClient);
     setState(() {});
+    final bot = _botClient;
+    final problem = bot?.ipWhitelistProblem;
+    if (bot != null &&
+        problem != null &&
+        !identical(problem, _shownIpWhitelistProblem)) {
+      _shownIpWhitelistProblem = problem;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || !identical(bot.ipWhitelistProblem, problem)) return;
+        unawaited(
+          AppDialogs.present<void>(
+            context,
+            key: 'ip-whitelist:${problem.appId}',
+            stillRelevant: () =>
+                mounted && identical(bot.ipWhitelistProblem, problem),
+            builder: (_) => IpWhitelistDialog(problem: problem),
+          ).whenComplete(() => bot.dismissIpWhitelistProblem(problem)),
+        );
+      });
+    }
   }
 
   void _selectFirstSessionIfNeeded(BotClient? client) {
@@ -247,8 +272,16 @@ class _MainScreenState extends State<MainScreen> {
                             MessageButton(
                               id: 'plugin_${i}_$j',
                               label: reply.buttons[i][j].label,
+                              visitedLabel: reply.buttons[i][j].label,
                               data: reply.buttons[i][j].data,
-                              actionType: reply.buttons[i][j].callback ? 1 : 2,
+                              actionType: reply.buttons[i][j].url
+                                  ? 0
+                                  : reply.buttons[i][j].callback
+                                  ? 1
+                                  : 2,
+                              permissionType:
+                                  reply.buttons[i][j].userIds.isEmpty ? 2 : 0,
+                              userIds: reply.buttons[i][j].userIds,
                             ),
                         ],
                     ],
@@ -279,7 +312,7 @@ class _MainScreenState extends State<MainScreen> {
     final bot = context.watch<BotClient>();
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
-    if (MediaQuery.sizeOf(context).width < 700) return _mobileScaffold(bot);
+    if (usePhoneLayout(context)) return _mobileScaffold(bot);
 
     return Scaffold(
       key: _scaffoldKey,
@@ -630,107 +663,46 @@ class _MainScreenState extends State<MainScreen> {
             4 => '日志',
             _ => '会话',
           };
-    return PopScope(
-      canPop: !chatting,
-      onPopInvokedWithResult: (didPop, _) {
-        if (!didPop && chatting) setState(() => _mobileChatOpen = false);
-      },
-      child: Scaffold(
-        key: _scaffoldKey,
-        appBar: AppBar(
-          automaticallyImplyLeading: false,
-          title: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
-          leading: chatting
-              ? IconButton(
-                  tooltip: '返回会话列表',
-                  onPressed: () => setState(() => _mobileChatOpen = false),
-                  icon: const Icon(Icons.arrow_back),
-                )
-              : null,
-          actions: [
-            if (chatting)
-              IconButton(
-                tooltip: '会话信息',
-                onPressed: () => _navigateTo(1),
-                icon: const Icon(Icons.info_outline),
+    return MobileWorkspace(
+      scaffoldKey: _scaffoldKey,
+      chatting: chatting,
+      connected: bot.isConnected,
+      connecting: bot.isConnecting,
+      section: _sideIndex,
+      title: title,
+      botLabel: bot.config.appId.isEmpty
+          ? '选择或添加机器人'
+          : 'AppID · ${bot.config.appId}',
+      isGroup: _selectedSession?.sessionType == 1,
+      avatarUrl: _selectedSession?.avatarUrl,
+      onBack: () => setState(() => _mobileChatOpen = false),
+      onSwitchBot: () => _chooseBot(bot),
+      onConnection: () => _toggleConnection(bot),
+      onSettings: _openSettings,
+      onNewChat: _newSession,
+      onNavigate: _navigateTo,
+      body: Column(
+        children: [
+          if (bot.isConnecting) _progressBar(bot),
+          if (bot.connectionError.isNotEmpty) _errorBanner(bot),
+          Expanded(
+            child: switch (_sideIndex) {
+              0 => DashboardPanel(
+                bot: bot,
+                onOpenChat: () => _navigateTo(2),
+                onOpenPlugins: () => _navigateTo(3),
+                onOpenSettings: _openSettings,
               ),
-            IconButton(
-              tooltip: bot.isConnected ? '断开机器人' : '连接机器人',
-              onPressed: bot.isConnecting ? null : () => _toggleConnection(bot),
-              icon: Icon(
-                bot.isConnected ? Icons.link_off : Icons.link,
-                color: bot.isConnected ? AppTheme.qqGreen : null,
-              ),
-            ),
-            IconButton(
-              tooltip: '切换机器人',
-              onPressed: () => _chooseBot(bot),
-              icon: const Icon(Icons.swap_horiz_rounded),
-            ),
-            if (!chatting)
-              IconButton(
-                tooltip: '设置',
-                onPressed: _openSettings,
-                icon: const Icon(Icons.settings_outlined),
-              ),
-          ],
-        ),
-        bottomNavigationBar: chatting
-            ? null
-            : NavigationBar(
-                selectedIndex: const [0, 2, 3, 4].contains(_sideIndex)
-                    ? const [0, 2, 3, 4].indexOf(_sideIndex)
-                    : 0,
-                onDestinationSelected: (index) =>
-                    _navigateTo(const [0, 2, 3, 4][index]),
-                destinations: const [
-                  NavigationDestination(
-                    icon: Icon(Icons.space_dashboard_outlined),
-                    selectedIcon: Icon(Icons.space_dashboard_rounded),
-                    label: '总览',
-                  ),
-                  NavigationDestination(
-                    icon: Icon(Icons.forum_outlined),
-                    selectedIcon: Icon(Icons.forum_rounded),
-                    label: '会话',
-                  ),
-                  NavigationDestination(
-                    icon: Icon(Icons.extension_outlined),
-                    selectedIcon: Icon(Icons.extension_rounded),
-                    label: '插件',
-                  ),
-                  NavigationDestination(
-                    icon: Icon(Icons.receipt_long_outlined),
-                    selectedIcon: Icon(Icons.receipt_long_rounded),
-                    label: '日志',
-                  ),
-                ],
-              ),
-        body: SafeArea(
-          child: Column(
-            children: [
-              if (bot.isConnecting) _progressBar(bot),
-              if (bot.connectionError.isNotEmpty) _errorBanner(bot),
-              Expanded(
-                child: switch (_sideIndex) {
-                  0 => DashboardPanel(
-                    bot: bot,
-                    onOpenChat: () => _navigateTo(2),
-                    onOpenPlugins: () => _navigateTo(3),
-                    onOpenSettings: _openSettings,
-                  ),
-                  1 => _infoPanel(bot),
-                  3 => const PluginPanel(),
-                  4 => LogPanel(logs: _logs),
-                  _ =>
-                    chatting
-                        ? _conversation(bot)
-                        : _sessionPanel(bot, width: double.infinity),
-                },
-              ),
-            ],
+              1 => _infoPanel(bot),
+              3 => const PluginPanel(),
+              4 => LogPanel(logs: _logs),
+              _ =>
+                chatting
+                    ? _conversation(bot)
+                    : _sessionPanel(bot, width: double.infinity),
+            },
           ),
-        ),
+        ],
       ),
     );
   }
@@ -965,6 +937,83 @@ class _MainScreenState extends State<MainScreen> {
             _sessionSearch.toLowerCase(),
           ));
     }).toList();
+    if (usePhoneLayout(context)) {
+      return Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+            child: TextField(
+              onChanged: (value) => setState(() => _sessionSearch = value),
+              decoration: InputDecoration(
+                hintText: '搜索会话',
+                prefixIcon: const Icon(Icons.search_rounded, size: 21),
+                filled: true,
+                fillColor: Theme.of(context).scaffoldBackgroundColor,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(14),
+                  borderSide: BorderSide.none,
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(14),
+                  borderSide: BorderSide.none,
+                ),
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            child: Wrap(
+              runSpacing: 4,
+              children: [
+                _filterChip(
+                  '全部',
+                  _sessionTypeFilter == null,
+                  bot.sessions.length,
+                  null,
+                ),
+                _filterChip(
+                  '单聊',
+                  _sessionTypeFilter == 0,
+                  bot.sessions.where((s) => s.sessionType == 0).length,
+                  0,
+                ),
+                _filterChip(
+                  '群聊',
+                  _sessionTypeFilter == 1,
+                  bot.sessions.where((s) => s.sessionType == 1).length,
+                  1,
+                ),
+              ],
+            ),
+          ),
+          Expanded(
+            child: visibleSessions.isEmpty
+                ? _emptyState(
+                    Icons.chat_bubble_outline_rounded,
+                    _sessionSearch.isEmpty ? '还没有会话' : '没有找到会话',
+                    _sessionSearch.isEmpty
+                        ? '连接机器人，开始接收群聊和单聊消息。'
+                        : '试试其他名称或 OpenID。',
+                  )
+                : ListView.separated(
+                    keyboardDismissBehavior:
+                        ScrollViewKeyboardDismissBehavior.onDrag,
+                    padding: const EdgeInsets.only(bottom: 16),
+                    itemCount: visibleSessions.length,
+                    separatorBuilder: (_, _) => Divider(
+                      height: 1,
+                      indent: 82,
+                      color: Theme.of(
+                        context,
+                      ).dividerColor.withValues(alpha: .6),
+                    ),
+                    itemBuilder: (_, index) =>
+                        _sessionTile(visibleSessions[index], bot),
+                  ),
+          ),
+        ],
+      );
+    }
     return _panel(
       width: width,
       child: Column(
@@ -1148,12 +1197,13 @@ class _MainScreenState extends State<MainScreen> {
   }
 
   Widget _sessionTile(ChatSession session, BotClient bot) {
-    final selected = _selectedSession?.id == session.id;
+    final mobile = usePhoneLayout(context);
+    final selected = _selectedSession?.id == session.id && !mobile;
     final accent = session.sessionType == 1
         ? AppTheme.qqGreen
         : AppTheme.qqBlue;
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
+      padding: EdgeInsets.symmetric(vertical: mobile ? 0 : 4),
       child: Material(
         color: selected
             ? AppTheme.qqBlue.withValues(alpha: 0.1)
@@ -1172,16 +1222,18 @@ class _MainScreenState extends State<MainScreen> {
             bot.refreshSessionProfile(session.id);
           },
           child: Padding(
-            padding: const EdgeInsets.all(10),
+            padding: mobile
+                ? const EdgeInsets.symmetric(horizontal: 18, vertical: 14)
+                : const EdgeInsets.all(10),
             child: Row(
               children: [
                 ProfileAvatar(
                   name: session.name,
                   url: session.avatarUrl,
                   isGroup: session.sessionType == 1,
-                  radius: 23,
+                  radius: mobile ? 25 : 23,
                 ),
-                const SizedBox(width: 10),
+                SizedBox(width: mobile ? 14 : 10),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -1192,9 +1244,9 @@ class _MainScreenState extends State<MainScreen> {
                             child: Text(
                               session.name,
                               overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w900,
+                              style: TextStyle(
+                                fontSize: mobile ? 16 : 14,
+                                fontWeight: FontWeight.w600,
                               ),
                             ),
                           ),
@@ -1215,14 +1267,15 @@ class _MainScreenState extends State<MainScreen> {
                               formatQqMessageContent(session.lastMessage),
                               overflow: TextOverflow.ellipsis,
                               style: TextStyle(
-                                fontSize: 12,
+                                fontSize: mobile ? 13 : 12,
                                 color: Theme.of(context).hintColor,
                               ),
                             ),
                           ),
                           if (session.unreadCount > 0)
                             _unreadBadge(session.unreadCount),
-                          if (session.unreadCount == 0) _statusDot(accent),
+                          if (session.unreadCount == 0 && !mobile)
+                            _statusDot(accent),
                         ],
                       ),
                     ],
@@ -1242,8 +1295,7 @@ class _MainScreenState extends State<MainScreen> {
       child: LayoutBuilder(
         builder: (context, constraints) => Column(
           children: [
-            if (MediaQuery.sizeOf(context).width >= 700)
-              _conversationHeader(session),
+            if (!usePhoneLayout(context)) _conversationHeader(session),
             Expanded(
               child: session == null
                   ? _emptyState(
@@ -1264,7 +1316,7 @@ class _MainScreenState extends State<MainScreen> {
                   maxHeight: math.max(
                     0,
                     constraints.maxHeight -
-                        (MediaQuery.sizeOf(context).width >= 700 ? 74 : 0) -
+                        (!usePhoneLayout(context) ? 74 : 0) -
                         math.min(80, constraints.maxHeight * .15),
                   ),
                 ),
@@ -1277,7 +1329,7 @@ class _MainScreenState extends State<MainScreen> {
   }
 
   Widget _conversationHeader(ChatSession? session) {
-    final compact = MediaQuery.sizeOf(context).width < 700;
+    final compact = usePhoneLayout(context);
     return Container(
       height: 74,
       padding: const EdgeInsets.symmetric(horizontal: 18),
@@ -1742,6 +1794,9 @@ class _MainScreenState extends State<MainScreen> {
   }
 
   Widget _panel({double? width, required Widget child}) {
+    if (usePhoneLayout(context)) {
+      return SizedBox(width: width, child: child);
+    }
     return Container(
       width: width,
       decoration: BoxDecoration(

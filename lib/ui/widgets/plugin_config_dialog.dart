@@ -54,6 +54,23 @@ class _PluginConfigDialogState extends State<PluginConfigDialog> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
+              if (widget.info.id == 'group_authorization')
+                const Padding(
+                  padding: EdgeInsets.only(bottom: 16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '这里只配置机器人的资料。群号由群主在 QQ 群里点击“填写群号”按钮后发送，不需要在此配置。多个 AppID 可分别添加。',
+                      ),
+                      SizedBox(height: 10),
+                      SelectableText(
+                        '{\n  "替换为当前AppID": {\n    "bot_qq": "机器人QQ号",\n    "bot_uid": "机器人UID"\n  }\n}',
+                        style: TextStyle(fontSize: 12, height: 1.5),
+                      ),
+                    ],
+                  ),
+                ),
               for (final field in widget.definition.fields)
                 Padding(
                   padding: const EdgeInsets.only(bottom: 14),
@@ -67,6 +84,8 @@ class _PluginConfigDialogState extends State<PluginConfigDialog> {
                         )
                       : TextFormField(
                           controller: _controllers[field.key],
+                          minLines: field.type == 'multiline' ? 5 : 1,
+                          maxLines: field.type == 'multiline' ? 12 : 1,
                           obscureText:
                               field.type == 'secret' &&
                               !_visible.contains(field.key),
@@ -74,6 +93,8 @@ class _PluginConfigDialogState extends State<PluginConfigDialog> {
                               ? const TextInputType.numberWithOptions(
                                   signed: true,
                                 )
+                              : field.type == 'multiline'
+                              ? TextInputType.multiline
                               : TextInputType.text,
                           decoration: InputDecoration(
                             helperMaxLines: 2,
