@@ -1,6 +1,7 @@
 "use strict";
 const $ = (id) => document.getElementById(id);
 const S = {
+  sending: false,
   state: null,
   revision: -1,
   page: "chat",
@@ -197,6 +198,7 @@ document.addEventListener("click", (event) => {
   const url = safeUrl(anchor.href);
   if (url) {
     event.preventDefault();
+    if (event.repeat) return;
     openBrowser(url);
   }
 });
@@ -369,7 +371,7 @@ function renderChatHeader() {
       { id: "chat-avatar" },
     ),
   );
-  $("send").disabled = !session;
+  $("send").disabled = !session || S.sending;
 }
 function renderSessions() {
   const query = $("search").value.trim().toLowerCase();
@@ -472,6 +474,12 @@ function renderReceived(body, parent) {
 function renderMessages() {
   const area = $("messages"),
     top = area.scrollTop;
+  const expanded = new Set();
+  for (const article of area.querySelectorAll("[data-render-id]")) {
+    [...article.querySelectorAll("details")].forEach((detail, index) => {
+      if (detail.open) expanded.add(article.dataset.renderId + ":" + index);
+    });
+  }
   area.replaceChildren();
   for (const message of S.messages) {
     const bubble = el("div", { class: "bubble" });
@@ -523,7 +531,10 @@ function renderMessages() {
     area.append(
       el(
         "article",
-        { class: "message" + (message.isFromBot ? " mine" : "") },
+        {
+          class: "message" + (message.isFromBot ? " mine" : ""),
+          "data-render-id": `${S.state.config.appId}/${S.session}/${message.id}`,
+        },
         avatar(message.senderName, message.senderAvatarUrl),
         main,
       ),
@@ -533,6 +544,12 @@ function renderMessages() {
     area.append(
       el("div", { class: "empty" }, el("p", {}, "这里还没有聊天记录")),
     );
+  for (const article of area.querySelectorAll("[data-render-id]")) {
+    [...article.querySelectorAll("details")].forEach((detail, index) => {
+      if (expanded.has(article.dataset.renderId + ":" + index))
+        detail.open = true;
+    });
+  }
   area.scrollTop = top;
 }
 async function loadMessages(toBottom = false) {
@@ -561,8 +578,10 @@ async function loadMessages(toBottom = false) {
     requestAnimationFrame(bottom);
   }
 }
-$("send").onclick = (event) =>
-  perform(async () => {
+$("send").onclick = async (event) => {
+  if (S.sending) return;
+  S.sending = true;
+  await perform(async () => {
     if (!S.session) throw Error("请先选择会话");
     const body = {
       appId: S.state.config.appId,
@@ -573,15 +592,22 @@ $("send").onclick = (event) =>
     };
     if (!body.content.trim()) throw Error("消息不能为空");
     await post("send", body);
+    const sentKey = `${body.appId}/${body.session}/${body.format}`;
+    if (S.drafts.get(sentKey) === body.content) S.drafts.delete(sentKey);
     if (body.appId === S.state.config.appId && body.session === S.session) {
-      $("draft").value = "";
-      saveDraft();
-      clearReply();
+      if (S.format === body.format && $("draft").value === body.content) {
+        $("draft").value = "";
+        saveDraft();
+      }
+      if ((S.reply?.id || "") === body.replyId) clearReply();
       updatePreview();
       await loadMessages(true);
     }
     await refresh(true);
   }, event.currentTarget);
+  S.sending = false;
+  if (S.state) renderChatHeader();
+};
 $("mention").onclick = () => {
   const session = S.state.sessions.find((s) => s.id === S.session);
   if (session?.sessionType !== 1) {

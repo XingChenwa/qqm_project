@@ -93,6 +93,10 @@ try {
   await page.route("**/api/messages?*", async (route) => {
     const response = await route.fetch();
     const body = await response.json();
+    body.messages[28].body = {
+      text: "引用消息",
+      elements: [{ text: "可重复展开的内容", elements: [] }],
+    };
     body.messages.push(...extra);
     await route.fulfill({ response, json: body });
   });
@@ -120,16 +124,50 @@ try {
     await page.locator("#messages").evaluate((node) => node.scrollTop),
     0,
   );
+  await page.locator("#messages details").evaluate((node) => {
+    node.open = true;
+  });
+  extra.push({
+    id: "another-inbound",
+    senderId: "member-a",
+    senderName: "薯条同学",
+    content: "保留引用展开状态",
+    isFromBot: false,
+    time: new Date().toISOString(),
+  });
+  await page.evaluate(async () => {
+    await fetch("/api/read", {
+      method: "POST",
+      headers: { "X-QQM-Request": "1", "Content-Type": "application/json" },
+      body: JSON.stringify({ appId: "10000001", session: "group-a" }),
+    });
+  });
+  await page.waitForFunction(
+    () => document.querySelectorAll(".message").length === 32,
+  );
+  assert.equal(
+    await page.locator("#messages details").evaluate((node) => node.open),
+    true,
+  );
+  let sendIndex = 0,
+    holdNext = false,
+    releaseSend;
   await page.route("**/api/send", async (route) => {
     const body = route.request().postDataJSON();
     extra.push({
-      id: "new-outbound",
+      id: "new-outbound-" + ++sendIndex,
       senderId: "bot",
       senderName: "小助手",
       content: body.content,
       isFromBot: true,
       time: new Date().toISOString(),
     });
+    if (holdNext) {
+      holdNext = false;
+      await new Promise((resolve) => {
+        releaseSend = resolve;
+      });
+    }
     await route.fulfill({ json: { ok: true } });
   });
   await page.locator("#draft").fill("回车发送的消息");
@@ -141,6 +179,16 @@ try {
     const m = document.querySelector("#messages");
     return m.scrollHeight - m.scrollTop - m.clientHeight < 3;
   });
+  holdNext = true;
+  const pendingSend = page.waitForRequest("**/api/send");
+  await page.locator("#draft").fill("较慢的发送");
+  await page.locator("#draft").press("Enter");
+  await pendingSend;
+  await page.locator("#draft").fill("发送期间写的新草稿");
+  assert.equal(typeof releaseSend, "function");
+  releaseSend();
+  await page.waitForFunction(() => !document.querySelector("#send").disabled);
+  assert.equal(await page.locator("#draft").inputValue(), "发送期间写的新草稿");
   for (const width of [1360, 768, 390, 320]) {
     await page.setViewportSize({ width, height: 900 });
     for (const name of ["plugins", "logs", "settings"]) {
