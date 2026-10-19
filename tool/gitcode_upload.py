@@ -1,5 +1,6 @@
 """Publisher-only PUT transport; credentials and signed URLs are never logged."""
 import json
+import http.client
 import ssl
 import sys
 import urllib.error
@@ -10,6 +11,19 @@ import urllib.request
 class NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         return None
+
+
+class UploadConnection(http.client.HTTPSConnection):
+    def connect(self):
+        # Distinguish unreachable runner networks from a slow large-file PUT.
+        self.timeout = 15
+        super().connect()
+        self.sock.settimeout(300)
+
+
+class UploadHTTPSHandler(urllib.request.HTTPSHandler):
+    def https_open(self, req):
+        return self.do_open(UploadConnection, req, context=self._context)
 
 
 def main():
@@ -28,7 +42,7 @@ def main():
     if len(content) != size:
         raise ValueError('Upload size mismatch')
     request = urllib.request.Request(descriptor['url'], data=content, headers=headers, method='PUT')
-    opener = urllib.request.build_opener(NoRedirect, urllib.request.HTTPSHandler(context=ssl.create_default_context()))
+    opener = urllib.request.build_opener(NoRedirect, UploadHTTPSHandler(context=ssl.create_default_context()))
     with opener.open(request, timeout=300) as response:
         if not 200 <= response.status < 300:
             raise ValueError('Upload rejected')
@@ -40,6 +54,9 @@ if __name__ == '__main__':
         main()
     except urllib.error.HTTPError as error:
         print('Upload HTTP ' + str(error.code), file=sys.stderr)
+        sys.exit(1)
+    except urllib.error.URLError as error:
+        print('Upload transport: ' + type(error.reason).__name__ + 'Error', file=sys.stderr)
         sys.exit(1)
     except Exception as error:
         # Never render exception messages: urllib may include the signed URL.

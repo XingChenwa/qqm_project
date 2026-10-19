@@ -6,6 +6,11 @@ on:
         description: 已发布的 GitHub Release 标签，例如 v1.3.8 或 v1.3.8-beta.1
         required: true
         type: string
+      runner:
+        description: 上传节点（可在不同网络环境间切换）
+        default: macos-15
+        type: choice
+        options: [macos-15, ubuntu-24.04]
 permissions:
   contents: read
 concurrency:
@@ -13,7 +18,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   mirror:
-    runs-on: ubuntu-24.04
+    runs-on: ${{ inputs.runner || 'macos-15' }}
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
