@@ -2,7 +2,7 @@
   "schema_version": 2,
   "id": "weather_plugin",
   "name": "天气与 IP 查询",
-  "version": "2.0.0",
+  "version": "3.0.0",
   "description": "高德实况、每日预报、城市编码和国内 IPv4 定位，支持明确天气指令免 @。",
   "config": {
     "amap_key": "",
@@ -11,7 +11,8 @@
   "permissions": [
     "message:read",
     "message:send",
-    "network:amap"
+    "network:http",
+    "events:group-all"
   ],
   "config_schema": [
     {
@@ -28,6 +29,75 @@
     }
   ],
   "author": "QQ 机器人管理器",
-  "runtime": "builtin",
-  "entrypoint": "lib/weather_plugin/plugin.dart"
+  "runtime": "script",
+  "entrypoint": "main.ht",
+  "script": {
+    "language": "hetu",
+    "commands": [
+      {
+        "name": "天气",
+        "description": "高德实况天气",
+        "usage": "天气 城市",
+        "aliases": [
+          "weather",
+          "tianqi",
+          "查询天气",
+          "天气查询",
+          "查天气"
+        ]
+      },
+      {
+        "name": "天气预报",
+        "description": "未来天气预报",
+        "usage": "天气预报 城市",
+        "aliases": [
+          "forecast",
+          "预报"
+        ]
+      },
+      {
+        "name": "城市编码",
+        "description": "行政区编码",
+        "usage": "城市编码 城市",
+        "aliases": [
+          "adcode"
+        ]
+      },
+      {
+        "name": "ip",
+        "description": "国内 IPv4 归属地",
+        "usage": "ip 114.114.114.114",
+        "aliases": [
+          "查ip",
+          "查询ip",
+          "查ip地址",
+          "查询ip地址",
+          "ip地址",
+          "ip查询",
+          "ip地址查询"
+        ]
+      }
+    ],
+    "hosts": [
+      "restapi.amap.com"
+    ],
+    "timeout_ms": 20000,
+    "unmentioned": {
+      "commands": true,
+      "prefixes": [
+        "天气",
+        "查询天气",
+        "查天气",
+        "预报",
+        "forecast",
+        "城市编码",
+        "adcode",
+        "weather",
+        "tianqi",
+        "ip",
+        "查ip",
+        "查询ip"
+      ]
+    }
+  }
 }

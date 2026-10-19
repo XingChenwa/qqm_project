@@ -102,11 +102,9 @@ class PublicIpService {
             ),
           );
   Future<List<String>> lookup() async {
-    final results = await Future.wait([
-      _lookup('https://api.ipify.org', InternetAddressType.IPv4),
-      _lookup('https://api6.ipify.org', InternetAddressType.IPv6),
-    ]);
-    return results.whereType<String>().toSet().toList();
+    // IPv4-only endpoint, never fall back silently to an IPv6 result.
+    final ip = await _lookup('https://api.ipify.org', InternetAddressType.IPv4);
+    return [?ip];
   }
 
   Future<String?> _lookup(String endpoint, InternetAddressType family) async {

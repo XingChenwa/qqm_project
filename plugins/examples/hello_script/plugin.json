@@ -1,0 +1,33 @@
+{
+  "schema_version": 2,
+  "id": "hello_script",
+  "name": "脚本开发示例",
+  "version": "1.0.0",
+  "description": "完整可导入源码：问候、Markdown按钮与本会话计数",
+  "runtime": "script",
+  "permissions": [
+    "message:read",
+    "message:send",
+    "storage:local"
+  ],
+  "config_schema": [
+    {
+      "key": "greeting",
+      "label": "问候语",
+      "type": "string",
+      "default": "你好"
+    }
+  ],
+  "rules": [],
+  "script": {
+    "language": "hetu",
+    "commands": [
+      {
+        "name": "hello",
+        "description": "问候并记录次数",
+        "usage": "hello [内容]"
+      }
+    ],
+    "source": "function main(ctx) {\n  if (ctx.phase == 'enable') { return null }\n  if (ctx.command != 'hello') { return null }\n  var count = integer(ctx.state['count'])\n  if (count == null) { count = 0 }\n  ctx.state['count'] = count + 1\n  return {\n    format: 'markdown',\n    content: '### ' + markdown_escape(ctx.config['greeting']) + '\\n\\n' + markdown_escape(clean_name(ctx.message['sender_name'])) + '，这是本会话第 ' + str(count + 1) + ' 次问候。\\n\\n' + markdown_escape(ctx.args.join(' ')),\n    buttons: [[{label: '再次问候', data: '/hello'}]]\n  }\n}\n"
+  }
+}

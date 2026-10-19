@@ -1,6 +1,8 @@
 # 插件开发指南：SDK / 清单协议 v2
 
-这套插件系统让开发者在四端共享命令与玩法。宿主负责 QQ 连接、凭据、回复上下文、序号和发送；插件只返回结果。可使用 JSON/YAML 规则、HTTP 服务或随应用编译的 Dart SDK 开发插件。
+本文的可导入脚本入口适用于 **1.3.8-beta.4 及更新版本**。旧版客户端可继续使用 JSON/YAML 规则与 HTTP 插件。
+
+这套插件系统让开发者在四端共享命令与玩法。宿主负责 QQ 连接、凭据、回复上下文、序号和发送；插件只返回结果。可使用 JSON/YAML 规则、HTTP 服务或跨平台 Hetu 脚本 开发插件。
 
 内置七个插件，覆盖基础助手、天气与 IP、随机游乐场、翻译、每日小会馆、群互动和主动消息权限。新安装的插件默认关闭，需在插件中心手动启用；已经手动保存的启停选择会保留。需要固定回复时，也可以编写可独立启停的规则插件。
 
@@ -10,9 +12,9 @@
 | --- | --- | --- |
 | `rules` JSON / YAML | 命令、关键词、Markdown、按钮、固定媒体 | 应用内直接安装，无需编译 |
 | `http` 清单 + 自有服务 | Node.js / Python / Go 等复杂玩法 | 开发者的服务；应用只调用已授权地址 |
-| `builtin` Dart SDK | 深度逻辑、原生集成、离线玩法 | 源码审核后随应用重新编译 |
+| `script` Hetu 入口 / 完整 JSON | 自定义算法、命令、离线玩法、持久状态、已授权 HTTP | 四端直接导入，修改后应用，不需要重新编译 |
 
-文件管理器可以编辑 `.json/.yaml/.yml/.md/.txt/.js/.mjs/.py/.dart`。**能编辑不等于能执行**：应用不 eval 脚本、不运行 shell、不自动启动服务，也不内置 Node/Redis。手机上的本地 HTTP 地址指手机自己，不是电脑。
+七个随附插件与第三方脚本共用同一个加载器。每个插件目录内的 `main.ht` 就是完整逻辑，不再用清单映射到应用内固定功能。开发者可以自由编写函数、分支、循环和类；命令和权限在清单中声明。文件管理器支持 `.ht/.json/.yaml/.yml/.md/.txt`，也能编辑 JS/Python/Dart 参考文本；本地可执行语言为 Hetu，Node.js/npm 等生态可通过 HTTP 服务接入。手机上的本地 HTTP 地址指手机自己，不是电脑。
 
 ## 2. 两分钟安装第一个插件
 
@@ -37,11 +39,11 @@
 ```
 
 1. 校验或本地试运行；预览不会调用 HTTP 或发送 QQ。
-2. 点击「安装到插件中心」，检查权限；替换现有 ID 还要确认替换。
+2. 点击「应用到插件中心」，检查权限；替换现有 ID 还要确认替换。
 3. 安装和替换后均停用，检查配置后再启用。
 4. 发送 `/myhello 测试` 或 `#myhello 测试`。
 
-已有 v1 清单继续可用。v2 推荐显式 `message.format`，避免正文里的 Markdown 符号被误判。不要占用内置 ID。
+已有 v1 清单继续可用。v2 推荐显式 `message.format`，避免正文里的 Markdown 符号被误判。可以复制随附脚本改为自己的 ID；也可明确确认后覆盖原 ID，保留兼容配置与玩法数据。
 
 ## 3. 内置玩法命令
 
@@ -74,7 +76,7 @@
 这是格式示例，请替换真实机器人资料；AppID 不是机器人 QQ 号，机器人 UID 也不是群 OpenID。
 
 1. 群内 **@机器人 /主动消息**，收到「填写群号(群主)」指令按钮。
-2. 群主点击按钮，在预填的 `/主动消息 ` 后补上本群真实群号发送，例如 `/主动消息 123456789`。也可直接发送完整命令，不需要预先在插件里配置群号。
+2. 群主点击按钮，在预填的 `/主动消息 ` 后补上本群真实群号，保持 @机器人后发送，例如 `@机器人 /主动消息 123456789`。也可直接发送完整命令，不需要预先在插件里配置群号。
 3. 本次 QQ 事件的 `author.member_role` 必须为 `owner`；普通成员、管理员、未知角色均不能生成授权链接。填写按钮本身只是指令入口，不是授权操作；未知群主时其他人也能打开该输入入口，但提交后仍会严格校验身份。
 4. 返回 Markdown **主动权限(群主使用)** 跳转按钮，使用指定用户权限 `permission.type=0`，仅允许本次群主 OpenID 点击。
 5. 群主在 QQ 页面核对群号并完成授权。每次命令使用当前消息所在群、机器人 AppID 和发送者，不保存跨群或跨机器人的待填写状态。
@@ -86,6 +88,7 @@
 群内免 @ 的前提是 QQ 平台已开通「接收所有消息」，且应用允许接收全量群消息；代码不能绕过平台权限。[全量群事件文档](https://bot.q.qq.com/wiki/develop/api-v2/autogen/event/group_message_create.html)
 
 - 全量群事件中，内置插件只响应明确 `/`、`#` 命令；天气/IP 的明确自然指令、骰子表达式也可触发。普通聊天不兜底回复。
+- `GROUP_MESSAGE_CREATE` 也可能包含发给当前机器人的 @，不能只按事件名判定为未 @。宿主识别当前机器人后，仅规范化插件输入中的前缀，不改动原聊天记录；`PluginMessage.isMentioned` / HTTP 消息字段 `is_mentioned` 记录这一状态，`is_full_group_message` 仍保留原事件类型。`acceptsUnmentioned` 只筛选确实未 @ 的全量消息。主动消息权限插件仍要求 @，不会响应无 @ 的 `/主动消息`；@ 了其他机器人也不触发。
 - 第三方 `command` 规则可免 @；`exact/prefix/contains` 默认仅处理单聊或 @ 消息。需要普通全量消息时同时声明 `"listen_all":true` 和权限 `events:group-all`，安装时由操作者确认。
 - 插件按 `priority` 从小到大运行，范围 0–1000，默认 100；同优先级按加载顺序。首个返回有效回复的插件结束本轮，避免多个插件消耗被动回复额度。
 - `cooldown_ms`：0–60000，默认 0，同插件、会话、发送者的回复冷却；每插件最多 4 个并发任务。
@@ -101,13 +104,13 @@
 
 例如规则回复 `{"format":"markdown","content":"<qqbot-at-user id=\"{{sender_id}}\" /> 收到你的指令了。"}`，配合 `"scope":"group"` 即可 @ 触发命令的成员。完整示例见 [群成员 @ 插件](../plugins/examples/group_mentions/plugin.json)。成员 OpenID 必须来自**当前 AppID**，不能用 QQ 号或另一机器人的 OpenID；HTTP 服务也应校验返回的 ID，不能将用户输入直接拼成标签。
 
-切换机器人后，会话、头像／昵称缓存、回复序号和玩法数据按 AppID 隔离。尚未完成的旧机器人插件结果不会发到新机器人；Dart 插件内 `host.store` 固定使用本次执行开始时的 AppID，不会因异步等待后切换而写错归属。
+切换机器人后，会话、头像／昵称缓存、回复序号和玩法数据按 AppID 隔离。尚未完成的旧机器人插件结果不会发到新机器人；脚本的状态存储 固定使用本次执行开始时的 AppID，不会因异步等待后切换而写错归属。
 
 ## 5. 清单与结构化回复
 
-[JSON Schema](../plugins/schema/plugin.schema.json) 提供编辑器提示；应用还会交叉检查权限、配置、URL 和域名。清单不执行代码。最大 256 KB、16 层、10000 节点，最多 64 条规则、32 个配置项、32 个第三方插件；未知字段直接拒绝。
+[JSON Schema](../plugins/schema/plugin.schema.json) 提供编辑器提示；应用还会交叉检查权限、配置、URL 和域名。检查和导入清单不运行源码；脚本仅在手动启用后执行。最大 256 KB、16 层、10000 节点，最多 64 条规则、32 个配置项、32 个第三方插件；未知字段直接拒绝。
 
-必填字段：`schema_version`（1 或 2）、`id`、`name`、`version`、`description`、`runtime`、`permissions`、`rules`。ID 3–64 位小写字母、数字、下划线，以字母开头。名称/版本最多 80 字，描述最多 1000 字。`author` 可选。每条规则使用 `reply` 或 `message`，不能同时使用；HTTP 规则可以都省略，由服务决定结果。
+必填字段：`schema_version`（1 或 2）、`id`、`name`、`version`、`description`、`runtime`、`permissions`；规则/HTTP 插件还需要 `rules`（脚本可以省略或置空）。ID 3–64 位小写字母、数字、下划线，以字母开头。名称/版本最多 80 字，描述最多 1000 字。`author` 可选。每条规则使用 `reply` 或 `message`，不能同时使用；HTTP 规则可以都省略，由服务决定结果。
 
 ```json
 {
@@ -128,7 +131,7 @@
 
 媒体格式例：`{"format":"media","content":"图片说明","media_url":"https://cdn.example.com/pic.png","media_type":1}`。需声明 `message:media` 和 `media_hosts:["cdn.example.com"]`，类型 1 图片 / 2 视频 / 3 语音 / 4 文件。URL 仅 HTTPS、无凭据和片段；域名严格匹配，不允许通过模板换到其他主机。QQ 服务器还需能够访问该媒体。不是本地任意文件上传接口。
 
-权限基础为 `message:read`、`message:send`；HTTP 增加 `network:http`。可选 `message:media`、`interaction:read`、`events:group-all`。`network:amap/deepseek` 仅可信内置插件使用；清单不是原生代码的 OS 沙箱。
+权限基础为 `message:read`、`message:send`；HTTP 或联网脚本增加 `network:http`；脚本持久化增加 `storage:local`。可选 `message:media`、`interaction:read`、`events:group-all`。脚本宿主不提供机器人 Token、系统文件或命令行。
 
 配置项由 `config_schema` 定义，类型 `string/multiline/secret/boolean/integer`（`multiline` 使用多行文本编辑器），支持 `key/label/type/default/required`。key 字母开头，最多 64 字符；字符串最多 8192 字符。`config` 仅存声明过的默认值。分享清单会清除 secret 默认值，不带本机密钥；不要把密钥写进规则正文或普通配置。
 
@@ -164,6 +167,7 @@ POST 请求示意（HTTP 封装版本保留 `1`，新增字段为可选）：
     "message_type": 0,
     "is_group": true,
     "is_full_group_message": false,
+    "is_mentioned": true,
     "event_type": "message",
     "timestamp": "2026-10-16T00:00:00.000Z"
   },
@@ -185,47 +189,121 @@ node plugins/examples/http_echo/server.mjs
 
 示例监听 `127.0.0.1:8787`；在插件配置填写同一令牌，启用后 `/echo 测试`。服务不会由应用启动。部署公网需自行增加 TLS、访问令牌、限流、幂等、数据备份；不要把开发服务器直接暴露公网。服务收到 OpenID/消息内容，请明确用途、最小化日志和保留时间。Node/Redis 玩法可以写在此服务。
 
-## 7. Dart SDK v2
+## 7. 可导入即运行的脚本 SDK
 
-导入 `package:qqm_plugins/sdk.dart`。原 `onEnable/onDisable/onMessage/onCommand/handleMessage` 接口保持兼容，返回 String 的旧插件继续自动判断 Markdown。新插件推荐重写 `execute(PluginMessage)` 返回 `PluginReply?`，完整保留身份与会话上下文；返回 null 表示不处理。
+### 创建、编辑和分享
 
-```dart
-class CounterPlugin extends BotPlugin {
-  CounterPlugin(super.info);
-  @override
-  Future<void> onEnable() async {}
-  @override
-  Future<void> onDisable() async {}
-  @override
-  Future<String?> onMessage(PluginMessage message) async => null;
-  @override
-  Future<String?> onCommand(String command, List<String> args) async => null;
-  @override
-  Future<PluginReply?> execute(PluginMessage message) async {
-    if (parseSlashCommand(message.content)?.command != 'count') return null;
-    final key = '${message.isGroup}:${message.sessionId}';
-    final count = await host!.store.update<int>(key, (data) {
-      final next = (data['count'] as int? ?? 0) + 1;
-      data['count'] = next;
-      return next;
-    });
-    return PluginReply('本会话计数：$count', format: 'text');
-  }
+1. 「插件 → 写插件 → 新建脚本插件」，得到 `plugin.json`、`main.ht` 和说明文件。
+2. 在 `main.ht` 编写 `function main(ctx)`。文件管理器保存时不执行脚本。
+3. 点击「应用到插件中心」，确认权限与替换（如有），检查配置，再手动启用；不需要修改应用内核或重新编译。
+4. 插件中心每个卡片均可「在工作台编辑」，包括七个随附插件。已存在的本地草稿不会被自动覆盖。
+5. 分享时复制/导出插件中心的完整清单，里面的 `script.source` 包含可运行源码；对方在「导入」粘贴 JSON/YAML 即可。仅导出当前 `.ht` 文件不包含命令和权限清单。
+
+项目目录：
+
+```text
+my_counter/
+  plugin.json
+  main.ht
+  readme.md
+```
+
+`plugin.json`：
+
+```json
+{
+  "schema_version": 2,
+  "id": "my_counter",
+  "name": "我的计数器",
+  "version": "1.0.0",
+  "description": "本会话计数示例",
+  "runtime": "script",
+  "entrypoint": "main.ht",
+  "permissions": ["message:read", "message:send", "storage:local"],
+  "script": {
+    "language": "hetu",
+    "timeout_ms": 3000,
+    "commands": [{"name": "count", "description": "本会话计数", "usage": "count"}]
+  },
+  "rules": []
 }
 ```
 
-- `commands` 返回 `PluginCommand` 列表，动态帮助和插件卡片自动显示。`acceptsUnmentioned` 决定是否接收未 @ 全量消息，默认仅 `/`、`#` 命令；不能突破平台接收权限。
-- `PluginMessage` 还提供 senderRole、isFullGroupMessage、eventType、callbackData、attachments；回调通过 `execute` 或默认 `onInteraction` 处理。
-- `host.appId` 返回本次插件执行所属的 AppID（异步执行期间保持归属），不包含密钥或 Token。
-- `host.store.update` 串行原子读改写；按当前 AppID + 插件 ID 隔离，开发者再用会话/发送者组成键。必须使用 JSON 数据；整个插件最多 256 个数据键、512 KB。不放密钥，不在 action 内启动异步工作。
-- `host.store.read`、`snapshot` 读取；`clear` 清空。宿主在插件菜单提供数据导出/清理，清理需先停用。卸载不自动擦除玩法数据；应用“清除全部数据”会清除。
-- `executionTimeout` 默认 10 秒，启停 5 秒；异步操作自己取消和限时。超时不代表任意 Dart 工作能被强行中止。`onTick` 仅保留接口，目前无自动调度，不承诺定时推送。
+`main.ht`（Hetu 不是 JavaScript，语法相近但请按示例编写）：
 
-新 Dart 插件需加入 `plugins/lib/built_in_registry.dart`、`plugins/index.json`、根 pubspec 的清单 assets，再重新编译。参考新内置 `daily_club` / `group_games`；源码是受信任应用代码，必须审核依赖，不能视为安全沙箱。
+```text
+function main(ctx) {
+  if (ctx.phase == 'enable') { return null }
+  if (ctx.command != 'count') { return null }
+  var count = integer(ctx.state['count'])
+  if (count == null) { count = 0 }
+  ctx.state['count'] = count + 1
+  return {format: 'text', content: '本会话计数：' + str(count + 1)}
+}
+```
+
+完整可直接导入的示例见 [脚本问候与计数](../plugins/examples/hello_script/plugin.json)。更完整的现成项目见 `plugins/<ID>/main.ht`，例如 `group_games` 的投票与按钮、`weather_plugin` 的 HTTP、`daily_club` 的状态管理。复制后改变 ID，回调数据用 `'qqm:' + ctx.id + ':动作:参数'`，不要硬编码别人的 ID。
+
+### 入口、消息和状态
+
+- 启用时调用 `main(ctx)`，其中 `ctx.phase == 'enable'`；可返回 `{error:'配置说明'}` 拒绝启用。此阶段不允许联网、不提交状态、也不发送消息。
+- 每次事件使用独立可取消的解释器；脚本全局变量不会跨消息保留。用 `ctx.state` 存储状态，不用全局变量保存会话进度。
+- `ctx.phase == 'message'` 时，`ctx.command` 是去除 / 或 # 后的小写命令名；`ctx.args` 为参数列表，多行代码块保留。普通文本命令为空，原文在 `ctx.text`。
+- `ctx.id` 是插件 ID；`ctx.app_id` 是本次执行所属 AppID；`ctx.message` 字段同 HTTP 消息表（OpenID、角色、附件、回调、is_mentioned 等）。`ctx.config` 只含这个插件的配置，不含机器人凭据。
+- `ctx.now` 为毫秒时间戳；`ctx.beijing` 为北京时间文本；`ctx.today/yesterday` 为北京时间日期；`ctx.help` 是当前启用插件的动态帮助。
+- 返回 `null` 表示不处理，返回字符串自动判断文本格式；建议显式返回 `{format:'text/markdown/media',content:'...'}`，按钮/媒体字段同第 5 节。返回 `{error:'...'}` 表示本次任务失败，不提交状态。
+- 声明 `storage:local` 后，可以直接修改 `ctx.state['键']`。宿主按 AppID + 插件 + 群/私聊会话隔离并串行提交，只在成功执行和通过回复校验后保存；超时、运行异常和停用结果不提交。整个插件最多 256 个会话键、512 KB JSON 状态；开发者自行控制每会话人数。不要存密钥。
+- `script.commands`（最多 64 条）仅用于帮助和管理界面；实际分支由源码决定，别名也要在代码中处理。
+- 未 @ 全量群消息默认只传明确命令；`script.unmentioned.commands:false` 可以要求 @。`prefixes:['天气','查ip']` 可以接收字面前缀，须声明 `events:group-all`。普通用户角色只能依据当前事件，群主/管理员验证要在源码里完成。
+- 回调要声明 `interaction:read`；`ctx.message.event_type == 'interaction'`，参数在 `callback_data`。只有本插件命名空间回调才会送达。
+
+### 可调用的公共函数
+
+| 函数 | 用途 |
+| --- | --- |
+| `str(value)`、`integer(value)` | 转文本/整数；整数解析失败为 null |
+| `json_encode(value)`、`json_decode(text)`、`json_try_decode(text)` | 严格 JSON 编解码；try 版本失败返回 null；不用 Hetu JSON.stringify 代替协议 JSON |
+| `is_map(x)`、`is_list(x)`、`is_text(x)`、`keys(map)` | JSON 类型判断与对象键 |
+| `rx(pattern,text[,caseSensitive])` | 首次匹配的 [全文,分组1,...]，不匹配为 null |
+| `rx_all(...)` | 最多 128 个匹配；正则最多 512 字符 |
+| `random_int(min,max)` | 闭区间随机整数，范围 ±10 亿；不用于博彩 |
+| `stable_hash(text)` | 跨启动稳定散列，用于娱乐运势等，不是密码算法 |
+| `clean_name(text)`、`markdown_escape(text)` | 清理昵称/转义 Markdown；不能把未经处理的用户输入拼进标签 |
+| `build_url(base,query)` | 用 URL 编码构造查询参数 |
+| `comments(code,language)`、`replace_comments(code,language,list)` | 保守解析和替换代码注释，不能保证所有语言语义 |
+| `await http(request)` | 经过权限与域名检查的 HTTPS GET/POST，见下文 |
+
+脚本可使用 Hetu 内置的字符串、列表、Map、数值及函数/类能力，未绑定任何系统文件、进程、平台通道或 QQ API。不要把 API Key 硬编码在源码中，使用 `config_schema` 的 `secret` 配置。导出只会清除 secret 配置默认值，无法自动识别开发者写进源码里的秘密。
+
+### 脚本请求 HTTPS
+
+清单加上 `network:http`，并声明 `script.hosts:["api.example.com"]`。例如：
+
+```text
+function main(ctx) async {
+  if (ctx.phase == 'enable') { return null }
+  if (ctx.command != 'quote') { return null }
+  final response = await http({url: 'https://api.example.com/quote'})
+  if (response['status'] != 200 || !is_map(response['data'])) {
+    return '服务暂时不可用，请稍后重试。'
+  }
+  return str(response['data']['text'])
+}
+```
+
+请求格式 `{url,method:'GET/POST',headers:{Authorization:'Bearer ...'},body:{...}}`；返回 `{status,data}`，非 JSON 的 data 为 null；网络失败/权限拒绝返回不含原始 URL 或密钥的 `{error:'...'}`。允许请求头为 Authorization、Content-Type、Accept。域名严格匹配，不允许 IP、内网地址、非 443 端口、URL 凭据和重定向，解析后固定连接已校验的公网地址。每次最多 4 请求，请求体 64 KB、响应 128 KB。
+
+### 运行边界和排错
+
+源码最多 64 KB，入口为插件根目录下一个 `.ht` 文件；可分享为包含 `script.source` 的单 JSON/YAML。代码不自动加载目录里的 JS/npm、外部模块或系统库；需要这些依赖时使用 HTTP 插件。
+
+默认执行期限 3 秒；`script.timeout_ms` 可设 100–40000，启用检查最多 5 秒。死循环/超时会终止该解释器；停用会取消运行与网络请求。单次返回和状态副本合计最多 512 KB、嵌套 16 层；列表/对象各最多 2000 项。并发与冷却同第 4 节。隔离器是可取消的 Dart 解释器，不是操作系统进程/内存配额隔离，只运行可信来源的脚本，不能承诺任意恶意源码无资源风险。
+
+「校验 / 试运行」使用临时状态与默认配置，不联网、不发 QQ、不写入真实签到/投票数据。启用或运行错误显示在插件卡片，语法错误给出错误码/行号（包含前置 SDK 声明），不会直接显示密钥和原始异常正文。一个项目损坏不会阻止其他插件或聊天启动，原始定义保留，重新导入即可修复。
 
 ## 8. 文件管理、数据与测试
 
-工作区位于应用支持目录 `plugin_workspace/<项目ID>/`，不提供系统全盘浏览。最多 6 层、128 个文本文件、单文件 256 KB；不跟随符号链接/目录联接，不接受 `..`、绝对路径或系统保留名。原生源码只是编辑文本，不能通过清单执行。
+工作区位于应用支持目录 `plugin_workspace/<项目ID>/`，不提供系统全盘浏览。最多 6 层、128 个文本文件、单文件 256 KB；不跟随符号链接/目录联接，不接受 `..`、绝对路径或系统保留名。只有清单声明的 Hetu 入口会在启用后运行，其他源码只是参考文本。
 
 切换/关闭会提示未保存草稿；保存用原内容检查防止覆盖其他窗口的修改。旧版本和移除的文件进入 `plugin_workspace/_history`，可恢复为新文件，不覆盖现有文件。最多保留 500 份，达到上限会停止保存并提示手动备份整理，不自动删除。文件操作无法防御同一用户恶意并发替换文件系统路径，不把工作区暴露给不受信任的本地进程。
 

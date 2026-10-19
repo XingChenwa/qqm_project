@@ -7,6 +7,7 @@ class PluginDeveloperDialog extends StatefulWidget {
   final List<String> contents;
   static const assetPaths = [
     'docs/plugin-development.md',
+    'plugins/examples/hello_script/plugin.json',
     'plugins/examples/hello_json/plugin.json',
     'plugins/examples/hello_yaml/plugin.yaml',
     'plugins/examples/http_echo/plugin.json',
@@ -49,6 +50,7 @@ class _PluginDeveloperDialogState extends State<PluginDeveloperDialog> {
               }),
               tabs: const [
                 Tab(text: '开发文档'),
+                Tab(text: '脚本示例'),
                 Tab(text: 'JSON 示例'),
                 Tab(text: 'YAML 示例'),
                 Tab(text: 'HTTP 示例'),

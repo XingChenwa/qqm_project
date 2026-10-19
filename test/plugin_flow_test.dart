@@ -1,5 +1,4 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:qq_bot_manager/core/plugin_manager.dart';
 import 'package:qq_bot_manager/models/config.dart';
 import 'package:qq_bot_manager/models/plugin.dart';
 
@@ -7,7 +6,7 @@ import 'support/fakes.dart';
 
 void main() {
   test('收到 /translate 多行代码时走命令处理，代码不会被拆成单行或返回错误用法', () async {
-    final manager = PluginManager(MemoryStorage());
+    final manager = TestPluginManager(MemoryStorage());
     addTearDown(manager.dispose);
     await manager.init();
     await manager.enablePlugin('translate_comment');
@@ -38,7 +37,7 @@ void main() {
         defaultAutoReply: '默认回复',
       ),
     );
-    final manager = PluginManager(storage);
+    final manager = TestPluginManager(storage);
     addTearDown(manager.dispose);
     await manager.init();
     final responses = await manager.processMessage(

@@ -2,7 +2,7 @@
   "schema_version": 2,
   "id": "example_plugin",
   "name": "基础助手",
-  "version": "2.0.0",
+  "version": "3.0.0",
   "description": "问候、命令帮助、ping 与时间查询。",
   "config": {},
   "permissions": [
@@ -11,6 +11,43 @@
   ],
   "config_schema": [],
   "author": "QQ 机器人管理器",
-  "runtime": "builtin",
-  "entrypoint": "lib/example_plugin/plugin.dart"
+  "runtime": "script",
+  "entrypoint": "main.ht",
+  "script": {
+    "language": "hetu",
+    "commands": [
+      {
+        "name": "帮助",
+        "description": "查看已启用插件命令",
+        "usage": "帮助",
+        "aliases": [
+          "help",
+          "菜单",
+          "menu"
+        ]
+      },
+      {
+        "name": "ping",
+        "description": "测试响应",
+        "usage": "",
+        "aliases": []
+      },
+      {
+        "name": "时间",
+        "description": "查看北京时间",
+        "usage": "时间",
+        "aliases": [
+          "time",
+          "日期",
+          "几点"
+        ]
+      },
+      {
+        "name": "复读",
+        "description": "原样发送文本",
+        "usage": "复读 文本",
+        "aliases": []
+      }
+    ]
+  }
 }

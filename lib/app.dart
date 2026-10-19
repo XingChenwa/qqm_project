@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import 'ui/screens/main_screen.dart';
 import 'ui/themes/app_theme.dart';
 import 'services/storage_service.dart';
+import 'services/theme_preferences.dart';
 import 'services/desktop_window_controller.dart';
 import 'ui/widgets/desktop_window_frame.dart';
 import 'ui/widgets/window_close_dialog.dart';
@@ -22,7 +23,8 @@ class QQBotManagerApp extends StatefulWidget {
 }
 
 class _QQBotManagerAppState extends State<QQBotManagerApp> {
-  ThemeMode _themeMode = ThemeMode.light;
+  late final ThemePreferences _appearance;
+  ThemeMode get _themeMode => _appearance.mode;
   final _navigatorKey = GlobalKey<NavigatorState>();
   DesktopWindowController? _desktopWindow;
   bool _showOnboarding = false;
@@ -30,9 +32,9 @@ class _QQBotManagerAppState extends State<QQBotManagerApp> {
   @override
   void initState() {
     super.initState();
+    _appearance = ThemePreferences(context.read<StorageService>());
     final onboarding = context.read<OnboardingPreferences?>();
     _showOnboarding = onboarding != null && !onboarding.completed;
-    WidgetsBinding.instance.addPostFrameCallback((_) => _loadTheme());
     WidgetsBinding.instance.addPostFrameCallback((_) => _startUpdates());
   }
 
@@ -64,23 +66,20 @@ class _QQBotManagerAppState extends State<QQBotManagerApp> {
     });
   }
 
-  void _loadTheme() {
-    final storage = context.read<StorageService>();
-    final isDark = storage.getThemeMode();
-    if (mounted) {
-      setState(() {
-        _themeMode = isDark ? ThemeMode.dark : ThemeMode.light;
-      });
+  Future<void> toggleTheme() async {
+    final dark =
+        _themeMode == ThemeMode.dark ||
+        _themeMode == ThemeMode.system &&
+            WidgetsBinding.instance.platformDispatcher.platformBrightness ==
+                Brightness.dark;
+    try {
+      await _appearance.select(dark ? ThemeMode.light : ThemeMode.dark);
+    } catch (_) {
+      final target = _navigatorKey.currentState?.overlay?.context;
+      if (mounted && target != null && target.mounted) {
+        AppDialogs.show(target, '主题未能保存，请重试。', error: true);
+      }
     }
-  }
-
-  void toggleTheme() {
-    setState(() {
-      _themeMode = _themeMode == ThemeMode.light
-          ? ThemeMode.dark
-          : ThemeMode.light;
-    });
-    context.read<StorageService>().setThemeMode(_themeMode == ThemeMode.dark);
   }
 
   Future<DesktopCloseDecision?> _confirmWindowClose() async {
@@ -95,50 +94,57 @@ class _QQBotManagerAppState extends State<QQBotManagerApp> {
   @override
   void dispose() {
     _desktopWindow?.confirmClose = null;
+    _appearance.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      navigatorKey: _navigatorKey,
-      locale: const Locale('zh', 'CN'),
-      supportedLocales: const [Locale('zh', 'CN')],
-      localizationsDelegates: GlobalMaterialLocalizations.delegates,
-      title: 'QQ 机器人管理器',
-      debugShowCheckedModeBanner: false,
-      themeMode: _themeMode,
-      theme: AppTheme.lightTheme,
-      darkTheme: AppTheme.darkTheme,
-      builder: (context, child) {
-        final desktop = context.watch<DesktopWindowController?>();
-        if (!identical(desktop, _desktopWindow)) {
-          _desktopWindow?.confirmClose = null;
-          _desktopWindow = desktop;
-          desktop?.confirmClose = _confirmWindowClose;
-        }
-        Widget content = UpdateNotice(
-          enabled: !_showOnboarding,
-          child: child!,
-          dialogContext: () => _navigatorKey.currentState!.overlay!.context,
-        );
-        if (usePhoneLayout(context)) {
-          content = Theme(
-            data: AppTheme.phoneTheme(Theme.of(context)),
-            child: content,
-          );
-        }
-        return desktop == null || !desktop.supported
-            ? content
-            : DesktopWindowFrame(controller: desktop, child: content);
-      },
-      home: _showOnboarding
-          ? OnboardingScreen(onFinished: _finishOnboarding)
-          : MainScreen(
-              toggleTheme: toggleTheme,
-              themeMode: _themeMode,
-              openSettingsOnStart: _openConnection,
-            ),
+    return ChangeNotifierProvider<ThemePreferences>.value(
+      value: _appearance,
+      child: ListenableBuilder(
+        listenable: _appearance,
+        builder: (context, _) => MaterialApp(
+          navigatorKey: _navigatorKey,
+          locale: const Locale('zh', 'CN'),
+          supportedLocales: const [Locale('zh', 'CN')],
+          localizationsDelegates: GlobalMaterialLocalizations.delegates,
+          title: 'QQ 机器人管理器',
+          debugShowCheckedModeBanner: false,
+          themeMode: _themeMode,
+          theme: AppTheme.lightTheme,
+          darkTheme: AppTheme.darkTheme,
+          builder: (context, child) {
+            final desktop = context.watch<DesktopWindowController?>();
+            if (!identical(desktop, _desktopWindow)) {
+              _desktopWindow?.confirmClose = null;
+              _desktopWindow = desktop;
+              desktop?.confirmClose = _confirmWindowClose;
+            }
+            Widget content = UpdateNotice(
+              enabled: !_showOnboarding,
+              child: child!,
+              dialogContext: () => _navigatorKey.currentState!.overlay!.context,
+            );
+            if (usePhoneLayout(context)) {
+              content = Theme(
+                data: AppTheme.phoneTheme(Theme.of(context)),
+                child: content,
+              );
+            }
+            return desktop == null || !desktop.supported
+                ? content
+                : DesktopWindowFrame(controller: desktop, child: content);
+          },
+          home: _showOnboarding
+              ? OnboardingScreen(onFinished: _finishOnboarding)
+              : MainScreen(
+                  toggleTheme: toggleTheme,
+                  themeMode: _themeMode,
+                  openSettingsOnStart: _openConnection,
+                ),
+        ),
+      ),
     );
   }
 }

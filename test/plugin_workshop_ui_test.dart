@@ -5,7 +5,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:qq_bot_manager/core/plugin_manager.dart';
 import 'package:qq_bot_manager/services/plugin_workspace.dart';
 import 'package:qq_bot_manager/ui/themes/app_theme.dart';
 import 'package:qq_bot_manager/ui/widgets/plugin_import_dialog.dart';
@@ -40,7 +39,7 @@ void main() {
     }
   });
   testWidgets('空工作区可以生成完整插件项目并打开编辑器，不覆盖已有项目', (tester) async {
-    final manager = PluginManager(MemoryStorage());
+    final manager = TestPluginManager(MemoryStorage());
     addTearDown(manager.dispose);
     final root = (await tester.runAsync(
       () => Directory.systemTemp.createTemp('qqm-new-project-'),
@@ -76,7 +75,7 @@ void main() {
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
-      final manager = PluginManager(MemoryStorage());
+      final manager = TestPluginManager(MemoryStorage());
       addTearDown(manager.dispose);
       final root = await tester.runAsync(
         () => Directory.systemTemp.createTemp('qqm-workshop-ui-'),
@@ -144,6 +143,11 @@ void main() {
             )
             .first,
       );
+      await Scrollable.ensureVisible(
+        tester.element(find.text('docs/readme.md')),
+        alignment: .3,
+      );
+      await tester.pumpAndSettle();
       await tester.tap(find.text('docs/readme.md'));
       await tester.pumpAndSettle();
       expect(find.text('文件尚未保存'), findsOneWidget);
@@ -195,7 +199,7 @@ void main() {
   }
 
   testWidgets('保存冲突阻止安装；有效清单安装仍需权限确认，不静默替换', (tester) async {
-    final manager = PluginManager(MemoryStorage());
+    final manager = TestPluginManager(MemoryStorage());
     addTearDown(manager.dispose);
     final root = (await tester.runAsync(
       () => Directory.systemTemp.createTemp('qqm-workshop-consent-'),
@@ -232,7 +236,7 @@ void main() {
         source.replaceAll('hello', 'otherhello'),
       ),
     );
-    await tester.tap(find.text('安装到插件中心'));
+    await tester.tap(find.text('应用到插件中心'));
     await settleFiles(tester);
     expect(find.byType(PluginImportDialog), findsNothing);
     expect(find.textContaining('文件已被其他窗口修改'), findsOneWidget);
@@ -248,7 +252,7 @@ void main() {
       ),
     );
     await settleFiles(tester);
-    await tester.tap(find.text('安装到插件中心'));
+    await tester.tap(find.text('应用到插件中心'));
     await settleFiles(tester);
     expect(find.byType(PluginImportDialog), findsOneWidget);
     expect(find.text('检查清单'), findsOneWidget);

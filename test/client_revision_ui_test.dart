@@ -8,7 +8,6 @@ import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:qq_bot_manager/core/bot_client.dart';
 import 'package:qq_bot_manager/models/message.dart';
-import 'package:qq_bot_manager/core/plugin_manager.dart';
 import 'package:qq_bot_manager/services/app_update_service.dart';
 import 'package:qq_bot_manager/services/update_preferences.dart';
 import 'package:qq_bot_manager/ui/widgets/chat_input.dart';
@@ -99,7 +98,7 @@ void main() {
         apiService: RecordingApi(),
         webSocketService: TestGateway(),
       );
-      final plugins = PluginManager(storage);
+      final plugins = TestPluginManager(storage);
       addTearDown(bot.dispose);
       addTearDown(plugins.dispose);
       await bot.addSession('same-openid', isGroup: true, name: '离线测试群');
@@ -212,6 +211,11 @@ void main() {
       expect(find.text('更新渠道'), findsNothing);
       expect(find.text('正式版'), findsNothing);
       expect(find.text('Beta 测试版'), findsNothing);
+      expect(find.byType(ChoiceChip), findsNothing);
+      expect(find.text('45 ms'), findsNothing);
+      await tester.tap(find.byKey(const ValueKey('update-node-expander')));
+      await tester.pumpAndSettle();
+      expect(find.widgetWithText(ChoiceChip, '自动优选'), findsOneWidget);
       expect(find.text('45 ms'), findsOneWidget);
       await captureUi(tester, 'updates-revision-${width.toInt()}');
       expect(tester.takeException(), isNull);

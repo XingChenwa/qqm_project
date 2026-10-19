@@ -1,0 +1,117 @@
+function textValue(value) {
+  if (value == null || is_list(value) || is_map(value) || str(value).isEmpty) { return '暂无数据' }
+  return str(value)
+}
+function measure(value, unit) {
+  final text = textValue(value)
+  return text == '暂无数据' ? text : text + unit
+}
+function amapError(code) {
+  var reason = '高德服务暂时不可用，请稍后重试或检查控制台'
+  if (['10001','10013'].contains(code)) { reason = '高德 Key 无效、过期或已删除，请检查插件配置' }
+  else if (['10002','10012','10041'].contains(code)) { reason = '高德 Key 未开通此服务或权限已过期，请检查高德控制台' }
+  else if (['10003','10044'].contains(code)) { reason = '高德今日查询额度已用完，请检查账号配额' }
+  else if (['10004','10014','10015','10019','10020','10021'].contains(code)) { reason = '高德查询过于频繁，请稍后重试' }
+  else if (['10005','10010'].contains(code)) { reason = '高德出口 IP 白名单或 IP 访问额度限制，请检查高德控制台' }
+  else if (code == '10007') { reason = '此 Key 要求数字签名；当前插件仅支持普通 Web 服务 Key，请调整 Key 鉴权方式' }
+  else if (code == '10009') { reason = 'Key 类型不匹配，请使用 Web 服务类型，而不是 JS/Android/iOS Key' }
+  else if (['20000','20001'].contains(code)) { reason = '查询参数无效，请检查城市编码或 IPv4 地址' }
+  else if (['40000','40002'].contains(code)) { reason = '高德服务余额不足或服务已到期，请检查高德控制台' }
+  return reason + '（错误码：' + (rx('^[0-9]{5}$', code) == null ? '未知' : code) + '）。'
+}
+function amap(ctx, path, params) async {
+  params['key'] = ctx.config['amap_key'].trim()
+  params['output'] = 'JSON'
+  final response = await http({url: build_url('https://restapi.amap.com' + path, params)})
+  if (response['error'] != null) { return {error:'无法连接高德接口，请检查网络或稍后重试。'} }
+  if (response['status'] != 200) { return {error:'高德 HTTP ' + str(response['status']) + '，请稍后重试。'} }
+  if (!is_map(response['data'])) { return {error:'高德接口返回格式异常，请稍后重试。'} }
+  final data = response['data']
+  if (str(data['status']) != '1' || (data['infocode'] != null && str(data['infocode']) != '10000')) { return {error:amapError(str(data['infocode']))} }
+  return {data:data}
+}
+function cityCode(ctx, city) async {
+  if (city.isEmpty || city.length > 60) { return {error:'请填写城市/区县名称或六位行政区编码。'} }
+  if (rx('^[0-9]{6}$', city) != null) { return {code:city} }
+  final response = await amap(ctx, '/v3/config/district', {keywords:city, subdistrict:'0', extensions:'base', page:'1', offset:'20'})
+  if (response['error'] != null) { return response }
+  final data = response['data']
+  final districts = data['districts']
+  if (!is_list(districts) || districts.isEmpty) { return {error:'未找到地区，请检查城市名称。'} }
+  final candidates = []
+  final exact = []
+  for (final district in districts) {
+    if (is_map(district) && rx('^[0-9]{6}$', str(district['adcode'])) != null && (['city','district'].contains(district['level']) || ['110000','120000','310000','500000'].contains(district['adcode']))) {
+      candidates.add(district)
+      if (district['name'] == city) { exact.add(district) }
+    }
+  }
+  final selected = exact.isEmpty ? candidates : exact
+  if (selected.isEmpty) { return {error:'请指定具体城市/区县或使用六位行政区编码，不要查询整个省份。'} }
+  var count = integer(data['count'])
+  if (count == null) { count = districts.length }
+  if (selected.length != 1 || count > districts.length) {
+    final choices = []
+    for (var i = 0; i < selected.length && i < 5; ++i) { choices.add(str(selected[i]['name']) + '（' + str(selected[i]['adcode']) + '）') }
+    return {error:'找到多个地区，请用行政区编码明确查询：\n' + choices.join('\n')}
+  }
+  return {code:selected[0]['adcode']}
+}
+function main(ctx) async {
+  if (ctx.phase == 'enable') { return null }
+  var command = ctx.command
+  var argument = ctx.args.join(' ').trim()
+  if (command.isEmpty) {
+    final parsed = rx('^(天气预报|预报|forecast|城市编码|adcode|weather|tianqi|天气|查询天气|天气查询|查天气|查询ip地址|查ip地址|ip地址查询|查询ip|查ip|ip地址|ip查询|ip)(?:[ :：\\t]+([^\\r\\n]*))?$', ctx.text.trim(), false)
+    if (parsed == null) { return null }
+    command = parsed[1].toLowerCase()
+    argument = parsed[2].trim()
+  }
+  final ip = ['ip','查询ip地址','查ip地址','ip地址查询','查询ip','查ip','ip地址','ip查询'].contains(command)
+  final forecast = ['天气预报','预报','forecast'].contains(command)
+  final codeOnly = ['城市编码','adcode'].contains(command)
+  if (!ip && !forecast && !codeOnly && !['weather','tianqi','天气','查询天气','天气查询','查天气'].contains(command)) { return null }
+  final usage = ip ? '用法：查ip地址 114.114.114.114 / /ip 114.114.114.114。\n仅支持国内 IPv4，QQ 消息不提供发送者 IP，不能通过 QQ 号查询用户 IP。' : '用法：天气 北京 / 查询天气 上海 / /天气 深圳。\n天气预报 北京：未来几天天气。城市编码 北京：查询行政区编码。'
+  if (['help','帮助'].contains(argument.toLowerCase())) { return usage }
+  final city = argument.isEmpty ? ctx.config['default_city'].trim() : argument
+  if ((!ip && city.isEmpty) || (ip && argument.isEmpty)) { return usage }
+  if (ctx.config['amap_key'].trim().isEmpty) { return (ip ? 'IP' : '天气') + '查询失败：尚未配置高德 Web 服务 Key，请在插件配置中填写。' }
+  if (ip) {
+    final pieces = argument.split('.')
+    if (pieces.length != 4) { return '请输入有效的 IPv4 地址；高德基础接口不支持 IPv6。' }
+    for (final piece in pieces) {
+      final n = integer(piece)
+      if (rx('^(0|[1-9][0-9]{0,2})$', piece) == null || n < 0 || n > 255) { return '请输入有效的 IPv4 地址，例如 114.114.114.114。' }
+    }
+    final result = await amap(ctx, '/v3/ip', {ip:argument})
+    if (result['error'] != null) { return 'IP查询失败：' + result['error'] }
+    final data = result['data']
+    final province = textValue(data['province'])
+    final local = textValue(data['city'])
+    if (province == '暂无数据' && local == '暂无数据') { return 'IP：' + argument + '\n未查询到位置。高德基础接口仅支持国内 IPv4。' }
+    return 'IP：' + argument + '\n归属地：' + (province == local ? province : province + ' ' + local) + '\n行政区编码：' + textValue(data['adcode']) + '\n数据来源：高德地图（IP 定位仅供参考，不代表实时位置）'
+  }
+  final resolved = await cityCode(ctx, city)
+  if (resolved['error'] != null) { return '天气查询失败：' + resolved['error'] }
+  if (codeOnly) { return city + ' 的行政区编码：' + resolved['code'] + '\n数据来源：高德地图' }
+  final result = await amap(ctx, '/v3/weather/weatherInfo', {city:resolved['code'], extensions:forecast ? 'all' : 'base'})
+  if (result['error'] != null) { return '天气查询失败：' + result['error'] }
+  final data = result['data']
+  if (forecast) {
+    if (!is_list(data['forecasts']) || data['forecasts'].isEmpty) { return '该地区暂无天气预报。' }
+    final report = data['forecasts'][0]
+    if (!is_map(report) || !is_list(report['casts'])) { return '高德预报数据无效，请稍后重试。' }
+    final lines = [textValue(report['city']) + ' 天气预报']
+    final days = report['casts']
+    for (var i = 0; i < days.length && i < 4; ++i) {
+      if (!is_map(days[i])) { return '高德预报数据无效，请稍后重试。' }
+      lines.add(textValue(days[i]['date']) + '：' + textValue(days[i]['dayweather']) + ' / ' + textValue(days[i]['nightweather']) + '，' + textValue(days[i]['nighttemp']) + '～' + measure(days[i]['daytemp'],'℃'))
+    }
+    lines.add('发布时间：' + textValue(report['reporttime']) + '\n数据来源：高德地图，预报仅供参考')
+    return lines.join('\n')
+  }
+  if (!is_list(data['lives']) || data['lives'].isEmpty) { return '该地区暂无实况天气。' }
+  final live = data['lives'][0]
+  if (!is_map(live)) { return '高德实况数据无效，请稍后重试。' }
+  return textValue(live['province']) + ' ' + textValue(live['city']) + ' 实况天气\n天气：' + textValue(live['weather']) + '\n温度：' + measure(live['temperature'],'℃') + '\n湿度：' + measure(live['humidity'],'%') + '\n风况：' + textValue(live['winddirection']) + '风 ' + textValue(live['windpower']) + '级\n更新时间：' + textValue(live['reporttime']) + '\n数据来源：高德地图'
+}

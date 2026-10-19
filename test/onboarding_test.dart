@@ -37,7 +37,7 @@ void main() {
     final storage = MemoryStorage();
     final api = RecordingApi();
     final bot = BotClient(storage, apiService: api);
-    final plugins = PluginManager(storage);
+    final plugins = TestPluginManager(storage);
     addTearDown(bot.dispose);
     addTearDown(plugins.dispose);
     await tester.pumpWidget(onboardingHost(storage, bot, plugins, preferences));
@@ -73,7 +73,7 @@ void main() {
       );
       final storage = MemoryStorage();
       final bot = BotClient(storage, apiService: RecordingApi());
-      final plugins = PluginManager(storage);
+      final plugins = TestPluginManager(storage);
       addTearDown(bot.dispose);
       addTearDown(plugins.dispose);
       await tester.pumpWidget(
@@ -134,7 +134,7 @@ void main() {
     );
     final storage = MemoryStorage();
     final bot = BotClient(storage);
-    final plugins = PluginManager(storage);
+    final plugins = TestPluginManager(storage);
     addTearDown(bot.dispose);
     addTearDown(plugins.dispose);
     await tester.pumpWidget(

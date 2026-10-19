@@ -80,7 +80,7 @@ class PluginRule {
   });
 }
 
-/// v1/v2 清单是数据，不 eval、不启动进程，也不把导入的 Dart 当脚本执行。
+/// v1/v2 manifest validation; script source is executed only after explicit enable.
 class PluginManifest {
   static const maxBytes = 256 * 1024;
   final Map<String, dynamic> data;
@@ -167,6 +167,7 @@ class PluginManifest {
       'priority',
       'cooldown_ms',
       'media_hosts',
+      'script',
     };
     if (data.keys.any((key) => !knownFields.contains(key))) {
       invalid('清单包含未知字段，请对照 v2 协议检查拼写。');
@@ -207,12 +208,22 @@ class PluginManifest {
       invalid('author 必须是文本。');
     }
     final runtime = data['runtime'];
-    if (runtime != 'builtin' && data.containsKey('entrypoint') ||
+    if (!['builtin', 'script'].contains(runtime) &&
+            data.containsKey('entrypoint') ||
         runtime == 'rules' && data.containsKey('http')) {
-      invalid('规则/HTTP 插件不使用 Dart 入口；规则插件也不使用 http 字段。');
+      invalid('规则/HTTP 插件不使用脚本入口；规则插件也不使用 http 字段。');
     }
-    if (!['rules', 'http', if (allowBuiltin) 'builtin'].contains(runtime)) {
-      invalid('导入插件仅支持 rules 或 http；Dart 插件需要随应用编译。');
+    if (![
+      'rules',
+      'http',
+      'script',
+      if (allowBuiltin) 'builtin',
+    ].contains(runtime)) {
+      invalid('插件支持 rules、http 或 script 运行时。');
+    }
+    if (runtime != 'script' && data.containsKey('script') ||
+        runtime == 'script' && data.containsKey('http')) {
+      invalid('script 和 http 字段需与运行时一致。');
     }
     final permissions = data['permissions'];
     if (permissions is! List || permissions.any((p) => p is! String)) {
@@ -228,7 +239,8 @@ class PluginManifest {
       'message:media',
       'interaction:read',
       'events:group-all',
-      if (runtime == 'http') 'network:http',
+      if (runtime == 'http' || runtime == 'script') 'network:http',
+      if (runtime == 'script') 'storage:local',
       if (allowBuiltin && runtime == 'builtin') ...[
         'network:amap',
         'network:deepseek',
@@ -318,7 +330,7 @@ class PluginManifest {
     final rawRules = data['rules'] ?? [];
     if (rawRules is! List ||
         rawRules.length > 64 ||
-        runtime != 'builtin' && rawRules.isEmpty) {
+        !['builtin', 'script'].contains(runtime) && rawRules.isEmpty) {
       invalid('rules 必须包含 1–64 条触发规则。');
     }
     final rules = <PluginRule>[];
@@ -400,6 +412,105 @@ class PluginManifest {
         ),
       );
     }
+    if (runtime == 'script') {
+      final script = data['script'];
+      if (script is! Map<String, dynamic> ||
+          script['language'] != 'hetu' ||
+          script.keys.any(
+            (key) => ![
+              'language',
+              'source',
+              'commands',
+              'hosts',
+              'timeout_ms',
+              'unmentioned',
+            ].contains(key),
+          )) {
+        invalid('script 需要 language: hetu，且只能使用已声明的沙箱配置。');
+      }
+      final source = script['source'];
+      if (source != null &&
+          (source is! String ||
+              source.trim().isEmpty ||
+              utf8.encode(source).length > 65536)) {
+        invalid('脚本源码必须是 1–64 KB 的文本。');
+      }
+      final entrypoint = data['entrypoint'];
+      if (entrypoint != null &&
+          (entrypoint is! String ||
+              !RegExp(r'^[a-zA-Z0-9_-]{1,60}\.ht$').hasMatch(entrypoint))) {
+        invalid('脚本入口只允许插件根目录下的 .ht 文件。');
+      }
+      if (source == null && entrypoint == null) {
+        invalid('脚本插件需要 source 或 .ht 入口文件。');
+      }
+      final timeout = script['timeout_ms'] ?? 3000;
+      if (timeout is! int || timeout < 100 || timeout > 40000) {
+        invalid('脚本超时必须在 100–40000 毫秒之间。');
+      }
+      final hosts = script['hosts'] ?? [];
+      if (hosts is! List ||
+          hosts.length > 8 ||
+          hosts.any(
+            (host) =>
+                host is! String ||
+                !RegExp(r'^[a-zA-Z][a-zA-Z0-9.-]{1,252}$').hasMatch(host) ||
+                host.contains('..') ||
+                !host.contains('.') ||
+                host.endsWith('.') ||
+                host.endsWith('.local'),
+          )) {
+        invalid('脚本最多声明 8 个公共 HTTPS 域名，不支持 IP、本机或通配符。');
+      }
+      if (hosts.isNotEmpty && !permissions.contains('network:http')) {
+        invalid('联网脚本需要 network:http 权限。');
+      }
+      final commands = script['commands'] ?? [];
+      if (commands is! List || commands.length > 64) invalid('脚本最多声明 64 条命令。');
+      for (final command in commands) {
+        if (command is! Map ||
+            command.keys.any(
+              (key) =>
+                  !['name', 'description', 'usage', 'aliases'].contains(key),
+            ) ||
+            command['name'] is! String ||
+            !RegExp(r'^[^\s/#]{1,60}$').hasMatch(command['name']) ||
+            command['description'] is! String ||
+            (command['description'] as String).length > 200 ||
+            command['usage'] != null &&
+                (command['usage'] is! String ||
+                    (command['usage'] as String).length > 200)) {
+          invalid('脚本命令声明无效。');
+        }
+        final aliases = command['aliases'] ?? [];
+        if (aliases is! List ||
+            aliases.length > 16 ||
+            aliases.any(
+              (alias) =>
+                  alias is! String ||
+                  !RegExp(r'^[^\s/#]{1,60}$').hasMatch(alias),
+            )) {
+          invalid('脚本命令别名无效。');
+        }
+      }
+      final unmentioned = script['unmentioned'] ?? <String, dynamic>{};
+      if (unmentioned is! Map ||
+          unmentioned.keys.any(
+            (key) => !['commands', 'prefixes'].contains(key),
+          ) ||
+          unmentioned['commands'] != null && unmentioned['commands'] is! bool) {
+        invalid('未 @ 的消息接收规则无效。');
+      }
+      final prefixes = unmentioned['prefixes'] ?? [];
+      if (prefixes is! List ||
+          prefixes.length > 64 ||
+          prefixes.any((v) => v is! String || v.isEmpty || v.length > 80)) {
+        invalid('消息前缀最多 64 项，每项 1–80 字符。');
+      }
+      if (prefixes.isNotEmpty && !permissions.contains('events:group-all')) {
+        invalid('接收普通全量消息前缀需要 events:group-all 权限。');
+      }
+    }
     if (runtime == 'http') {
       final http = data['http'];
       if (http is! Map<String, dynamic> || http['url'] is! String) {
@@ -476,6 +587,7 @@ class PluginManifest {
         author: data['author'] ?? '',
         directory: 'plugins/$id',
         isEnabled: saved?.isEnabled ?? enabledByDefault,
+        isCustomized: saved?.isCustomized ?? false,
         config: validateConfig(saved?.config ?? {}),
         permissions: permissions,
         manifest: jsonDecode(jsonEncode(data)) as Map<String, dynamic>,

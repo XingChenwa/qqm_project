@@ -8,8 +8,9 @@ import 'package:logging/logging.dart';
 import '../models/plugin.dart';
 import '../models/plugin_manifest.dart';
 import '../services/storage_service.dart';
-import 'package:qqm_plugins/built_in_registry.dart';
 import 'plugins/manifest_plugin.dart';
+import 'plugins/script_plugin.dart';
+import 'plugins/script_runner.dart';
 
 class PluginManager extends ChangeNotifier {
   static final _botScope = Object();
@@ -21,13 +22,28 @@ class PluginManager extends ChangeNotifier {
   final Map<String, int> _active = {};
   final Map<String, DateTime> _cooldowns = {};
   bool _disposed = false;
+  final _bundledIds = <String>{};
 
-  PluginManager(this._storage);
+  final PluginScriptRunner Function() _scriptRunnerFactory;
+  PluginManager(
+    this._storage, {
+    PluginScriptRunner Function()? scriptRunnerFactory,
+  }) : _scriptRunnerFactory = scriptRunnerFactory ?? PluginScriptRunner.new;
 
   List<BotPlugin> get plugins => List.unmodifiable(_plugins);
   int get enabledCount => _plugins.where((p) => p.info.isEnabled).length;
   String? errorFor(String id) => _errors[id];
-  bool isBundled(String id) => BuiltInPluginRegistry.factories.containsKey(id);
+  Map<String, String> get unavailablePlugins => Map.unmodifiable({
+    for (final entry in _errors.entries)
+      if (!_plugins.any((plugin) => plugin.info.id == entry.key))
+        entry.key: entry.value,
+  });
+  bool isBundled(String id) => _bundledIds.contains(id);
+
+  BotPlugin _create(PluginManifest definition, PluginInfo info) =>
+      definition.runtime == 'script'
+      ? ScriptPlugin(info, definition, runnerFactory: _scriptRunnerFactory)
+      : ManifestPlugin(info, definition);
 
   String commandHelp() {
     final lines = <String>['插件命令菜单（支持 / 或 # 前缀）'];
@@ -67,33 +83,55 @@ class PluginManager extends ChangeNotifier {
 
   Future<void> init() async {
     for (final plugin in _plugins) {
-      await plugin.onDisable();
+      try {
+        await plugin.onDisable().timeout(const Duration(seconds: 2));
+      } catch (_) {}
     }
     _plugins.clear();
     _errors.clear();
+    _bundledIds.clear();
     final savedConfigs = _savedPluginConfigsById();
     final index =
         jsonDecode(await rootBundle.loadString('plugins/index.json')) as Map;
     for (final path in index['plugins'] as List) {
       if (path is! String ||
-          !RegExp(r'^plugins/[a-z][a-z0-9_]+/plugin\.json$').hasMatch(path)) {
-        throw const PluginManifestException('内置插件索引包含无效资源路径。');
+          !RegExp(r'^plugins/[a-z][a-z0-9_]+/plugin[.]json$').hasMatch(path)) {
+        _log.warning('已跳过无效的随附插件路径');
+        continue;
       }
-      final definition = PluginManifest.parse(
-        await rootBundle.loadString(path),
-        allowBuiltin: true,
-      );
-      final info = definition.toInfo(
-        saved: savedConfigs[definition.id],
-        enabledByDefault: false,
-      );
-      final plugin = BuiltInPluginRegistry.create(info.id, info);
-      if (plugin == null) {
-        throw PluginManifestException('内置 Dart 插件 ${info.id} 尚未注册工厂。');
+      final bundledId = path.split('/')[1];
+      _bundledIds.add(bundledId);
+      try {
+        var definition = PluginManifest.parse(
+          await rootBundle.loadString(path),
+        );
+        if (definition.id != bundledId) {
+          throw const PluginManifestException('插件目录与 ID 不一致');
+        }
+        final saved = savedConfigs[definition.id];
+        if (saved?.isCustomized == true) {
+          definition = PluginManifest.parse(jsonEncode(saved!.manifest));
+          if (definition.id != bundledId) {
+            throw const PluginManifestException('插件 ID 不一致');
+          }
+        } else if (definition.runtime == 'script' &&
+            definition.data['entrypoint'] is String) {
+          final data =
+              jsonDecode(jsonEncode(definition.data)) as Map<String, dynamic>;
+          (data['script'] as Map)['source'] = await rootBundle.loadString(
+            'plugins/${definition.id}/${data['entrypoint']}',
+          );
+          definition = PluginManifest.parse(jsonEncode(data));
+        }
+        final info = definition.toInfo(saved: saved, enabledByDefault: false);
+        final plugin = _create(definition, info);
+        _plugins.add(plugin);
+        _bind(plugin);
+        if (info.isEnabled) await _enablePluginSafely(plugin);
+      } catch (_) {
+        _errors[bundledId] = '插件定义无效，已跳过加载；原始配置仍保留，可重新导入修复。';
+        _log.warning('已跳过无效的插件定义：$bundledId');
       }
-      _plugins.add(plugin);
-      _bind(plugin);
-      if (info.isEnabled) await _enablePluginSafely(plugin);
     }
     for (final saved in savedConfigs.values.where((p) => !isBundled(p.id))) {
       if (saved.manifest.isEmpty) continue;
@@ -103,11 +141,12 @@ class PluginManager extends ChangeNotifier {
           throw const PluginManifestException('保存的插件 ID 不一致。');
         }
         final info = definition.toInfo(saved: saved);
-        final plugin = ManifestPlugin(info, definition);
+        final plugin = _create(definition, info);
         _plugins.add(plugin);
         _bind(plugin);
         if (info.isEnabled) await _enablePluginSafely(plugin);
       } catch (_) {
+        _errors[saved.id] = '插件定义无效，已跳过加载；原始配置仍保留。';
         _log.warning('已跳过无效的第三方插件配置：${saved.id}');
       }
     }
@@ -129,8 +168,9 @@ class PluginManager extends ChangeNotifier {
     bool replaceExisting = false,
   }) async {
     final definition = PluginManifest.parse(source);
-    if (isBundled(definition.id)) {
-      throw const PluginManifestException('此 ID 属于内置插件，不能被导入清单覆盖。');
+    if (definition.runtime == 'script' &&
+        definition.data['script']['source'] is! String) {
+      throw const PluginManifestException('导入需要完整脚本源码；请从工作台安装含 .ht 的项目。');
     }
     final previous = _findPlugin(definition.id);
     if (previous != null && !replaceExisting) {
@@ -140,7 +180,9 @@ class PluginManager extends ChangeNotifier {
         _plugins.where((p) => !isBundled(p.info.id)).length >= 32) {
       throw const PluginManifestException('第三方插件最多安装 32 个。');
     }
-    final info = definition.toInfo(saved: previous?.info)..isEnabled = false;
+    final info = definition.toInfo(saved: previous?.info)
+      ..isEnabled = false
+      ..isCustomized = true;
     await _storage.savePluginConfig(info);
     if (previous != null) {
       previous.info.isEnabled = false;
@@ -151,7 +193,7 @@ class PluginManager extends ChangeNotifier {
       }
       _plugins.remove(previous);
     }
-    final installed = ManifestPlugin(info, definition);
+    final installed = _create(definition, info);
     _bind(installed);
     _plugins.add(installed);
     _errors.remove(info.id);
@@ -191,6 +233,9 @@ class PluginManager extends ChangeNotifier {
     try {
       await plugin.onEnable().timeout(const Duration(seconds: 5));
     } catch (e, stackTrace) {
+      try {
+        await plugin.onDisable().timeout(const Duration(seconds: 2));
+      } catch (_) {}
       plugin.info.isEnabled = false;
       _errors[plugin.info.id] = e is PluginManifestException
           ? e.message
@@ -212,6 +257,40 @@ class PluginManager extends ChangeNotifier {
     return null;
   }
 
+  /// Local preview only: no QQ sends, external HTTP or persistent plugin data.
+  Future<PluginReply?> previewPlugin(
+    String source,
+    PluginMessage message,
+  ) async {
+    final definition = PluginManifest.parse(source);
+    if (definition.runtime == 'http') {
+      throw const PluginManifestException('HTTP 插件请在自己的测试服务验证，预览不会调用外部接口。');
+    }
+    final info = definition.toInfo();
+    final plugin = definition.runtime == 'script'
+        ? ScriptPlugin(
+            info,
+            definition,
+            runnerFactory: _scriptRunnerFactory,
+            networkForTesting: (_) async => {'error': '本地试运行不联网'},
+          )
+        : ManifestPlugin(info, definition);
+    var data = <String, dynamic>{};
+    plugin.host = PluginHost(
+      help: commandHelp,
+      appId: () => 'local-preview',
+      store: () => PluginStore(() async => data, (next) async {
+        data = next;
+      }),
+    );
+    try {
+      await plugin.onEnable().timeout(const Duration(seconds: 5));
+      return await plugin.execute(message).timeout(plugin.executionTimeout);
+    } finally {
+      await plugin.onDisable();
+    }
+  }
+
   Future<bool> enablePlugin(String pluginId) async {
     final plugin = _findPlugin(pluginId);
     if (plugin == null) return false;
@@ -226,6 +305,9 @@ class PluginManager extends ChangeNotifier {
       notifyListeners();
       return true;
     } catch (e, stackTrace) {
+      try {
+        await plugin.onDisable().timeout(const Duration(seconds: 2));
+      } catch (_) {}
       _errors[pluginId] = e is PluginManifestException
           ? e.message
           : '插件启用失败，请检查配置。';
@@ -262,7 +344,7 @@ class PluginManager extends ChangeNotifier {
   }
 
   Future<bool> uninstallPlugin(String pluginId) async {
-    // 内置 Dart 代码属于应用包；可停用，但不能伪装为运行时卸载。
+    // 随附项目始终保留入口，可停用或用同一加载器覆盖源码。
     if (isBundled(pluginId)) return false;
     final plugin = _findPlugin(pluginId);
     if (plugin == null) return false;
@@ -308,7 +390,9 @@ class PluginManager extends ChangeNotifier {
           !_plugins.contains(plugin)) {
         continue;
       }
-      if (message.isFullGroupMessage && !plugin.acceptsUnmentioned(message)) {
+      if (message.isFullGroupMessage &&
+          !message.isMentioned &&
+          !plugin.acceptsUnmentioned(message)) {
         continue;
       }
       if (message.eventType == 'interaction' &&

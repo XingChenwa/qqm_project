@@ -10,7 +10,7 @@ class PluginStore {
 
   Future<T> update<T>(
     String key,
-    T Function(Map<String, dynamic>) action, {
+    FutureOr<T> Function(Map<String, dynamic>) action, {
     bool persist = true,
   }) {
     final result = Completer<T>();
@@ -24,7 +24,7 @@ class PluginStore {
         final copy =
             jsonDecode(jsonEncode(value is Map ? value : {}))
                 as Map<String, dynamic>;
-        final answer = action(copy);
+        final answer = await action(copy);
         if (persist) {
           final next = {...all, key: copy};
           if (next.length > 256 ||

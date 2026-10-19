@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "urn:qqm:plugin:v2",
   "title": "QQ 机器人管理器可导入插件协议 v2（兼容 v1）",
-  "description": "规则与 HTTP 插件；Dart builtin 清单不用于运行时导入。完整类型、URL 与配置键交叉校验仍由宿主执行。",
+  "description": "规则、HTTP 和跨平台 Hetu 脚本插件。宿主还会进行权限、URL、配置与源码大小交叉校验。",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -12,8 +12,7 @@
     "version",
     "description",
     "runtime",
-    "permissions",
-    "rules"
+    "permissions"
   ],
   "properties": {
     "$schema": {
@@ -22,7 +21,10 @@
     },
     "schema_version": {
       "type": "integer",
-      "enum": [1, 2]
+      "enum": [
+        1,
+        2
+      ]
     },
     "id": {
       "type": "string",
@@ -53,13 +55,35 @@
     "runtime": {
       "enum": [
         "rules",
-        "http"
+        "http",
+        "script"
       ]
     },
-    "listen_all": {"type": "boolean", "default": false},
-    "priority": {"type": "integer", "minimum": 0, "maximum": 1000, "default": 100},
-    "cooldown_ms": {"type": "integer", "minimum": 0, "maximum": 60000, "default": 0},
-    "media_hosts": {"type": "array", "maxItems": 8, "items": {"type": "string", "minLength": 2, "maxLength": 253}},
+    "listen_all": {
+      "type": "boolean",
+      "default": false
+    },
+    "priority": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 1000,
+      "default": 100
+    },
+    "cooldown_ms": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 60000,
+      "default": 0
+    },
+    "media_hosts": {
+      "type": "array",
+      "maxItems": 8,
+      "items": {
+        "type": "string",
+        "minLength": 2,
+        "maxLength": 253
+      }
+    },
     "permissions": {
       "type": "array",
       "uniqueItems": true,
@@ -70,7 +94,8 @@
           "network:http",
           "message:media",
           "interaction:read",
-          "events:group-all"
+          "events:group-all",
+          "storage:local"
         ]
       },
       "allOf": [
@@ -197,7 +222,7 @@
     },
     "rules": {
       "type": "array",
-      "minItems": 1,
+      "minItems": 0,
       "maxItems": 64,
       "items": {
         "type": "object",
@@ -265,11 +290,22 @@
             "type": "string",
             "maxLength": 16000
           },
-          "permission": {"enum": ["all", "admin", "owner"]},
-          "message": {"$ref": "#/$defs/message"}
+          "permission": {
+            "enum": [
+              "all",
+              "admin",
+              "owner"
+            ]
+          },
+          "message": {
+            "$ref": "#/$defs/message"
+          }
         },
         "not": {
-          "required": ["reply", "message"]
+          "required": [
+            "reply",
+            "message"
+          ]
         }
       }
     },
@@ -303,6 +339,94 @@
           }
         }
       }
+    },
+    "entrypoint": {
+      "type": "string",
+      "pattern": "^[a-zA-Z0-9_-]{1,60}\\.ht$"
+    },
+    "script": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "language"
+      ],
+      "properties": {
+        "language": {
+          "const": "hetu"
+        },
+        "source": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 65536
+        },
+        "hosts": {
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-zA-Z][a-zA-Z0-9.-]{1,252}$"
+          }
+        },
+        "timeout_ms": {
+          "type": "integer",
+          "minimum": 100,
+          "maximum": 40000,
+          "default": 3000
+        },
+        "commands": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "description"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "pattern": "^[^\\s/#]{1,60}$"
+              },
+              "description": {
+                "type": "string",
+                "maxLength": 200
+              },
+              "usage": {
+                "type": "string",
+                "maxLength": 200
+              },
+              "aliases": {
+                "type": "array",
+                "maxItems": 16,
+                "items": {
+                  "type": "string",
+                  "pattern": "^[^\\s/#]{1,60}$"
+                }
+              }
+            }
+          }
+        },
+        "unmentioned": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "commands": {
+              "type": "boolean",
+              "default": true
+            },
+            "prefixes": {
+              "type": "array",
+              "maxItems": 64,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 80
+              }
+            }
+          }
+        }
+      }
     }
   },
   "allOf": [
@@ -330,7 +454,18 @@
           },
           "rules": {
             "items": {
-              "oneOf": [{"required": ["reply"]}, {"required": ["message"]}],
+              "oneOf": [
+                {
+                  "required": [
+                    "reply"
+                  ]
+                },
+                {
+                  "required": [
+                    "message"
+                  ]
+                }
+              ],
               "properties": {
                 "reply": {
                   "minLength": 1,
@@ -362,28 +497,149 @@
           }
         }
       }
+    },
+    {
+      "if": {
+        "properties": {
+          "runtime": {
+            "const": "script"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "script"
+        ],
+        "anyOf": [
+          {
+            "required": [
+              "entrypoint"
+            ]
+          },
+          {
+            "properties": {
+              "script": {
+                "required": [
+                  "source"
+                ]
+              }
+            }
+          }
+        ],
+        "not": {
+          "required": [
+            "http"
+          ]
+        }
+      },
+      "else": {
+        "not": {
+          "anyOf": [
+            {
+              "required": [
+                "script"
+              ]
+            },
+            {
+              "required": [
+                "entrypoint"
+              ]
+            }
+          ]
+        },
+        "properties": {
+          "rules": {
+            "minItems": 1
+          },
+          "permissions": {
+            "not": {
+              "contains": {
+                "const": "storage:local"
+              }
+            }
+          }
+        },
+        "required": [
+          "rules"
+        ]
+      }
     }
   ],
   "$defs": {
     "message": {
-      "type": "object", "additionalProperties": false,
+      "type": "object",
+      "additionalProperties": false,
       "properties": {
-        "format": {"enum": ["text", "markdown", "media"], "default": "text"},
-        "content": {"type": "string", "maxLength": 16000},
-        "media_url": {"type": "string", "maxLength": 4096, "pattern": "^https://"},
-        "media_type": {"enum": [1,2,3,4]},
-        "buttons": {"type": "array", "maxItems": 5, "items": {
-          "type": "array", "minItems": 1, "maxItems": 5, "items": {
-            "type": "object", "additionalProperties": false, "required": ["label", "data"],
-            "properties": {
-              "label": {"type": "string", "minLength": 1, "maxLength": 10},
-              "data": {"type": "string", "minLength": 1, "maxLength": 512},
-              "callback": {"type": "boolean", "default": false},
-              "url": {"type": "boolean", "default": false},
-              "user_ids": {"type": "array", "maxItems": 100, "items": {"type": "string", "pattern": "^[A-Za-z0-9_-]{1,128}$"}}
+        "format": {
+          "enum": [
+            "text",
+            "markdown",
+            "media"
+          ],
+          "default": "text"
+        },
+        "content": {
+          "type": "string",
+          "maxLength": 16000
+        },
+        "media_url": {
+          "type": "string",
+          "maxLength": 4096,
+          "pattern": "^https://"
+        },
+        "media_type": {
+          "enum": [
+            1,
+            2,
+            3,
+            4
+          ]
+        },
+        "buttons": {
+          "type": "array",
+          "maxItems": 5,
+          "items": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 5,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "label",
+                "data"
+              ],
+              "properties": {
+                "label": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 10
+                },
+                "data": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512
+                },
+                "callback": {
+                  "type": "boolean",
+                  "default": false
+                },
+                "url": {
+                  "type": "boolean",
+                  "default": false
+                },
+                "user_ids": {
+                  "type": "array",
+                  "maxItems": 100,
+                  "items": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_-]{1,128}$"
+                  }
+                }
+              }
             }
           }
-        }}
+        }
       }
     }
   }

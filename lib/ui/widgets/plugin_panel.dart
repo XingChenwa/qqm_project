@@ -78,9 +78,7 @@ class _PluginPanelState extends State<PluginPanel> {
       final workspace = PluginWorkspace(directory);
       await workspace.ensureRoot();
       if (id != null && source != null) {
-        if (!(await workspace.files(id)).contains('plugin.json')) {
-          await workspace.write(id, 'plugin.json', source, createOnly: true);
-        }
+        await workspace.seedProject(id, source);
       }
       if (!mounted) return;
       await showDialog<void>(
@@ -123,6 +121,7 @@ class _PluginPanelState extends State<PluginPanel> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        if (manager.unavailablePlugins.isNotEmpty) _loadErrors(manager),
         if (mobile) _mobileActions(manager),
         if (!mobile)
           Padding(
@@ -286,11 +285,25 @@ class _PluginPanelState extends State<PluginPanel> {
     );
   }
 
+  Widget _loadErrors(PluginManager manager) => TextButton.icon(
+    icon: const Icon(Icons.warning_amber_rounded),
+    label: Text('${manager.unavailablePlugins.length} 个插件未能加载，查看原因'),
+    onPressed: () => AppDialogs.show(
+      context,
+      manager.unavailablePlugins.entries
+          .map((entry) => '${entry.key}：${entry.value}')
+          .join('\\n'),
+      title: '插件加载诊断',
+      error: true,
+    ),
+  );
+
   Widget _mobilePanel(PluginManager manager, List<BotPlugin> plugins) =>
       ListView(
         keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
         children: [
           _mobileActions(manager),
+          if (manager.unavailablePlugins.isNotEmpty) _loadErrors(manager),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: TextField(
@@ -467,7 +480,9 @@ class _PluginCard extends StatelessWidget {
                       const SizedBox(height: 4),
                       Text(
                         'v${info.version} · ${bundled
-                            ? '内置 Dart'
+                            ? (info.isCustomized ? '随附脚本 · 已修改' : '随附脚本')
+                            : runtime == 'script'
+                            ? '脚本插件'
                             : runtime == 'http'
                             ? 'HTTP 服务'
                             : '规则插件'}',
@@ -613,19 +628,18 @@ class _PluginCard extends StatelessWidget {
                     PopupMenuItem(value: 'clear', child: Text('清空本地玩法数据')),
                   ],
                 ),
-                if (!bundled)
-                  IconButton(
-                    tooltip: '在工作台编辑',
-                    onPressed: () {
-                      final panel = context
-                          .findAncestorStateOfType<_PluginPanelState>();
-                      panel?._workshop(
-                        id: info.id,
-                        source: manager.exportPlugin(info.id),
-                      );
-                    },
-                    icon: const Icon(Icons.edit_outlined, size: 19),
-                  ),
+                IconButton(
+                  tooltip: '在工作台编辑',
+                  onPressed: () {
+                    final panel = context
+                        .findAncestorStateOfType<_PluginPanelState>();
+                    panel?._workshop(
+                      id: info.id,
+                      source: manager.exportPlugin(info.id),
+                    );
+                  },
+                  icon: const Icon(Icons.edit_outlined, size: 19),
+                ),
                 if (!bundled)
                   IconButton(
                     tooltip: '卸载插件',
@@ -760,7 +774,7 @@ class _PluginCard extends StatelessWidget {
                 if (manager.isBundled(info.id))
                   const Padding(
                     padding: EdgeInsets.only(bottom: 12),
-                    child: Text('内置 Dart 清单只供查看；修改源码后需重新编译应用。'),
+                    child: Text('包含完整脚本源码。可复制导入，或在工作台编辑后应用；本机配置中的密钥不随清单导出。'),
                   ),
                 SelectableText(
                   source,

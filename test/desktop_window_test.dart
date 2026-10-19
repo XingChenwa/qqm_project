@@ -481,7 +481,7 @@ void main() {
       addTearDown(tester.view.resetDevicePixelRatio);
       final storage = MemoryStorage();
       final bot = BotClient(storage, apiService: RecordingApi());
-      final plugins = PluginManager(storage);
+      final plugins = TestPluginManager(storage);
       final controller = DesktopWindowController(storage, supported: true)
         ..ready = true;
       addTearDown(bot.dispose);
@@ -551,7 +551,7 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
     final storage = MemoryStorage();
     final bot = BotClient(storage, apiService: RecordingApi());
-    final plugins = PluginManager(storage);
+    final plugins = TestPluginManager(storage);
     final controller = DesktopWindowController(storage, supported: true)
       ..ready = true;
     addTearDown(bot.dispose);
@@ -641,7 +641,7 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
     final storage = MemoryStorage();
     final bot = BotClient(storage, apiService: RecordingApi());
-    final plugins = PluginManager(storage);
+    final plugins = TestPluginManager(storage);
     final controller = DesktopWindowController(storage, supported: true)
       ..ready = true;
     addTearDown(bot.dispose);

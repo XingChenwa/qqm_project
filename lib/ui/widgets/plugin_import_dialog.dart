@@ -71,9 +71,6 @@ class _PluginImportDialogState extends State<PluginImportDialog> {
   void _check() {
     try {
       final definition = PluginManifest.parse(_source.text);
-      if (widget.manager.isBundled(definition.id)) {
-        throw const PluginManifestException('此 ID 属于内置插件，不能覆盖。');
-      }
       setState(() {
         _definition = definition;
         _error = null;
@@ -172,7 +169,11 @@ class _PluginImportDialogState extends State<PluginImportDialog> {
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      '${definition.id} · v${definition.data['version']} · ${definition.runtime == 'http' ? 'HTTP 服务插件' : '规则插件'}',
+                      '${definition.id} · v${definition.data['version']} · ${definition.runtime == 'script'
+                          ? '跨平台脚本插件'
+                          : definition.runtime == 'http'
+                          ? 'HTTP 服务插件'
+                          : '规则插件'}',
                     ),
                     const SizedBox(height: 12),
                     Text(definition.data['description']),
@@ -184,6 +185,15 @@ class _PluginImportDialogState extends State<PluginImportDialog> {
                     const SizedBox(height: 8),
                     for (final permission in definition.permissions)
                       Text('• $permission'),
+                    if (definition.runtime == 'script') ...[
+                      const SizedBox(height: 12),
+                      const Text(
+                        '此插件会执行 Hetu 脚本。只向脚本提供本插件配置、消息和插件自身数据，不提供 QQ 密钥或系统命令。运行时间受限，但不是操作系统级进程隔离；只导入可信来源。',
+                      ),
+                      Text(
+                        '允许联网的域名：${(definition.data['script']['hosts'] as List? ?? []).join('、')}',
+                      ),
+                    ],
                     if (definition.runtime == 'http') ...[
                       const SizedBox(height: 16),
                       const Text(

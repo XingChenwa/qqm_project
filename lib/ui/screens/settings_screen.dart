@@ -14,6 +14,7 @@ import '../widgets/ip_whitelist_dialog.dart';
 import '../../utils/constants.dart';
 import '../../models/config.dart';
 import '../../services/storage_service.dart';
+import '../../services/theme_preferences.dart';
 import '../../services/desktop_window_controller.dart';
 import '../../services/qq_qr_login_service.dart';
 import '../themes/app_theme.dart';
@@ -646,11 +647,51 @@ class _SettingsScreenState extends State<SettingsScreen> {
             runSpacing: 12,
             children: [
               _credentialsCard(),
+              if (context.watch<ThemePreferences?>() != null) _appearanceCard(),
               _loggingCard(),
             ].map((card) => SizedBox(width: cardWidth, child: card)).toList(),
           ),
         );
       },
+    );
+  }
+
+  Widget _appearanceCard() {
+    final appearance = context.watch<ThemePreferences>();
+    return _card(
+      title: '外观与主题',
+      icon: Icons.palette_outlined,
+      children: [
+        const Text('立即切换，应用会记住你的选择。'),
+        const SizedBox(height: 12),
+        for (final item in const [
+          (ThemeMode.system, '跟随系统', Icons.brightness_auto_outlined),
+          (ThemeMode.light, '浅色', Icons.light_mode_outlined),
+          (ThemeMode.dark, '深色', Icons.dark_mode_outlined),
+        ])
+          ListTile(
+            key: ValueKey('theme-${item.$1.name}'),
+            contentPadding: EdgeInsets.zero,
+            leading: Icon(item.$3),
+            title: Text(item.$2),
+            trailing: Icon(
+              appearance.mode == item.$1
+                  ? Icons.radio_button_checked
+                  : Icons.radio_button_off,
+              color: appearance.mode == item.$1
+                  ? Theme.of(context).colorScheme.primary
+                  : null,
+            ),
+            enabled: !appearance.saving,
+            onTap: () async {
+              try {
+                await appearance.select(item.$1);
+              } catch (_) {
+                if (mounted) _showError('主题选择未能保存，请重试。');
+              }
+            },
+          ),
+      ],
     );
   }
 

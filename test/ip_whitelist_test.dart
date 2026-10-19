@@ -71,7 +71,8 @@ void main() {
     final service = PublicIpService(http: Dio()..httpClientAdapter = adapter);
     addTearDown(service.dispose);
     expect(adapter.requests, isEmpty);
-    expect(await service.lookup(), ['9.8.7.6', '2001:4860:4860::8888']);
+    expect(await service.lookup(), ['9.8.7.6']);
+    expect(adapter.requests.single.uri.host, 'api.ipify.org');
     expect(
       adapter.requests.every(
         (r) =>
@@ -83,6 +84,16 @@ void main() {
       ),
       isTrue,
     );
+  });
+  test('IPv4 接口意外返回 IPv6 时拒绝结果，不向用户冒充 IPv4', () async {
+    final service = PublicIpService(
+      http: Dio()
+        ..httpClientAdapter = UpdateAdapter(
+          (_) async => ResponseBody.fromString('2001:4860:4860::8888', 200),
+        ),
+    );
+    addTearDown(service.dispose);
+    expect(await service.lookup(), isEmpty);
   });
   test('查询异常或本地地址不会冒充公网源 IP', () async {
     final service = PublicIpService(

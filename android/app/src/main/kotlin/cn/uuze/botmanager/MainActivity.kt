@@ -10,12 +10,34 @@ import androidx.core.content.FileProvider
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
+import io.flutter.plugins.sharedpreferences.LegacySharedPreferencesPlugin
 import java.io.File
 import java.security.MessageDigest
 
 class MainActivity : FlutterActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        // The app uses SharedPreferences.getInstance() (the legacy API).
+        // Register that host directly as well, rather than relying solely on
+        // the async/DataStore plugin's delegated registration. Same file/codec;
+        // this does not reset, migrate or copy any user preferences.
+        if (!flutterEngine.plugins.has(LegacySharedPreferencesPlugin::class.java)) {
+            flutterEngine.plugins.add(LegacySharedPreferencesPlugin())
+        }
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "cn.uuze.botmanager/runtime")
+            .setMethodCallHandler { call, result ->
+                if (call.method != "repairPreferences") {
+                    result.notImplemented()
+                } else {
+                    try {
+                        flutterEngine.plugins.remove(LegacySharedPreferencesPlugin::class.java)
+                        flutterEngine.plugins.add(LegacySharedPreferencesPlugin())
+                        result.success(true)
+                    } catch (_: Exception) {
+                        result.error("PREFERENCES_REPAIR_FAILED", "偏好设置通道恢复失败；本地数据未清除。", null)
+                    }
+                }
+            }
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "cn.uuze.botmanager/updates")
             .setMethodCallHandler { call, result ->
                 if (call.method != "installApk") {

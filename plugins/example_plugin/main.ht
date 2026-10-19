@@ -1,0 +1,17 @@
+// QQM SDK 3: this file is the complete plugin, not a built-in command alias.
+function main(ctx) {
+  if (ctx['phase'] == 'enable') { return null }
+  final command = ctx['command']
+  final text = ctx['text'].trim().toLowerCase()
+  if (['help', '帮助', '菜单', 'menu'].contains(command)) { return ctx['help'] }
+  if (command == 'ping') { return 'pong!' }
+  if (['time', '时间', '日期', '几点'].contains(command)) { return '北京时间：'  +  ctx['beijing'] }
+  if (command == '复读') {
+    final body = ctx['args'].join(' ')
+    if (body.isEmpty) { return '用法：/复读 文本' }
+    if (body.length > 1000) { return '复读内容最多 1000 字。' }
+    return body
+  }
+  if (['你好', 'hello', 'hi'].contains(text)) { return '你好，我是 QQ 机器人助手。发送 /help 可以查看可用命令。' }
+  return null
+}

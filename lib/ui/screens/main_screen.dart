@@ -11,6 +11,7 @@ import '../../models/outgoing_message.dart';
 import '../../models/message.dart';
 import '../../models/plugin.dart';
 import '../../utils/helpers.dart';
+import '../../utils/bot_command_context.dart';
 import '../../utils/constants.dart';
 import '../../services/ip_whitelist_service.dart';
 import '../themes/app_theme.dart';
@@ -175,15 +176,24 @@ class _MainScreenState extends State<MainScreen> {
     final epoch = activeBot.accountEpoch;
     final rawContent =
         message.extra?['rawContent']?.toString() ?? message.content;
-    final content = message.extra?['eventType'] == 'GROUP_AT_MESSAGE_CREATE'
-        ? stripLeadingBotMention(rawContent)
-        : rawContent;
+    final commandContext = botCommandContext(
+      rawContent,
+      isGroup: message.extra?['isGroup'] == true,
+      eventType: message.extra?['eventType']?.toString() ?? '',
+      botId: activeBot.botId,
+      botName: activeBot.botName,
+      mentions: message.extra?['mentions'] is List
+          ? message.extra!['mentions'] as List
+          : message.rawEvent['mentions'] is List
+          ? message.rawEvent['mentions'] as List
+          : const [],
+    );
     final pluginMessage = PluginMessage(
       messageId: message.id,
       sessionId: message.sessionId,
       senderId: message.senderId,
       senderName: message.senderName,
-      content: content,
+      content: commandContext.content,
       messageType: message.messageType,
       isGroup: message.extra?['isGroup'] == true,
       timestamp: message.timestamp,
@@ -192,6 +202,7 @@ class _MainScreenState extends State<MainScreen> {
           ? message.receivedBody.authorRole
           : message.extra?['senderRole']?.toString() ?? '',
       isFullGroupMessage: message.isFullGroupMessage,
+      isMentioned: commandContext.isMentioned,
       eventType: message.extra?['pluginEventId'] != null
           ? 'interaction'
           : 'message',
@@ -209,9 +220,16 @@ class _MainScreenState extends State<MainScreen> {
       ],
     );
 
-    final responses = await context.read<PluginManager>().processMessage(
-      pluginMessage,
-    );
+    final plugins = context.read<PluginManager>();
+    if (parseSlashCommand(commandContext.content)?.command == '主动消息' &&
+        (!message.isFullGroupMessage || commandContext.isMentioned) &&
+        !plugins.plugins.any(
+          (plugin) =>
+              plugin.info.id == 'group_authorization' && plugin.info.isEnabled,
+        )) {
+      _addLog('[${_clockText(DateTime.now())}] 主动消息权限插件未启用，请在「插件」中手动开启。');
+    }
+    final responses = await plugins.processMessage(pluginMessage);
     if (!mounted || activeBot.accountEpoch != epoch) return false;
 
     final bot = activeBot;

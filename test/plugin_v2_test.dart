@@ -6,7 +6,6 @@ import 'dart:typed_data';
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:qq_bot_manager/core/bot_client.dart';
-import 'package:qq_bot_manager/core/plugin_manager.dart';
 import 'package:qq_bot_manager/core/plugins/manifest_plugin.dart';
 import 'package:qq_bot_manager/models/message.dart';
 import 'package:qq_bot_manager/models/plugin.dart';
@@ -219,7 +218,7 @@ void main() {
   });
 
   test('命令免 @、普通关键词须授权全量监听；优先级和冷却生效', () async {
-    final manager = PluginManager(MemoryStorage());
+    final manager = TestPluginManager(MemoryStorage());
     addTearDown(manager.dispose);
     await manager.init();
     await manager.enablePlugin('example_plugin');
@@ -291,7 +290,7 @@ void main() {
       contains('操作员'),
     );
     final storage = MemoryStorage(config: validConfig());
-    final manager = PluginManager(storage);
+    final manager = TestPluginManager(storage);
     await manager.init();
     await manager.enablePlugin('daily_club');
     await manager.processMessage(event('/签到'));
@@ -304,7 +303,7 @@ void main() {
     final original = validConfig().appId;
     storage.config.appId = original;
     manager.dispose();
-    final restored = PluginManager(storage);
+    final restored = TestPluginManager(storage);
     addTearDown(restored.dispose);
     await restored.init();
     expect(

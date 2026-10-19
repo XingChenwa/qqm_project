@@ -5,7 +5,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:qq_bot_manager/core/bot_client.dart';
-import 'package:qq_bot_manager/core/plugin_manager.dart';
 import 'package:qq_bot_manager/models/message.dart';
 import 'package:qq_bot_manager/ui/widgets/chat_input.dart';
 import 'package:qq_bot_manager/ui/widgets/markdown_workbench.dart';
@@ -72,7 +71,7 @@ void main() {
         final storage = MemoryStorage();
         final api = RecordingApi();
         final bot = BotClient(storage, apiService: api);
-        final plugins = PluginManager(storage);
+        final plugins = TestPluginManager(storage);
         addTearDown(bot.dispose);
         addTearDown(plugins.dispose);
         await tester.runAsync(() => plugins.init());
@@ -197,7 +196,7 @@ void main() {
     addTearDown(() => debugDefaultTargetPlatformOverride = null);
     final storage = DarkMemoryStorage();
     final bot = BotClient(storage, apiService: RecordingApi());
-    final plugins = PluginManager(storage);
+    final plugins = TestPluginManager(storage);
     addTearDown(bot.dispose);
     addTearDown(plugins.dispose);
     await tester.runAsync(plugins.init);

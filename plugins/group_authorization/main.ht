@@ -1,0 +1,37 @@
+// The official-page URL structure is exactly the user's club.vip.qq.com template.
+// No AppID/OpenID-to-UID guessing, pending state or automatic authorization.
+function robots(ctx) {
+  final values = json_decode(ctx['config']['robots_json'])
+  if (!is_map(values) || keys(values).length > 32) { return null }
+  for (final appId in keys(values)) {
+    final bot = values[appId]
+    if (!is_map(bot) || rx('^[A-Za-z0-9_-]{1,128}$', appId) == null) { return null }
+    for (final key in keys(bot)) { if (!['bot_qq', 'bot_uid'].contains(key)) return null }
+    if (rx('^[1-9][0-9]{4,12}$', str(bot['bot_qq'])) == null || rx('^[A-Za-z0-9_-]{1,128}$', str(bot['bot_uid'])) == null) { return null }
+  }
+  return values
+}
+function main(ctx) {
+  if (ctx['phase'] == 'enable') {
+    if (robots(ctx) == null) { return {error: '请按 AppID 填写机器人资料 JSON，每项需要真实机器人 QQ 和 UID。'} }
+    return null
+  }
+  if (ctx['command'] != '主动消息' || ctx['message']['event_type'] == 'interaction') { return null }
+  final message = ctx['message']
+  if (!message['is_group']) { return '请在需要授权的 QQ 群中 @机器人发送 /主动消息。' }
+  final args = ctx['args']
+  final owner = message['sender_role'] == 'owner' && rx('^[A-Za-z0-9_-]{1,128}$', message['sender_id']) != null
+  if (args.isEmpty) {
+    final ids = []
+    if (owner) { ids.add(message['sender_id']) }
+    return {format: 'markdown', content: '### 开通群主动消息\n\n请群主点击「填写群号」，补上本群真实群号，保持 @机器人后发送。\n\n例如：/主动消息 938017865\n\n填写群号不会自动授权，仍需群主在 QQ 页面确认。', buttons: [[{label: '填写群号(群主)', data: '/主动消息 ', user_ids: ids}]]}
+  }
+  if (!owner) { return '只有群主本人可以提交群号。请群主 @机器人发送 /主动消息 本群群号；本次事件未确认群主身份时不会生成授权链接。' }
+  if (args.length != 1 || rx('^[1-9][0-9]{4,12}$', args[0]) == null) { return '请填写本群真实数字群号，例如：/主动消息 938017865。不能使用群 OpenID。' }
+  final bots = robots(ctx)
+  if (bots == null) { return '机器人资料 JSON 无效，请检查插件配置。' }
+  final bot = bots[ctx['app_id']]
+  if (bot == null) { return '请先在「主动消息权限」配置中，按当前 AppID '  +  ctx['app_id']  +  ' 填写机器人 QQ 和真实 UID，不要使用 AppID 或群 OpenID。' }
+  final url = build_url('https://club.vip.qq.com/transfer', {open_kuikly_info: json_encode({page_name: 'ai_group_service_agreement_pop_page', groupCode: integer(args[0]), botUin: integer(bot['bot_qq']), botUid: bot['bot_uid'], screen: 1})})
+  return {format: 'markdown', content: '### 群主动消息授权\n\n群号：'  +  args[0]  +  '\n\n请核对这是本群群号，再由群主点击按钮并在 QQ 页面确认。实际权限与结果以 QQ 为准。', buttons: [[{label: '主动权限(群主使用)', data: url, url: true, user_ids: [message['sender_id']]}]]}
+}

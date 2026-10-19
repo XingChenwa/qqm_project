@@ -82,7 +82,7 @@ Future<BotClient> host(WidgetTester tester, DelayedSendApi api) async {
     apiService: api,
     webSocketService: TestGateway(),
   );
-  final plugins = PluginManager(storage);
+  final plugins = TestPluginManager(storage);
   addTearDown(bot.dispose);
   addTearDown(plugins.dispose);
   await tester.pumpWidget(

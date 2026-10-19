@@ -50,7 +50,7 @@ export function renderPluginGuide(markdown) {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="QQ机器人管理器插件开发手册：JSON/YAML 规则、HTTP 插件、Markdown 与按钮、权限、Dart SDK 和文件工作区。含完整示例与命令说明。">
+  <meta name="description" content="QQ机器人管理器插件开发手册：JSON/YAML 规则、HTTP 插件、Markdown 与按钮、权限、跨平台脚本 SDK 和文件工作区。含完整示例与命令说明。">
   <meta name="theme-color" content="#f5f8ff">
   <title>插件开发手册 · QQ机器人管理器</title>
   <link rel="icon" href="assets/logo.png">
@@ -64,9 +64,9 @@ export function renderPluginGuide(markdown) {
   <nav aria-label="主导航"><a href="./#demo">项目演示</a><a href="plugins.html" aria-current="page">开发文档</a><a href="./#downloads">下载</a><a class="nav-github" href="https://github.com/${repository}">GitHub ↗</a></nav>
 </header>
 <div class="docs-heading wrap">
-  <p class="eyebrow">PLUGIN WORKSHOP / SDK v2</p>
+  <p class="eyebrow">PLUGIN WORKSHOP / SCRIPT SDK</p>
   <h1>把想法，写成一个插件。</h1>
-  <p>从第一条问候命令，到你自己的服务。这里是完整的插件开发手册。</p>
+  <p>从第一条问候命令，到可自由编辑的脚本与玩法。这里是完整的插件开发手册。</p>
   <div class="doc-meta"><a href="#section-2">开始第一个插件 ↓</a><a href="https://github.com/${repository}/tree/main/plugins/examples">示例源码 ↗</a><a href="${sourceUrl}">查看 Markdown 源文档 ↗</a></div>
 </div>
 <div class="docs-layout wrap">

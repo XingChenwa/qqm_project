@@ -6,7 +6,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../core/plugin_manager.dart';
-import '../../core/plugins/manifest_plugin.dart';
 import '../../models/plugin.dart';
 import '../../models/plugin_manifest.dart';
 import '../../services/plugin_workspace.dart';
@@ -182,22 +181,7 @@ class _PluginWorkshopState extends State<PluginWorkshop> {
   Future<void> _install() async {
     if (_dirty && !await _save()) return;
     await _guard(() async {
-      final name = _files.contains('plugin.json')
-          ? 'plugin.json'
-          : _files.contains('plugin.yaml')
-          ? 'plugin.yaml'
-          : _files.contains('plugin.yml')
-          ? 'plugin.yml'
-          : null;
-      if (name == null) {
-        throw const PluginManifestException(
-          '项目根目录需要 plugin.json 或 plugin.yaml。',
-        );
-      }
-      final source = await _workspace.read(_project!, name);
-      PluginManifest.parse(
-        source,
-      ); // Builtin manifests cannot masquerade as editable scripts.
+      final source = await _workspace.assembleProject(_project!);
       if (!mounted) return;
       final installed = await showDialog<bool>(
         context: context,
@@ -219,28 +203,38 @@ class _PluginWorkshopState extends State<PluginWorkshop> {
     return result == null || result.isEmpty ? null : result;
   }
 
-  Future<void> _create() async {
+  Future<void> _create({bool script = false}) async {
     if (!await _leave() || !mounted) return;
     final id = await _ask('新建插件项目', 'my_hello', '小写字母、数字、下划线，不能覆盖已有项目');
     if (id == null) return;
     await _guard(() async {
-      final source = PluginWorkspace.rulesManifest(
-        id: id,
-        name: '我的命令插件',
-        description: '可以编辑规则、消息格式和权限',
-        commands: [
-          PluginCommandDraft(
-            value: 'hello',
-            reply: '你好，{{sender_name}}！\n你说的是：{{args}}',
-          ),
-        ],
-      );
+      final source = script
+          ? PluginWorkspace.scriptManifest(id)
+          : PluginWorkspace.rulesManifest(
+              id: id,
+              name: '我的命令插件',
+              description: '可以编辑规则、消息格式和权限',
+              commands: [
+                PluginCommandDraft(
+                  value: 'hello',
+                  reply: '你好，{{sender_name}}！\n你说的是：{{args}}',
+                ),
+              ],
+            );
       await _workspace.createProject(id);
       await _workspace.write(id, 'plugin.json', source, createOnly: true);
+      if (script) {
+        await _workspace.write(
+          id,
+          'main.ht',
+          PluginWorkspace.helloScript,
+          createOnly: true,
+        );
+      }
       await _workspace.write(
         id,
         'readme.md',
-        '# 我的命令插件\n\n发送 /hello 内容 或 #hello 内容。\n\nJSON/YAML 规则可以直接安装；JS/Python 文件仅编辑，不会在手机内执行。复杂逻辑使用 HTTP 服务插件；Dart 内置插件需要重新编译。\n',
+        '# 我的命令插件\n\n发送 /hello 内容 或 #hello 内容。\n\n在 main.ht 编写脚本逻辑，或使用 JSON/YAML 规则与 HTTP 插件。保存后点击「应用到插件中心」，检查配置后启用。导出完整插件请使用插件中心的清单导出。JS/Python/Dart 文件仅作为参考文本。\n',
         createOnly: true,
       );
       await _reload(select: id);
@@ -344,6 +338,7 @@ class _PluginWorkshopState extends State<PluginWorkshop> {
       final picked = await FilePicker.pickFiles(
         type: FileType.custom,
         allowedExtensions: [
+          'ht',
           'json',
           'yaml',
           'yml',
@@ -390,22 +385,20 @@ class _PluginWorkshopState extends State<PluginWorkshop> {
 
   Future<void> _preview() async {
     await _guard(() async {
-      final definition = PluginManifest.parse(_editor.text, allowBuiltin: true);
-      if (definition.runtime != 'rules') {
-        throw const PluginManifestException(
-          '只支持本地规则试运行；HTTP 服务和内置 Dart 插件不会在预览中执行或联网。',
-        );
-      }
+      if (_dirty && !await _save()) return;
+      final source = await _workspace.assembleProject(_project!);
       if (!mounted) return;
       final text = await _ask('本地试运行（不发送 QQ）', '/hello 测试', '测试命令');
       if (text == null) return;
-      final plugin = ManifestPlugin(definition.toInfo(), definition);
-      final result = await plugin.execute(
+      final result = await widget.manager.previewPlugin(
+        source,
         PluginMessage(
           messageId: 'test',
           sessionId: 'test-group',
           senderId: 'test-member',
           senderName: '测试用户',
+          senderRole: 'owner',
+          isMentioned: true,
           content: text,
           messageType: 0,
           isGroup: true,
@@ -464,9 +457,14 @@ class _PluginWorkshopState extends State<PluginWorkshop> {
         ),
         const SizedBox(height: 8),
         OutlinedButton.icon(
-          onPressed: _busy ? null : _create,
+          onPressed: _busy ? null : () => _create(),
           icon: const Icon(Icons.create_new_folder_outlined),
           label: const Text('新建插件项目'),
+        ),
+        OutlinedButton.icon(
+          onPressed: _busy ? null : () => _create(script: true),
+          icon: const Icon(Icons.code),
+          label: const Text('新建脚本插件'),
         ),
         if (_project != null) ...[
           const Divider(),
@@ -576,7 +574,7 @@ class _PluginWorkshopState extends State<PluginWorkshop> {
             ),
             decoration: const InputDecoration(
               border: OutlineInputBorder(),
-              hintText: '支持 JSON/YAML 规则和源码文本；脚本不会被直接执行。',
+              hintText: '编辑 .ht 脚本或 JSON/YAML 清单；保存后应用到插件中心。',
             ),
           ),
         ),
@@ -624,7 +622,7 @@ class _PluginWorkshopState extends State<PluginWorkshop> {
                     ),
                   ],
                 ),
-                const Text('规则即装即用；复杂玩法接 HTTP 服务。修改已安装插件后，需重新安装、检查配置并启用。'),
+                const Text('脚本、规则与 HTTP 插件共用一套接口。保存 → 应用 → 启用，无需重新编译应用。'),
                 if (_busy && ModalRoute.of(context)?.isCurrent == true)
                   const LinearProgressIndicator(),
                 if (_error != null)
@@ -687,7 +685,7 @@ class _PluginWorkshopState extends State<PluginWorkshop> {
                     ),
                     FilledButton(
                       onPressed: _busy || _project == null ? null : _install,
-                      child: const Text('安装到插件中心'),
+                      child: const Text('应用到插件中心'),
                     ),
                   ],
                 ),

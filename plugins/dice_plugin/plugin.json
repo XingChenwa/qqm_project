@@ -2,17 +2,98 @@
   "schema_version": 2,
   "id": "dice_plugin",
   "name": "随机游乐场",
-  "version": "2.0.0",
+  "version": "3.0.0",
   "description": "骰子与修正值、硬币、选择转盘、随机排序、范围随机数和猜拳。",
   "permissions": [
     "message:read",
-    "message:send"
+    "message:send",
+    "events:group-all"
   ],
   "config_schema": [
-    {"key": "max_dice", "label": "骰子数量上限（1–100）", "type": "integer", "default": 100},
-    {"key": "max_sides", "label": "骰子面数上限（2–1000）", "type": "integer", "default": 1000}
+    {
+      "key": "max_dice",
+      "label": "骰子数量上限（1–100）",
+      "type": "integer",
+      "default": 100
+    },
+    {
+      "key": "max_sides",
+      "label": "骰子面数上限（2–1000）",
+      "type": "integer",
+      "default": 1000
+    }
   ],
   "author": "QQ 机器人管理器",
-  "runtime": "builtin",
-  "entrypoint": "lib/dice_plugin/plugin.dart"
+  "runtime": "script",
+  "entrypoint": "main.ht",
+  "script": {
+    "language": "hetu",
+    "commands": [
+      {
+        "name": "骰子",
+        "description": "掷骰子，可带修正值",
+        "usage": "骰子 2d6+3",
+        "aliases": [
+          "dice",
+          "roll"
+        ]
+      },
+      {
+        "name": "硬币",
+        "description": "抛硬币",
+        "usage": "硬币 3",
+        "aliases": [
+          "coin"
+        ]
+      },
+      {
+        "name": "选择",
+        "description": "选择或转盘",
+        "usage": "选择 火锅 | 烧烤",
+        "aliases": [
+          "choose",
+          "转盘"
+        ]
+      },
+      {
+        "name": "打乱",
+        "description": "随机排序",
+        "usage": "打乱 小明 | 小红",
+        "aliases": [
+          "shuffle"
+        ]
+      },
+      {
+        "name": "随机数",
+        "description": "范围内随机整数",
+        "usage": "随机数 1 100",
+        "aliases": [
+          "random"
+        ]
+      },
+      {
+        "name": "猜拳",
+        "description": "石头剪刀布",
+        "usage": "猜拳 石头",
+        "aliases": [
+          "rps"
+        ]
+      }
+    ],
+    "unmentioned": {
+      "commands": true,
+      "prefixes": [
+        "0",
+        "1",
+        "2",
+        "3",
+        "4",
+        "5",
+        "6",
+        "7",
+        "8",
+        "9"
+      ]
+    }
+  }
 }

@@ -1,3 +1,4 @@
+import 'package:qq_bot_manager/core/plugin_manager.dart';
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -5,7 +6,6 @@ import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
-import 'package:qq_bot_manager/core/plugin_manager.dart';
 import 'package:qq_bot_manager/core/plugins/weather_plugin.dart';
 import 'package:qq_bot_manager/models/plugin.dart';
 import 'package:qq_bot_manager/services/amap_service.dart';
@@ -359,7 +359,7 @@ void main() {
   });
 
   test('插件管理器将中文、斜杠和 IP 指令都路由到原天气插件，关闭后不处理', () async {
-    final manager = PluginManager(MemoryStorage());
+    final manager = TestPluginManager(MemoryStorage());
     addTearDown(manager.dispose);
     await manager.init();
     await manager.enablePlugin('weather_plugin');
@@ -382,11 +382,11 @@ void main() {
 
   testWidgets('天气插件可配置隐藏的高德 Key 和默认城市，保存到原插件且重新加载后恢复', (tester) async {
     final storage = MemoryStorage();
-    final manager = PluginManager(storage);
+    final manager = TestPluginManager(storage);
     addTearDown(manager.dispose);
     await tester.runAsync(() => manager.init());
     await tester.pumpWidget(
-      ChangeNotifierProvider.value(
+      ChangeNotifierProvider<PluginManager>.value(
         value: manager,
         child: const MaterialApp(home: Scaffold(body: PluginPanel())),
       ),

@@ -6,7 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:qq_bot_manager/core/plugin_manager.dart';
 import 'package:qq_bot_manager/models/plugin.dart';
 import 'package:qq_bot_manager/models/plugin_manifest.dart';
-import 'package:qqm_plugins/weather_plugin/plugin.dart';
+import 'package:qq_bot_manager/core/plugins/script_plugin.dart';
 
 import 'support/fakes.dart';
 
@@ -37,7 +37,7 @@ Map<String, dynamic> httpExample(Uri endpoint) {
 }
 
 Future<PluginManager> pluginManager([MemoryStorage? storage]) async {
-  final manager = PluginManager(storage ?? MemoryStorage());
+  final manager = TestPluginManager(storage ?? MemoryStorage());
   addTearDown(manager.dispose);
   await manager.init();
   return manager;
@@ -49,7 +49,7 @@ void main() {
     // 此文件只访问自建回环服务器，不使用 Flutter 的 HTTP 400 占位器。
     HttpOverrides.global = null;
   });
-  test('七个内置实现来自独立 plugins 包，旧 ID、启用状态和密钥配置保留', () async {
+  test('七个随附项目与第三方共用脚本加载器，旧 ID、启用状态和密钥配置保留', () async {
     final storage = MemoryStorage();
     storage.storedPlugins['weather_plugin'] = PluginInfo(
       id: 'weather_plugin',
@@ -73,17 +73,17 @@ void main() {
     final weather = manager.plugins.singleWhere(
       (p) => p.info.id == 'weather_plugin',
     );
-    expect(weather, isA<WeatherPlugin>());
+    expect(weather, isA<ScriptPlugin>());
     expect(weather.info.config['amap_key'], 'old-private-key');
     expect(weather.info.config['default_city'], '深圳');
     expect(weather.info.isEnabled, false);
     expect(weather.info.directory, 'plugins/weather_plugin');
     expect(
       weather.info.manifest['entrypoint'],
-      'lib/weather_plugin/plugin.dart',
+      'main.ht',
     );
     expect(await manager.uninstallPlugin('weather_plugin'), false);
-    expect(File('plugins/lib/weather_plugin/plugin.dart').existsSync(), true);
+    expect(File('plugins/weather_plugin/main.ht').existsSync(), true);
   });
 
   test('JSON 插件默认停用；命令、完整匹配、配置和 Markdown 正文实际运行', () async {
@@ -158,7 +158,7 @@ void main() {
     expect(afterUninstall.plugins, hasLength(7));
   });
 
-  test('不能导入 Dart 执行代码、覆盖内置 ID 或声明未知权限', () async {
+  test('不能导入原生 Dart、未知权限；替换随附 ID 需明确确认', () async {
     final manager = await pluginManager();
     final builtinId = jsonExample()..['id'] = 'weather_plugin';
     await expectLater(

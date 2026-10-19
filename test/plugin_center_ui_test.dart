@@ -98,7 +98,7 @@ void main() {
 
   testWidgets('导入必须检查并授权，默认停用；配置、启用、卸载均可操作', (tester) async {
     final storage = MemoryStorage();
-    final manager = PluginManager(storage);
+    final manager = TestPluginManager(storage);
     final bot = BotClient(storage);
     addTearDown(manager.dispose);
     addTearDown(bot.dispose);
@@ -166,7 +166,7 @@ void main() {
 
   testWidgets('应用内开发文档和示例可读，加载示例不会自动安装', (tester) async {
     final storage = MemoryStorage();
-    final manager = PluginManager(storage);
+    final manager = TestPluginManager(storage);
     final bot = BotClient(storage);
     addTearDown(manager.dispose);
     addTearDown(bot.dispose);
@@ -224,7 +224,7 @@ void main() {
           : TargetPlatform.windows;
       addTearDown(() => debugDefaultTargetPlatformOverride = null);
       final storage = MemoryStorage();
-      final manager = PluginManager(storage);
+      final manager = TestPluginManager(storage);
       final bot = BotClient(storage);
       addTearDown(manager.dispose);
       addTearDown(bot.dispose);
@@ -315,7 +315,7 @@ void main() {
       ..appId = ''
       ..clientSecret = '';
     final storage = MemoryStorage(config: config);
-    final manager = PluginManager(storage);
+    final manager = TestPluginManager(storage);
     final api = RecordingApi();
     final gateway = TestGateway();
     final bot = BotClient(storage, apiService: api, webSocketService: gateway);

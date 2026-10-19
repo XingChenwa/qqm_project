@@ -16,7 +16,7 @@ void main() {
       ..appId = ''
       ..clientSecret = '';
     final storage = MemoryStorage(config: config);
-    final manager = PluginManager(storage);
+    final manager = TestPluginManager(storage);
     final gateway = TestGateway();
     final api = RecordingApi();
     final bot = BotClient(storage, apiService: api, webSocketService: gateway);

@@ -2,13 +2,44 @@
   "schema_version": 2,
   "id": "group_games",
   "name": "群互动游戏",
-  "version": "2.0.0",
+  "version": "3.0.0",
   "description": "限时猜数字、群投票与回调按钮；每人一票可改票，发起人或管理员结束。",
   "author": "QQ 机器人管理器",
-  "runtime": "builtin",
-  "entrypoint": "lib/group_games/plugin.dart",
-  "permissions": ["message:read", "message:send", "interaction:read"],
+  "runtime": "script",
+  "entrypoint": "main.ht",
+  "permissions": [
+    "message:read",
+    "message:send",
+    "interaction:read",
+    "storage:local"
+  ],
   "config_schema": [
-    {"key": "enable_buttons", "label": "投票使用 Markdown 回调按钮（需 QQ 平台权限）", "type": "boolean", "default": false}
-  ]
+    {
+      "key": "enable_buttons",
+      "label": "投票使用 Markdown 回调按钮（需 QQ 平台权限）",
+      "type": "boolean",
+      "default": false
+    }
+  ],
+  "script": {
+    "language": "hetu",
+    "commands": [
+      {
+        "name": "猜数字",
+        "description": "15 分钟群游戏",
+        "usage": "猜数字 开始 / 数字 / 结束",
+        "aliases": [
+          "guess"
+        ]
+      },
+      {
+        "name": "投票",
+        "description": "投票与回调按钮",
+        "usage": "投票 创建 标题 | 选项1 | 选项2",
+        "aliases": [
+          "poll"
+        ]
+      }
+    ]
+  }
 }

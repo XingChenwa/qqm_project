@@ -97,11 +97,11 @@ void main() {
     final gateway = TestGateway();
     final api = RecordingApi();
     final bot = BotClient(storage, apiService: api, webSocketService: gateway);
-    final plugins = PluginManager(storage);
+    final plugins = TestPluginManager(storage);
     addTearDown(bot.dispose);
     addTearDown(plugins.dispose);
     await tester.runAsync(() => plugins.init());
-    await plugins.enablePlugin('weather_plugin');
+    await tester.runAsync(() => plugins.enablePlugin('weather_plugin'));
     await tester.pumpWidget(appShell(storage, bot, plugins));
     await tester.pumpAndSettle();
     expect(bot.config.autoReplyToAllGroupMessages, isFalse);
@@ -144,7 +144,7 @@ void main() {
       addTearDown(() => debugDefaultTargetPlatformOverride = null);
       final storage = MemoryStorage();
       final bot = BotClient(storage, apiService: RecordingApi());
-      final plugins = PluginManager(storage);
+      final plugins = TestPluginManager(storage);
       addTearDown(bot.dispose);
       addTearDown(plugins.dispose);
       await tester.runAsync(() => plugins.init());
@@ -200,7 +200,7 @@ void main() {
       addTearDown(tester.view.resetDevicePixelRatio);
       final storage = MemoryStorage();
       final bot = BotClient(storage, apiService: RecordingApi());
-      final plugins = PluginManager(storage);
+      final plugins = TestPluginManager(storage);
       addTearDown(bot.dispose);
       addTearDown(plugins.dispose);
       await tester.pumpWidget(

@@ -34,9 +34,8 @@ class _IpWhitelistDialogState extends State<IpWhitelistDialog> {
     final reported = validPublicIp(widget.problem.sourceIp);
     if (reported != null) {
       _ips = [reported];
-    } else {
-      unawaited(_query());
     }
+    if (reported == null || reported.contains(':')) unawaited(_query());
   }
 
   Future<void> _query() async {
@@ -48,7 +47,9 @@ class _IpWhitelistDialogState extends State<IpWhitelistDialog> {
     final ips = await _lookup.lookup();
     if (mounted) {
       setState(() {
-        _ips = ips;
+        _ips = ips
+            .where((ip) => validPublicIp(ip) != null && !ip.contains(':'))
+            .toList();
         _loading = false;
       });
     }
@@ -108,9 +109,10 @@ class _IpWhitelistDialogState extends State<IpWhitelistDialog> {
               SelectableText('机器人 AppID：${widget.problem.appId}'),
               const SizedBox(height: 16),
               Text(
-                widget.problem.sourceIp != null
-                    ? 'QQ 接口返回的源 IP'
-                    : '当前查询到的公网出口 IP',
+                widget.problem.sourceIp != null &&
+                        !widget.problem.sourceIp!.contains(':')
+                    ? 'QQ 接口返回的源 IPv4'
+                    : '当前查询到的公网出口 IPv4',
                 style: const TextStyle(fontWeight: FontWeight.w700),
               ),
               const SizedBox(height: 8),
@@ -135,7 +137,7 @@ class _IpWhitelistDialogState extends State<IpWhitelistDialog> {
                   ),
                 ),
               if (!_loading && _ips.isEmpty)
-                const Text('暂时无法查询公网 IP。请检查网络后重试，或核对 QQ 接口实际使用的公网出口。'),
+                const Text('暂时无法查询公网 IPv4。请检查 IPv4 网络或代理后重试，不会使用 IPv6 代替。'),
               Wrap(
                 spacing: 8,
                 children: [
@@ -145,13 +147,22 @@ class _IpWhitelistDialogState extends State<IpWhitelistDialog> {
                       icon: Icon(_copied ? Icons.check : Icons.copy, size: 16),
                       label: Text(_copied ? '已复制 IP' : '复制 IP'),
                     ),
-                  if (widget.problem.sourceIp == null)
+                  if (widget.problem.sourceIp == null ||
+                      widget.problem.sourceIp!.contains(':'))
                     TextButton(
                       onPressed: _loading ? null : _query,
                       child: const Text('重新查询'),
                     ),
                 ],
               ),
+              if (widget.problem.sourceIp?.contains(':') == true) ...[
+                const SizedBox(height: 8),
+                SelectableText('QQ 接口实际报告 IPv6：${widget.problem.sourceIp}'),
+                const Text(
+                  '上方 IPv4 为单独查询结果。若 QQ 请求仍走 IPv6，请调整网络或代理的 IPv4 路由，不能用不同出口代替。',
+                  style: TextStyle(fontSize: 12),
+                ),
+              ],
               const SizedBox(height: 8),
               const Text(
                 '1. 打开下方对应机器人的开发设置。\n2. 在「IP 白名单」添加实际公网出口 IP 并保存。\n3. 等设置生效后，返回应用重新连接。',

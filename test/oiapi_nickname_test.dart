@@ -444,7 +444,7 @@ void main() {
     final api = FakeOiapi();
     final gateway = TestGateway();
     final bot = nicknameBot(storage, api, gateway);
-    final plugins = PluginManager(storage);
+    final plugins = TestPluginManager(storage);
     addTearDown(bot.dispose);
     addTearDown(plugins.dispose);
     await tester.pumpWidget(

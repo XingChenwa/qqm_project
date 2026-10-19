@@ -10,6 +10,7 @@ class PluginInfo {
   final String author;
   final String directory;
   bool isEnabled;
+  bool isCustomized;
   final Map<String, dynamic> config;
   final List<String> permissions;
 
@@ -24,6 +25,7 @@ class PluginInfo {
     this.author = '',
     required this.directory,
     this.isEnabled = false,
+    this.isCustomized = false,
     Map<String, dynamic>? config,
     this.permissions = const [],
     this.manifest = const {},
@@ -37,6 +39,7 @@ class PluginInfo {
     'author': author,
     'directory': directory,
     'isEnabled': isEnabled,
+    'isCustomized': isCustomized,
     'config': config,
     'permissions': permissions,
     'manifest': manifest,
@@ -50,6 +53,7 @@ class PluginInfo {
     author: map['author'] as String? ?? '',
     directory: map['directory'] as String? ?? '',
     isEnabled: map['isEnabled'] as bool? ?? false,
+    isCustomized: map['isCustomized'] as bool? ?? false,
     config: Map<String, dynamic>.from(map['config'] as Map? ?? {}),
     permissions: List<String>.from(map['permissions'] as List? ?? []),
     manifest: Map<String, dynamic>.from(map['manifest'] as Map? ?? {}),
@@ -118,6 +122,9 @@ class PluginMessage {
   final DateTime timestamp;
   final String senderRole;
   final bool isFullGroupMessage;
+
+  /// Addressed to the active bot, independently of the gateway event name.
+  final bool isMentioned;
   final String eventType;
   final String callbackData;
   final List<Map<String, dynamic>> attachments;
@@ -133,6 +140,7 @@ class PluginMessage {
     required this.timestamp,
     this.senderRole = '',
     this.isFullGroupMessage = false,
+    this.isMentioned = false,
     this.eventType = 'message',
     this.callbackData = '',
     this.attachments = const [],
@@ -149,6 +157,7 @@ class PluginMessage {
     'timestamp': timestamp.toUtc().toIso8601String(),
     'sender_role': senderRole,
     'is_full_group_message': isFullGroupMessage,
+    'is_mentioned': isMentioned,
     'event_type': eventType,
     if (callbackData.isNotEmpty) 'callback_data': callbackData,
     if (attachments.isNotEmpty) 'attachments': attachments,

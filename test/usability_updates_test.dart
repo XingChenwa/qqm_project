@@ -309,7 +309,7 @@ void main() {
       }
     }
     final bot = BotClient(storage, apiService: RecordingApi());
-    final plugins = PluginManager(storage);
+    final plugins = TestPluginManager(storage);
     addTearDown(bot.dispose);
     addTearDown(plugins.dispose);
     await tester.pumpWidget(
@@ -357,7 +357,7 @@ void main() {
         lastMessageTime: DateTime(2026, 10, 15),
       );
       final bot = BotClient(storage, apiService: RecordingApi());
-      final plugins = PluginManager(storage);
+      final plugins = TestPluginManager(storage);
       addTearDown(bot.dispose);
       addTearDown(plugins.dispose);
       final key = GlobalKey();
@@ -405,7 +405,7 @@ void main() {
       addTearDown(tester.view.resetDevicePixelRatio);
       final storage = MemoryStorage();
       final bot = BotClient(storage);
-      final plugins = PluginManager(storage);
+      final plugins = TestPluginManager(storage);
       addTearDown(bot.dispose);
       addTearDown(plugins.dispose);
       await tester.pumpWidget(
@@ -448,7 +448,7 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
     final storage = MemoryStorage();
     final bot = BotClient(storage);
-    final plugins = PluginManager(storage);
+    final plugins = TestPluginManager(storage);
     addTearDown(bot.dispose);
     addTearDown(plugins.dispose);
     await tester.pumpWidget(

@@ -124,7 +124,7 @@ void main() {
       addTearDown(tester.view.resetDevicePixelRatio);
       final storage = MemoryStorage();
       final bot = BotClient(storage);
-      final plugins = PluginManager(storage);
+      final plugins = TestPluginManager(storage);
       final service = DemoQrService();
       addTearDown(bot.dispose);
       addTearDown(plugins.dispose);
@@ -180,7 +180,7 @@ void main() {
     );
     final logs = <String>[];
     bot.onLog = logs.add;
-    final plugins = PluginManager(storage);
+    final plugins = TestPluginManager(storage);
     final service = DemoQrService(authorize: true);
     addTearDown(bot.dispose);
     addTearDown(plugins.dispose);

@@ -25,7 +25,7 @@ class PluginWorkspace {
   final Directory root;
   static final idPattern = RegExp(r'^[a-z][a-z0-9_]{2,63}$');
   static final filePattern = RegExp(
-    r'\.(json|ya?ml|md|txt|js|mjs|py|dart)$',
+    r'\.(json|ya?ml|md|txt|ht|js|mjs|py|dart)$',
     caseSensitive: false,
   );
   static const maxBytes = 262144;
@@ -87,7 +87,7 @@ class PluginWorkspace {
     }
     if (!folder && !filePattern.hasMatch(parts.last)) {
       throw const PluginManifestException(
-        '只能编辑 JSON、YAML、Markdown、TXT、JS、Python、Dart 文本文件；脚本不会在应用内执行。',
+        '支持 JSON、YAML、Markdown、TXT 和 .ht 脚本；JS/Python/Dart 仅作为文本编辑。',
       );
     }
   }
@@ -343,6 +343,89 @@ class PluginWorkspace {
     }
     await write(id, name, utf8.decode(bytes), createOnly: true);
   }
+
+  /// Assemble a project into the same self-contained manifest used by imports.
+  Future<String> assembleProject(String id) async {
+    final names = await files(id);
+    final name = [
+      'plugin.json',
+      'plugin.yaml',
+      'plugin.yml',
+    ].where(names.contains).firstOrNull;
+    if (name == null) {
+      throw const PluginManifestException('项目根目录需要 plugin.json 或 plugin.yaml。');
+    }
+    final definition = PluginManifest.parse(await read(id, name));
+    final data =
+        jsonDecode(jsonEncode(definition.data)) as Map<String, dynamic>;
+    if (definition.runtime == 'script' && data['entrypoint'] is String) {
+      final source = await read(id, data['entrypoint'] as String);
+      if (source.trim().isEmpty) {
+        throw const PluginManifestException(
+          '入口脚本不存在或为空，请检查 entrypoint 和 .ht 文件。',
+        );
+      }
+      (data['script'] as Map)['source'] = source;
+    }
+    final assembled = const JsonEncoder.withIndent('  ').convert(data);
+    PluginManifest.parse(assembled);
+    return assembled;
+  }
+
+  /// Seed only missing files; never overwrite an existing developer's draft.
+  Future<void> seedProject(String id, String source) async {
+    final names = await files(id);
+    if (names.any(['plugin.json', 'plugin.yaml', 'plugin.yml'].contains)) {
+      return;
+    }
+    final definition = PluginManifest.parse(source);
+    final data =
+        jsonDecode(jsonEncode(definition.data)) as Map<String, dynamic>;
+    if (definition.runtime == 'script') {
+      final script = data['script'] as Map;
+      final code = script.remove('source');
+      final entry = data['entrypoint'] as String? ?? 'main.ht';
+      data['entrypoint'] = entry;
+      if (code is String && !names.contains(entry)) {
+        await write(id, entry, code, createOnly: true);
+      }
+    }
+    await write(
+      id,
+      'plugin.json',
+      const JsonEncoder.withIndent('  ').convert(data),
+      createOnly: true,
+    );
+  }
+
+  static const helloScript = '''
+function main(ctx) {
+  if (ctx.phase == 'enable') { return null }
+  if (ctx.command == 'hello') {
+    return '你好，' + clean_name(ctx.message['sender_name']) + '！\\n' + ctx.args.join(' ')
+  }
+  return null
+}
+''';
+
+  static String scriptManifest(String id) =>
+      const JsonEncoder.withIndent('  ').convert({
+        'schema_version': 2,
+        'id': id,
+        'name': '我的脚本插件',
+        'version': '1.0.0',
+        'description': '自由编写命令与玩法，保存后应用，无需重新编译',
+        'runtime': 'script',
+        'entrypoint': 'main.ht',
+        'permissions': ['message:read', 'message:send'],
+        'script': {
+          'language': 'hetu',
+          'commands': [
+            {'name': 'hello', 'description': '打个招呼', 'usage': 'hello [内容]'},
+          ],
+        },
+        'rules': [],
+      });
 
   static String rulesManifest({
     required String id,

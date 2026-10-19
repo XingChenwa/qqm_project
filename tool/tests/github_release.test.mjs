@@ -81,7 +81,7 @@ test('静态首页有原项目链接、Star、插件和四平台下载，无管�
   assert.ok(!html.includes('界面示意') && !html.includes('class="demo-chat"'));
   const guide = await readFile(join(process.env.WEBSITE_DIRECTORY, 'plugins.html'), 'utf8');
   assert.equal((guide.match(/<h2 id="section-/g) ?? []).length, 9);
-  assert.ok(guide.includes('HTTP 插件') && guide.includes('Dart SDK'));
+  assert.ok(guide.includes('HTTP 插件') && guide.includes('脚本 SDK'));
   assert.ok(!guide.includes('href="../'));
 });
 test('Pre-release 标记决定渠道，Beta 与正式签名清单不能混用', () => {

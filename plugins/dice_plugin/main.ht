@@ -1,0 +1,81 @@
+function dice(expression, config) {
+  final parsed = rx('^([0-9]{1,3})d([0-9]{1,4})([+-][0-9]{1,6})?$', expression, false)
+  if (parsed == null) { return null }
+  final count = integer(parsed[1])
+  final sides = integer(parsed[2])
+  if (count < 1 || sides < 2) { return '骰子数量至少为 1，面数至少为 2。' }
+  var maxCount = integer(config['max_dice'])
+  var maxSides = integer(config['max_sides'])
+  if (maxCount == null || maxCount < 1 || maxCount > 100) { maxCount = 100 }
+  if (maxSides == null || maxSides < 2 || maxSides > 1000) { maxSides = 1000 }
+  if (count > maxCount || sides > maxSides) { return '骰子参数过大，请使用 '  +  str(maxCount)  +  'd'  +  str(maxSides)  +  ' 以内的格式。' }
+  var total = 0
+  var modifier = integer(parsed[3])
+  if (modifier == null) { modifier = 0 }
+  total = modifier
+  final values = []
+  for (var i = 0; i < count; ++i) {
+    final value = random_int(1, sides)
+    total += value
+    if (i < 20) { values.add(value) }
+  }
+  var suffix = ''
+  if (modifier > 0) { suffix = '+'  +  str(modifier) }
+  else if (modifier < 0) { suffix = str(modifier) }
+  var detail = ''
+  if (count > 1) { detail = ' ['  +  values.join(', ')  +  (count > 20 ? ' ...' : '')  +  ']' }
+  return '掷骰结果：'  +  str(count)  +  'd'  +  str(sides)  +  suffix  +  ' = '  +  str(total)  +  detail
+}
+function main(ctx) {
+  if (ctx['phase'] == 'enable') { return null }
+  final command = ctx['command']
+  final args = ctx['args']
+  if (command.isEmpty) { return dice(ctx['text'].trim(), ctx['config']) }
+  if (['dice', 'roll', '骰子'].contains(command)) {
+    final result = dice(args.isEmpty ? '1d6' : args.join(''), ctx['config'])
+    return result == null ? '骰子格式不正确，请使用 2d6、1d20、2d6+3。' : result
+  }
+  if (['硬币', 'coin'].contains(command)) {
+    final count = args.isEmpty ? 1 : integer(args.join(' '))
+    if (count == null || count < 1 || count > 20) { return '用法：/硬币 [1–20 次]' }
+    final coins = []
+    for (var i=0; i<count; ++i) { coins.add(random_int(0, 1) == 0 ? '正面' : '反面') }
+    return '抛硬币：'  +  coins.join('、')
+  }
+  if (['选择', '转盘', 'choose', '打乱', 'shuffle'].contains(command)) {
+    final values = args.join(' ').replaceAll('｜', '|').split('|')
+    if (values.length < 2 || values.length > 20) { return '请提供 2–20 个选项，每项最多 80 字，用 | 隔开。' }
+    for (var i=0; i<values.length; ++i) {
+      values[i] = values[i].trim()
+      if (values[i].isEmpty || values[i].length > 80) { return '每个选项需要 1–80 字，用 | 隔开。' }
+    }
+    if (command == '打乱' || command == 'shuffle') {
+      for (var i=values.length - 1; i>0; --i) {
+        final j=random_int(0,i)
+        final swap=values[j]
+        values[j]=values[i]
+        values[i]=swap
+      }
+      final lines=[]
+      for(var i=0;i<values.length;++i) { lines.add(str(i + 1) + '. ' + values[i]) }
+      return '随机排序：\n' + lines.join('\n')
+    }
+    return '我选：' + values[random_int(0,values.length - 1)]
+  }
+  if (['随机数','random'].contains(command)) {
+    if(args.length!=2) { return '用法：/随机数 最小值 最大值（范围 ±10 亿）' }
+    final low=integer(args[0])
+    final high=integer(args[1])
+    if(low==null || high==null || low>high || low <  - 1000000000 || high>1000000000) { return '用法：/随机数 最小值 最大值（范围 ±10 亿）' }
+    return '随机数：' + str(random_int(low,high))
+  }
+  if (['猜拳','rps'].contains(command)) {
+    final options=['石头','剪刀','布']
+    final user=options.indexOf(args.join(' '))
+    final mine=random_int(0,2)
+    if(user<0) { return '用法：/猜拳 石头（也可选剪刀、布）' }
+    final result=user==mine ? '平局！' : (user + 1)%3==mine ? '你赢了！' : '我赢了！'
+    return '你出' + options[user] + '，我出' + options[mine] + '。' + result
+  }
+  return null
+}

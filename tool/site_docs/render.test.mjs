@@ -9,7 +9,7 @@ test('完整指南生成九节正文、静态目录、可复制代码和可用�
   assert.equal((html.match(/<h1>/g) || []).length, 1);
   assert.equal((html.match(/<h2 id="section-/g) || []).length, 9);
   for (let i = 1; i <= 9; i++) assert.ok(html.includes(`href="#section-${i}"`));
-  assert.ok(html.includes('host!.store.update'));
+  assert.ok(html.includes('ctx.state'));
   assert.ok(html.includes('class="table-scroll"'));
   assert.ok(html.includes('https://github.com/XingChenwa/qqm_project/blob/main/plugins/examples/http_echo/server.mjs'));
   assert.ok(!html.includes('href="../'));

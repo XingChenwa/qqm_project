@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'package:qq_bot_manager/core/plugin_manager.dart';
+import 'package:qq_bot_manager/core/plugins/script_runner.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:qq_bot_manager/models/config.dart';
@@ -8,6 +10,11 @@ import 'package:qq_bot_manager/models/outgoing_message.dart';
 import 'package:qq_bot_manager/services/api_service.dart';
 import 'package:qq_bot_manager/services/storage_service.dart';
 import 'package:qq_bot_manager/services/websocket_service.dart';
+
+class TestPluginManager extends PluginManager {
+  TestPluginManager(super.storage)
+    : super(scriptRunnerFactory: PluginScriptRunner.forTesting);
+}
 
 class MemoryStorage extends StorageService {
   BotConfig config;
@@ -122,6 +129,11 @@ class MemoryStorage extends StorageService {
 
   @override
   bool getThemeMode() => false;
+  String? appearance;
+  @override
+  String getAppearance() => appearance ?? (getThemeMode() ? 'dark' : 'system');
+  @override
+  Future<void> setAppearance(String value) async => appearance = value;
 }
 
 BotConfig validConfig() => BotConfig(

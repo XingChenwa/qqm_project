@@ -3,7 +3,6 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:qq_bot_manager/core/bot_client.dart';
-import 'package:qq_bot_manager/core/plugin_manager.dart';
 import 'package:qq_bot_manager/models/plugin.dart';
 import 'package:qq_bot_manager/models/config.dart';
 import 'package:qq_bot_manager/models/message.dart';
@@ -250,7 +249,7 @@ void main() {
       ..enableAutoReply = true
       ..defaultAutoReply = '收到';
     final storage = MemoryStorage(config: config);
-    final manager = PluginManager(storage);
+    final manager = TestPluginManager(storage);
     addTearDown(manager.dispose);
     await manager.init();
     PluginMessage message() => PluginMessage(

@@ -211,7 +211,7 @@ void main() {
     final gateway = TestGateway();
     final api = RecordingApi();
     final bot = BotClient(storage, apiService: api, webSocketService: gateway);
-    final plugins = PluginManager(storage);
+    final plugins = TestPluginManager(storage);
     addTearDown(bot.dispose);
     addTearDown(plugins.dispose);
     await tester.pumpWidget(

@@ -15,8 +15,19 @@ String startupDiagnostic(String stage, Object error, StackTrace? stack) {
       .take(8)
       .join('\n')
       .replaceAll(RegExp(r'[A-Za-z]:[\\/][^\s)]+'), '<本地路径>');
+  var platform = '';
+  if (error is PlatformException) {
+    final code = RegExp(r'^[A-Za-z0-9_.-]{1,80}$').hasMatch(error.code)
+        ? error.code
+        : '未知（已隐藏原始值）';
+    final channel = RegExp(
+      r'dev\.flutter\.pigeon\.(?:shared_preferences_android|path_provider_android)\.[A-Za-z0-9_.]+',
+    ).firstMatch(error.message ?? '')?.group(0);
+    platform =
+        '\n平台错误码：$code${channel == null ? '' : '\n平台通道：$channel'}\n原始异常正文与 details 已隐藏，避免泄露本地配置。';
+  }
   return 'QQ机器人管理器 ${AppConstants.appVersion}+${AppConstants.appBuild}\n'
-      '平台：${defaultTargetPlatform.name}\n阶段：$stage\n异常类型：${error.runtimeType}\n$frames';
+      '平台：${defaultTargetPlatform.name}\n阶段：$stage\n异常类型：${error.runtimeType}$platform\n$frames';
 }
 
 class StartupGate extends StatefulWidget {

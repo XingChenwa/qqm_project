@@ -2,13 +2,67 @@
   "schema_version": 2,
   "id": "daily_club",
   "name": "每日小会馆",
-  "version": "2.0.0",
+  "version": "3.0.0",
   "description": "签到、积分、会话排行榜、每日运势与抽签；按机器人和会话隔离，本地保存，仅供娱乐。",
   "author": "QQ 机器人管理器",
-  "runtime": "builtin",
-  "entrypoint": "lib/daily_club/plugin.dart",
-  "permissions": ["message:read", "message:send"],
+  "runtime": "script",
+  "entrypoint": "main.ht",
+  "permissions": [
+    "message:read",
+    "message:send",
+    "storage:local"
+  ],
   "config_schema": [
-    {"key": "daily_points", "label": "每日签到积分（1–100）", "type": "integer", "default": 10}
-  ]
+    {
+      "key": "daily_points",
+      "label": "每日签到积分（1–100）",
+      "type": "integer",
+      "default": 10
+    }
+  ],
+  "script": {
+    "language": "hetu",
+    "commands": [
+      {
+        "name": "签到",
+        "description": "每天签到积分",
+        "usage": "签到",
+        "aliases": [
+          "sign"
+        ]
+      },
+      {
+        "name": "积分",
+        "description": "查看当前积分",
+        "usage": "积分",
+        "aliases": [
+          "points"
+        ]
+      },
+      {
+        "name": "排行",
+        "description": "本会话积分榜",
+        "usage": "排行",
+        "aliases": [
+          "rank"
+        ]
+      },
+      {
+        "name": "今日运势",
+        "description": "每日固定娱乐运势",
+        "usage": "今日运势",
+        "aliases": [
+          "fortune"
+        ]
+      },
+      {
+        "name": "抽签",
+        "description": "娱乐签文",
+        "usage": "抽签",
+        "aliases": [
+          "draw"
+        ]
+      }
+    ]
+  }
 }

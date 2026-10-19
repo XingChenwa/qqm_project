@@ -2,7 +2,7 @@
   "schema_version": 2,
   "id": "translate_comment",
   "name": "代码注释翻译",
-  "version": "2.0.0",
+  "version": "3.0.0",
   "description": "显式命令翻译文本或代码注释；只替换识别到的注释片段，限制大小和超时，不自动上传普通代码块。",
   "config": {
     "api_key": "",
@@ -11,10 +11,15 @@
   "permissions": [
     "message:read",
     "message:send",
-    "network:deepseek"
+    "network:http"
   ],
   "config_schema": [
-    {"key": "model", "label": "DeepSeek 模型名称", "type": "string", "default": "deepseek-flash"},
+    {
+      "key": "model",
+      "label": "DeepSeek 模型名称",
+      "type": "string",
+      "default": "deepseek-flash"
+    },
     {
       "key": "api_key",
       "label": "DeepSeek API Key",
@@ -29,6 +34,30 @@
     }
   ],
   "author": "QQ 机器人管理器",
-  "runtime": "builtin",
-  "entrypoint": "lib/translate_comment/plugin.dart"
+  "runtime": "script",
+  "entrypoint": "main.ht",
+  "script": {
+    "language": "hetu",
+    "commands": [
+      {
+        "name": "注释翻译",
+        "description": "只替换注释，保留代码",
+        "usage": "注释翻译 ```语言 换行代码```",
+        "aliases": [
+          "translate",
+          "fanyi"
+        ]
+      },
+      {
+        "name": "翻译",
+        "description": "普通文本翻译",
+        "usage": "翻译 文本",
+        "aliases": []
+      }
+    ],
+    "hosts": [
+      "api.deepseek.com"
+    ],
+    "timeout_ms": 40000
+  }
 }

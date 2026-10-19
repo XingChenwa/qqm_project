@@ -33,9 +33,14 @@ class _CaptureStorage extends StorageService {
   final plugins = <String, PluginInfo>{};
   final pluginData = <String, Map<String, dynamic>>{};
   bool dark = false;
+  String appearance = 'light';
+  @override
+  String getAppearance() => appearance;
+  @override
+  Future<void> setAppearance(String value) async => appearance = value;
 
   @override
-  Future<void> init() async {}
+  Future<void> init({void Function(String)? report}) async {}
   @override
   BotConfig getBotConfig() => BotConfig.fromMap(config.toMap());
   @override

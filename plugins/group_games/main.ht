@@ -1,0 +1,107 @@
+function canClose(game, message) {
+  return game['owner']==message['sender_id'] || ['owner','admin'].contains(message['sender_role'])
+}
+function guess(ctx) {
+  final state=ctx['state']
+  final message=ctx['message']
+  final action=ctx['args'].join(' ').trim()
+  var game=state['guess']
+  if(!is_map(game) || game['expires']<=ctx['now']) { game=null }
+  if(['开始','start'].contains(action)) {
+    if(game!=null) { return '本群已经有猜数字游戏了。发送 /猜数字 50；发起人或管理员可结束。' }
+    state['guess']={answer:random_int(1,100),owner:message['sender_id'],attempts:0,expires:ctx['now'] + 900000}
+    return '我想了一个 1–100 的整数，15 分钟内发送 /猜数字 数字 来猜吧！最多 50 次。'
+  }
+  if(['结束','stop'].contains(action)) {
+    if(game==null) { return '当前没有进行中的猜数字游戏。' }
+    if(!canClose(game,message)) { return '仅发起人、群主或管理员可以结束。' }
+    state.remove('guess')
+    return '游戏已结束，答案是 ' + str(game['answer']) + '。'
+  }
+  final number=integer(action)
+  if(number==null || number<1 || number>100) { return '用法：/猜数字 开始、/猜数字 50、/猜数字 结束。范围 1–100。' }
+  if(game==null) { return '没有进行中的游戏（可能已过期），发送 /猜数字 开始。' }
+  final attempts=game['attempts'] + 1
+  final answer=game['answer']
+  if(number==answer || attempts>=50) {
+    state.remove('guess')
+    return number==answer ? '猜对啦！答案是 ' + str(answer) + '，共猜了 ' + str(attempts) + ' 次。' : '已达到 50 次，答案是 ' + str(answer) + '。'
+  }
+  game['attempts']=attempts
+  state['guess']=game
+  return (number<answer ? '小了' : '大了') + '，再试试！已猜 ' + str(attempts) + ' 次。'
+}
+function pollView(ctx, poll, status) {
+  final options=poll['options']
+  final votes=poll['votes']
+  final rows=[]
+  final lines=[status, poll['title']]
+  for(var i=0;i<options.length;++i) {
+    var count=0
+    for(final id in keys(votes)) { if(votes[id]==i) ++count }
+    lines.add(str(i + 1) + '. ' + options[i] + '：' + str(count) + ' 票')
+    if(ctx['config']['enable_buttons']==true && poll['closed']!=true) {
+      if(i%3==0) { rows.add([]) }
+      rows[integer(i/3)].add({label:'选 ' + str(i + 1),data:'qqm:' + ctx['id'] + ':vote:' + poll['nonce'] + ':' + str(i + 1),callback:true})
+    }
+  }
+  lines.add('共 ' + str(keys(votes).length) + ' 人参与。')
+  final text=lines.join('\n')
+  if(rows.isEmpty) { return text }
+  return {format:'markdown', content:markdown_escape(text), buttons:rows}
+}
+function vote(ctx, callback) {
+  final state=ctx['state']
+  final args=ctx['args']
+  final message=ctx['message']
+  var poll=state['poll']
+  if(!is_map(poll) || poll['expires']<=ctx['now']) { poll=null }
+  if(!callback && !args.isEmpty && ['创建','create'].contains(args[0])) {
+    if(poll!=null && poll['closed']!=true) { return '本群已有进行中的投票。发送 /投票 结果 查看。' }
+    final parts=args.sublist(1).join(' ').replaceAll('｜','|').split('|')
+    if(parts.length<3 || parts.length>7) { return '用法：/投票 创建 晚上吃什么 | 火锅 | 烧烤\n支持 2–6 个不重复选项，标题和每项最多 80 字。' }
+    final options=[]
+    for(var i=0;i<parts.length;++i) {
+      parts[i]=parts[i].trim()
+      if(parts[i].isEmpty || parts[i].length>80 || (i>0 && options.contains(parts[i]))) { return '标题和选项需要 1–80 字，选项不能重复。' }
+      if(i>0) { options.add(parts[i]) }
+    }
+    poll={title:parts[0], options:options, votes:json_decode('{}'), owner:message['sender_id'], nonce:str(ctx['now']) + '-' + str(random_int(0,1000000000)), expires:ctx['now'] + 86400000, closed:false}
+    state['poll']=poll
+    return pollView(ctx,poll,'投票已创建，24 小时内有效。')
+  }
+  if(poll==null) { return '没有有效投票。发送 /投票 创建 标题 | 选项1 | 选项2' }
+  if(callback || (!args.isEmpty && ['选择','vote'].contains(args[0]))) {
+    var selection=null
+    if(callback) {
+      final pieces=message['callback_data'].split(':')
+      if(pieces.length!=5 || pieces[3]!=poll['nonce']) { return '此按钮属于旧投票，请发送 /投票 结果。' }
+      selection=integer(pieces[4])
+    } else if(args.length==2) { selection=integer(args[1]) }
+    if(poll['closed']==true) { return '此投票已经结束。' }
+    if(selection==null || selection<1 || selection>poll['options'].length) { return '请选择 1–' + str(poll['options'].length) + '，例如：/投票 选择 1' }
+    final votes=poll['votes']
+    final id=message['sender_id']
+    if(!votes.containsKey(id) && keys(votes).length>=1000) { return '此投票已达到 1000 人上限。' }
+    votes[id]=selection - 1
+    state['poll']=poll
+    return pollView(ctx,poll,'已记录你的第 ' + str(selection) + ' 项选择（可重新选择）。')
+  }
+  if(['结束','close'].contains(args.join(' '))) {
+    if(!canClose(poll,message)) { return '仅发起人、群主或管理员可以结束投票。' }
+    poll['closed']=true
+    state['poll']=poll
+    return pollView(ctx,poll,'投票已结束。')
+  }
+  return pollView(ctx,poll,poll['closed']==true ? '投票已结束。' : '每人一票，可改票；发送 /投票 选择 序号。')
+}
+function main(ctx) {
+  if(ctx['phase']=='enable') { return null }
+  final message=ctx['message']
+  final callback=message['event_type']=='interaction' && str(message['callback_data']).startsWith('qqm:' + ctx['id'] + ':vote:')
+  if(!callback && !['猜数字','guess','投票','poll'].contains(ctx['command'])) { return null }
+  if(!message['is_group']) { return '群游戏请在群聊中使用。' }
+  if(message['sender_id'].isEmpty || message['session_id'].isEmpty || message['sender_role']=='operator') { return '此玩法需要 QQ 群成员身份，请在 QQ 群里发送命令。' }
+  if(!callback && ['猜数字','guess'].contains(ctx['command'])) { return guess(ctx) }
+  return vote(ctx,callback)
+}

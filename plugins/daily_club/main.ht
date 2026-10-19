@@ -1,0 +1,54 @@
+function score(user) {
+  var points=integer(user['points'])
+  if(points==null || points<0) { points=0 }
+  return points
+}
+function main(ctx) {
+  if(ctx['phase']=='enable') { return null }
+  final command=ctx['command']
+  if(!['签到','sign','积分','points','排行','rank','今日运势','fortune','抽签','draw'].contains(command)) { return null }
+  final message=ctx['message']
+  final id=message['sender_id']
+  final name=clean_name(message['sender_name'])
+  if(id.isEmpty || message['session_id'].isEmpty || message['sender_role']=='operator') { return '请在 QQ 会话中使用此命令；操作员没有 QQ 发送者身份。' }
+  final today=ctx['today']
+  if(['今日运势','fortune','抽签','draw'].contains(command)) {
+    final seed=stable_hash(today + ':' + message['session_id'] + ':' + id)
+    if(command=='抽签' || command=='draw') {
+      final sayings=['保持好奇，今天适合学一点新东西。','先完成最小的一步，进度自然会来。','休息也是计划的一部分。','把难题拆开，你会找到入口。','和朋友聊聊，或许会有新思路。','认真做的事情，值得慢慢来。']
+      return '今日签：' + sayings[seed%sayings.length] + '\n' + today + ' · 仅供娱乐，不作为现实决策依据。'
+    }
+    final suggestions=['整理桌面','读一页书','散步','写点代码','听听音乐','和朋友聊聊']
+    return today + ' 今日运势：' + str(seed%101) + '/100\n今日小建议：' + suggestions[integer(seed/101)%suggestions.length] + '\n仅供娱乐，每天固定；不代表真实运气。'
+  }
+  final state=ctx['state']
+  var users=state['users']
+  if(!is_map(users)) { users=json_decode('{}') }
+  var user=users[id]
+  if(!is_map(user)) { user=json_decode('{}') }
+  var points=integer(user['points'])
+  if(points==null || points<0) { points=0 }
+  if(command=='排行' || command=='rank') {
+    final sorted=[]
+    for(final uid in keys(users)) {
+      if(is_map(users[uid])) { sorted.add(users[uid]) }
+    }
+    sorted.sort((a,b) => score(b) - score(a))
+    if(sorted.isEmpty) { return '这里还没有签到记录，发送 /签到 试试吧。' }
+    final lines=[]
+    for(var i=0;i<sorted.length && i<10;++i) { lines.add(str(i + 1) + '. ' + clean_name(sorted[i]['name']) + ' · ' + str(sorted[i]['points']) + ' 分') }
+    return '本会话积分榜\n' + lines.join('\n')
+  }
+  var days=integer(user['days'])
+  if(days==null) { days=0 }
+  if(command=='积分' || command=='points') { return name + '：' + str(points) + ' 分，累计签到 ' + str(days) + ' 天。' }
+  if(user['date']==today) { return '今天已经签到过啦。当前 ' + str(points) + ' 分，连续 ' + str(user['streak']) + ' 天。' }
+  if(!users.containsKey(id) && keys(users).length>=1000) { return '本会话签到人数已达 1000 人，请管理员先备份、清理插件数据。' }
+  var reward=integer(ctx['config']['daily_points'])
+  if(reward==null || reward<1 || reward>100) { reward=10 }
+  var streak=1
+  if(user['date']==ctx['yesterday'] && integer(user['streak'])!=null) { streak=integer(user['streak']) + 1 }
+  users[id]={name:name,points:points + reward,date:today,streak:streak,days:days + 1}
+  state['users']=users
+  return name + '，签到成功！+' + str(reward) + ' 分\n连续 ' + str(streak) + ' 天，当前 ' + str(points + reward) + ' 分。'
+}

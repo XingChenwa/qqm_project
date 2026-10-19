@@ -1,5 +1,5 @@
 name: qqm_plugins
-description: QQ 机器人管理器插件 SDK 与随应用编译的插件实现。
+description: QQ 机器人管理器插件公共模型、状态存储和兼容参考。
 version: 2.0.0
 publish_to: none
 environment:

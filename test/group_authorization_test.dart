@@ -63,7 +63,7 @@ void main() {
   });
   test('所有新插件默认关闭，手动开启状态和关闭状态重启保留', () async {
     final storage = MemoryStorage();
-    var manager = PluginManager(storage);
+    var manager = TestPluginManager(storage);
     await manager.init();
     expect(manager.plugins, hasLength(7));
     expect(manager.enabledCount, 0);
@@ -71,7 +71,7 @@ void main() {
     expect(await manager.enablePlugin('group_authorization'), true);
     expect(manager.enabledCount, 1);
     manager.dispose();
-    manager = PluginManager(storage);
+    manager = TestPluginManager(storage);
     await manager.init();
     expect(manager.enabledCount, 1);
     expect(
@@ -80,7 +80,7 @@ void main() {
     );
     await manager.disablePlugin('group_authorization');
     manager.dispose();
-    manager = PluginManager(storage);
+    manager = TestPluginManager(storage);
     await manager.init();
     expect(manager.enabledCount, 0);
     manager.dispose();
@@ -200,82 +200,153 @@ void main() {
     }
   });
 
-  testWidgets('群 @ 指令实际发送两步 Markdown 键盘，最终 URL 及用户权限正确', (tester) async {
-    final storage = MemoryStorage(
-      config: validConfig()
-        ..appId = 'bot-a'
-        ..clientSecret = '',
-    );
-    final manager = PluginManager(storage);
-    final gateway = TestGateway();
-    final api = RecordingApi();
-    final bot = BotClient(storage, apiService: api, webSocketService: gateway);
-    addTearDown(manager.dispose);
-    addTearDown(bot.dispose);
-    await tester.runAsync(manager.init);
-    await manager.updatePluginConfig('group_authorization', {
-      'robots_json': robots,
-    });
-    await manager.enablePlugin('group_authorization');
-    await tester.pumpWidget(
-      MultiProvider(
-        providers: [
-          Provider<StorageService>.value(value: storage),
-          ChangeNotifierProvider<BotClient>.value(value: bot),
-          ChangeNotifierProvider<PluginManager>.value(value: manager),
-        ],
-        child: MaterialApp(
-          home: MainScreen(toggleTheme: () {}, themeMode: ThemeMode.light),
+  for (final delivery in ['at', 'full-tag', 'full-display', 'full-stripped']) {
+    testWidgets('群 @ 指令发送两步键盘且权限正确：$delivery', (tester) async {
+      final storage = MemoryStorage(
+        config: validConfig()
+          ..appId = 'bot-a'
+          ..clientSecret = '',
+      );
+      final manager = TestPluginManager(storage);
+      final gateway = TestGateway();
+      final api = RecordingApi();
+      final bot = BotClient(
+        storage,
+        apiService: api,
+        webSocketService: gateway,
+      );
+      addTearDown(manager.dispose);
+      addTearDown(bot.dispose);
+      await tester.runAsync(manager.init);
+      await manager.updatePluginConfig('group_authorization', {
+        'robots_json': robots,
+      });
+      await manager.enablePlugin('group_authorization');
+      await tester.pumpWidget(
+        MultiProvider(
+          providers: [
+            Provider<StorageService>.value(value: storage),
+            ChangeNotifierProvider<BotClient>.value(value: bot),
+            ChangeNotifierProvider<PluginManager>.value(value: manager),
+          ],
+          child: MaterialApp(
+            home: MainScreen(toggleTheme: () {}, themeMode: ThemeMode.light),
+          ),
         ),
-      ),
-    );
-    await tester.pumpAndSettle();
-    Map<String, dynamic> event(
-      String id,
-      String text,
-      String role,
-      String user,
-    ) => {
-      'id': id,
-      'sessionId': 'group-openid',
-      'senderId': user,
-      'senderName': '用户',
-      'content': text,
-      'rawContent': text,
-      'senderRole': role,
-      'isGroup': true,
-      'timestamp': DateTime.now(),
-      'eventType': 'GROUP_AT_MESSAGE_CREATE',
-    };
-    gateway.events.add(
-      event('prompt-source', '/主动消息', 'member', 'member-openid'),
-    );
-    await tester.pumpAndSettle();
-    expect(api.calls, hasLength(1));
-    final prompt = api.calls.single['body'] as Map;
-    expect(prompt['msg_type'], 2);
-    expect(
-      prompt['keyboard']['content']['rows'][0]['buttons'][0]['action']['type'],
-      2,
-    );
-    gateway.events.add(
-      event('link-source', '/主动消息 123456789', 'owner', 'owner-openid'),
-    );
-    await tester.pumpAndSettle();
-    expect(api.calls, hasLength(2));
-    final body = api.calls.last['body'] as Map;
-    final button = body['keyboard']['content']['rows'][0]['buttons'][0];
-    expect(body['msg_type'], 2);
-    expect(body['msg_id'], 'link-source');
-    expect(button['action']['type'], 0);
-    expect(button['action']['permission'], {
-      'type': 0,
-      'specify_user_ids': ['owner-openid'],
+      );
+      await tester.pumpAndSettle();
+      gateway.onReady?.call({
+        'user': {'id': 'current-bot', 'username': '薯条很乖巧'},
+      });
+      await tester.pumpAndSettle();
+      Map<String, dynamic> event(
+        String id,
+        String text,
+        String role,
+        String user,
+      ) {
+        final raw = switch (delivery) {
+          'full-tag' => '<@!current-bot> $text',
+          'full-display' => '@薯条很乖巧 $text',
+          _ => text,
+        };
+        return {
+          'id': id,
+          'sessionId': 'group-openid',
+          'senderId': user,
+          'senderName': '用户',
+          'content': raw,
+          'rawContent': raw,
+          'senderRole': role,
+          'isGroup': true,
+          'timestamp': DateTime.now(),
+          'eventType': delivery == 'at'
+              ? 'GROUP_AT_MESSAGE_CREATE'
+              : 'GROUP_MESSAGE_CREATE',
+          'mentions': [
+            {'id': 'current-bot', 'username': '薯条很乖巧', 'bot': true},
+          ],
+        };
+      }
+
+      for (final other in [false, true]) {
+        gateway.events.add({
+          ...event(
+            'not-for-bot-$other',
+            '/主动消息 938017865',
+            'owner',
+            'owner-openid',
+          ),
+          'eventType': 'GROUP_MESSAGE_CREATE',
+          'content': other ? '@其他机器人 /主动消息 938017865' : '/主动消息 938017865',
+          'rawContent': other
+              ? '<@!other-bot> /主动消息 938017865'
+              : '/主动消息 938017865',
+          'mentions': [
+            if (other) {'id': 'other-bot', 'username': '其他机器人', 'bot': true},
+          ],
+        });
+        await tester.pumpAndSettle();
+        expect(api.calls, isEmpty);
+      }
+      gateway.events.add(
+        event('prompt-source', '/主动消息', 'member', 'member-openid'),
+      );
+      await tester.pumpAndSettle();
+      expect(api.calls, hasLength(1));
+      gateway.events.add({
+        ...event('prompt-source', '/主动消息', 'member', 'member-openid'),
+        'eventType': 'GROUP_AT_MESSAGE_CREATE',
+        'content': '/主动消息',
+        'rawContent': '/主动消息',
+      });
+      await tester.pumpAndSettle();
+      expect(api.calls, hasLength(1), reason: '全量与 @ 重复推送不能生成两个按钮');
+      final prompt = api.calls.single['body'] as Map;
+      expect(prompt['msg_type'], 2);
+      expect(
+        prompt['keyboard']['content']['rows'][0]['buttons'][0]['action']['type'],
+        2,
+      );
+      gateway.events.add(
+        event('link-source', '/主动消息 938017865', 'owner', 'owner-openid'),
+      );
+      await tester.pumpAndSettle();
+      expect(api.calls, hasLength(2));
+      final body = api.calls.last['body'] as Map;
+      final button = body['keyboard']['content']['rows'][0]['buttons'][0];
+      expect(body['msg_type'], 2);
+      expect(body['msg_id'], 'link-source');
+      expect(button['action']['type'], 0);
+      expect(button['action']['permission'], {
+        'type': 0,
+        'specify_user_ids': ['owner-openid'],
+      });
+      expect(button['render_data']['label'], '主动权限(群主使用)');
+      expect(button['render_data']['visited_label'], '主动权限(群主使用)');
+      expect(button['action'].containsKey('enter'), false);
+      expect(
+        jsonDecode(
+          Uri.parse(
+            button['action']['data'] as String,
+          ).queryParameters['open_kuikly_info']!,
+        )['groupCode'],
+        938017865,
+      );
+      expect(
+        bot.messages
+            .singleWhere((message) => message.id == 'link-source')
+            .content,
+        event(
+          'link-source',
+          '/主动消息 938017865',
+          'owner',
+          'owner-openid',
+        )['content'],
+        reason: '仅规范化插件输入，不改动收到的原消息',
+      );
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
     });
-    expect(button['render_data']['label'], '主动权限(群主使用)');
-    expect(button['render_data']['visited_label'], '主动权限(群主使用)');
-    expect(button['action'].containsKey('enter'), false);
-    expect(tester.takeException(), isNull);
-    await tester.pumpWidget(const SizedBox());
-  });
+  }
 }

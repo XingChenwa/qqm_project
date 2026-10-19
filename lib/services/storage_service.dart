@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'package:hive/hive.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import '../models/message.dart';
 import '../models/config.dart';
 import '../models/plugin.dart';
@@ -17,13 +19,43 @@ class StorageService {
   String get activeBotAppId => _chatAppId ?? getBotConfig().appId;
   void selectChatAccount(String appId) => _chatAppId = appId;
 
-  Future<void> init() async {
+  Future<void> init({void Function(String)? report}) async {
+    try {
+      await _initialize(report);
+    } on PlatformException catch (error, stack) {
+      if (kIsWeb ||
+          defaultTargetPlatform != TargetPlatform.android ||
+          !{'channel-error', 'missing-plugin'}.contains(error.code)) {
+        rethrow;
+      }
+      report?.call('恢复 Android 偏好设置通道（保留本地数据）');
+      try {
+        await const MethodChannel(
+          'cn.uuze.botmanager/runtime',
+        ).invokeMethod<bool>('repairPreferences');
+        final preferences = await SharedPreferences.getInstance();
+        await preferences.reload();
+      } catch (_) {
+        Error.throwWithStackTrace(error, stack);
+      }
+      await _initialize(report);
+    }
+  }
+
+  Future<void> _initialize(void Function(String)? report) async {
+    report?.call('打开聊天记录库');
     _messagesBox = await Hive.openBox<String>('messages');
+    report?.call('打开会话资料库');
     _sessionsBox = await Hive.openBox<String>('sessions');
+    report?.call('打开表情库');
     _emojisBox = await Hive.openBox<String>('emojis');
+    report?.call('打开插件配置库');
     _pluginsBox = await Hive.openBox<String>('plugins');
+    report?.call('打开插件数据存储');
     _pluginDataBox = await Hive.openBox<String>('plugin_data');
+    report?.call('读取系统偏好设置');
     _prefs = await SharedPreferences.getInstance();
+    report?.call('确认本地聊天数据所属机器人');
     selectChatAccount(getBotConfig().appId);
     // Legacy records belong ONLY to the bot configured before multi-bot support.
     // An unknown owner stays unassigned; never attach old OpenIDs to a new bot.
@@ -34,6 +66,7 @@ class StorageService {
     // 只迁移一次旧版的默认关闭状态，后续用户主动关闭不再被重置。
     final savedConfig = _prefs.getString('bot_config');
     if (savedConfig != null) {
+      report?.call('迁移旧版偏好设置');
       final map = Map<String, dynamic>.from(jsonDecode(savedConfig) as Map);
       if (BotConfig.needsOiapiNicknameDefaultMigration(map)) {
         await _prefs.setString(
@@ -114,6 +147,25 @@ class StorageService {
   }
 
   // --- Theme ---
+  String getAppearance() {
+    final value = _prefs.getString('appearance');
+    if (['light', 'dark', 'system'].contains(value)) return value!;
+    // Keep an existing user's explicit light/dark choice.
+    if (_prefs.containsKey('theme_dark')) {
+      return getThemeMode() ? 'dark' : 'light';
+    }
+    return 'system';
+  }
+
+  Future<void> setAppearance(String value) async {
+    if (!['light', 'dark', 'system'].contains(value)) {
+      throw ArgumentError.value(value, 'appearance');
+    }
+    if (!await _prefs.setString('appearance', value)) {
+      throw StateError('主题选择未能保存');
+    }
+  }
+
   bool getThemeMode() => _prefs.getBool('theme_dark') ?? false;
 
   Future<void> setThemeMode(bool isDark) async {

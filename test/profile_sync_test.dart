@@ -633,7 +633,7 @@ void main() {
       apiService: api,
       profileRequests: ProfileRequestQueue(spacing: Duration.zero),
     );
-    final plugins = PluginManager(storage);
+    final plugins = TestPluginManager(storage);
     addTearDown(bot.dispose);
     addTearDown(plugins.dispose);
     await tester.pumpWidget(

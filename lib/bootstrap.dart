@@ -32,7 +32,7 @@ Future<Widget> initializeApplication(
   // Initialize storage service
   final storageService = StorageService();
   report('读取本地配置和聊天记录');
-  await storageService.init();
+  await storageService.init(report: report);
 
   // 从 plugins/ 清单加载内置实现，并恢复已安装的 JSON/YAML/HTTP 插件。
   final pluginManager = PluginManager(storageService);
