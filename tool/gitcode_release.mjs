@@ -60,7 +60,9 @@ export async function mirrorRelease({token, envelope, publicKey, files, request 
     try { json = JSON.parse(content.toString('utf8')); } catch { throw new Error('GitCode API 返回格式无效'); }
     if (missing && (response.status === 404 ||
       (response.status === 400 && /未找到 release/i.test(json.error_message ?? '')))) return null;
-    requireThat(response.ok, `GitCode API 请求失败（HTTP ${response.status}），请检查令牌权限`);
+    const message = String(json.error_message ?? json.message ?? '').replaceAll(token, '[redacted]')
+      .replace(/https?:\/\/\S+/g, '[url]').replace(/[\r\n\u0000-\u001f]/g, ' ').slice(0, 180);
+    requireThat(response.ok, `GitCode ${method} ${path.split('?')[0] || '/'} 请求失败（HTTP ${response.status}）：${message || '请检查令牌权限和仓库状态'}`);
     return json;
   }
   async function publicAsset(name, maximum, tag = data.tag) {
