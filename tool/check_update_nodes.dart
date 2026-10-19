@@ -38,8 +38,9 @@ Future<void> main(List<String> args) async {
         url = url.resolve(location);
         continue;
       }
-      if (response.statusCode != 200)
+      if (response.statusCode != 200) {
         throw HttpException('HTTP ${response.statusCode}');
+      }
       final bytes = <int>[];
       await for (final chunk in response.timeout(const Duration(seconds: 10))) {
         bytes.addAll(chunk);
@@ -83,8 +84,9 @@ Future<void> main(List<String> args) async {
             platform: 'windows',
             arch: 'x64',
           );
-          if (release == null || tag != null && tag != 'v${release.version}')
+          if (release == null || tag != null && tag != 'v${release.version}') {
             throw const FormatException('版本不匹配');
+          }
           stdout.writeln(
             '$node：签名有效 ${release.version}+${release.build}，${clock.elapsedMilliseconds} ms；未下载或执行安装包。',
           );
