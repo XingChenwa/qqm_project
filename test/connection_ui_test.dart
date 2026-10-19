@@ -142,6 +142,10 @@ void main() {
       await tester.ensureVisible(find.text('生成登录二维码'));
       await tester.tap(find.text('生成登录二维码'));
       await tester.pumpAndSettle();
+      expect(find.text('扫码前请确认'), findsOneWidget);
+      expect(service.phase, QrLoginPhase.idle);
+      await tester.tap(find.text('我已了解，继续扫码'));
+      await tester.pumpAndSettle();
       expect(find.text('等待手机 QQ 扫码…'), findsOneWidget);
       expect(storage.config.appId, isEmpty);
       await captureUi(tester, 'qr-${size.width.toInt()}');
@@ -159,12 +163,13 @@ void main() {
     });
   }
 
-  testWidgets('扫码结果先确认再替换，取消不改配置；保存保留其他设置且不泄露密钥', (tester) async {
+  testWidgets('扫码前提示重置，取消不创建；授权后自动更新对应 AppID 且保留其他机器人', (tester) async {
     tester.view.physicalSize = const Size(1280, 900);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
     final original = validConfig()
+      ..appId = '100000001'
       ..autoReconnect = false
       ..markdownTemplateId = 'keep-template';
     final storage = MemoryStorage(config: original);
@@ -186,20 +191,19 @@ void main() {
     await tester.ensureVisible(find.text('生成登录二维码'));
     await tester.tap(find.text('生成登录二维码'));
     await tester.pumpAndSettle();
-    expect(storage.config.appId, 'test-app');
-    expect(find.textContaining('fixture-only-app-secret'), findsNothing);
-    await tester.ensureVisible(find.text('保存并连接'));
-    await tester.tap(find.text('保存并连接'));
-    // The underlying save button is busy while the confirmation dialog is open.
-    await tester.pump(const Duration(milliseconds: 400));
-    expect(find.text('更新当前机器人凭据？'), findsOneWidget);
+    expect(storage.config.appId, '100000001');
+    expect(find.text('扫码前请确认'), findsOneWidget);
+    expect(service.phase, QrLoginPhase.idle);
     await tester.tap(find.text('取消'));
     await tester.pumpAndSettle();
-    expect(storage.config.appId, 'test-app');
-    await tester.tap(find.text('保存并连接'));
-    await tester.pump(const Duration(milliseconds: 400));
-    await tester.tap(find.text('确认更新并连接'));
+    expect(service.phase, QrLoginPhase.idle);
+    expect(storage.config.clientSecret, original.clientSecret);
+    await tester.tap(find.text('生成登录二维码'));
     await tester.pumpAndSettle();
+    await tester.tap(find.text('我已了解，继续扫码'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('fixture-only-app-secret'), findsNothing);
+    expect(find.text('更新当前机器人凭据？'), findsNothing);
     expect(storage.config.appId, '100000001');
     expect(storage.config.clientSecret, 'fixture-only-app-secret');
     expect(storage.config.autoReconnect, isFalse);

@@ -1,0 +1,18 @@
+{
+  "schema_version": 2,
+  "id": "group_mentions_demo",
+  "name": "群成员问候",
+  "version": "1.0.0",
+  "description": "发送 /叫我，使用当前 AppID 下的成员 OpenID 回复并 @ 你。",
+  "runtime": "rules",
+  "permissions": ["message:read", "message:send"],
+  "rules": [
+    {
+      "match": {"type": "command", "value": "叫我", "scope": "group"},
+      "message": {
+        "format": "text",
+        "content": "<qqbot-at-user id=\"{{sender_id}}\" /> 收到你的指令了。"
+      }
+    }
+  ]
+}

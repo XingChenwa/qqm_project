@@ -13,8 +13,34 @@ class MemoryStorage extends StorageService {
   BotConfig config;
   final storedMessages = <String, MessageModel>{};
   final storedSessions = <String, ChatSession>{};
+  final profiles = <String, BotConfig>{};
+  @override
+  List<BotConfig> getBotProfiles() => {
+    ...profiles,
+    if (config.appId.isNotEmpty) config.appId: config,
+  }.values.map((bot) => BotConfig.fromMap(bot.toMap())).toList();
+
   final storedPlugins = <String, PluginInfo>{};
   final pluginData = <String, Map<String, dynamic>>{};
+
+  String? _selectedChatAppId;
+  final _messageAccounts = <String, Map<String, MessageModel>>{};
+  final _sessionAccounts = <String, Map<String, ChatSession>>{};
+  @override
+  void selectChatAccount(String appId) {
+    if (_selectedChatAppId != null && _selectedChatAppId != appId) {
+      _messageAccounts[_selectedChatAppId!] = Map.of(storedMessages);
+      _sessionAccounts[_selectedChatAppId!] = Map.of(storedSessions);
+      storedMessages
+        ..clear()
+        ..addAll(_messageAccounts[appId] ?? {});
+      storedSessions
+        ..clear()
+        ..addAll(_sessionAccounts[appId] ?? {});
+    }
+    _selectedChatAppId = appId;
+    super.selectChatAccount(appId);
+  }
 
   @override
   Future<Map<String, dynamic>> readPluginData(String scope) async =>
@@ -33,8 +59,13 @@ class MemoryStorage extends StorageService {
   BotConfig getBotConfig() => BotConfig.fromMap(config.toMap());
 
   @override
-  Future<void> saveBotConfig(BotConfig config) async =>
-      this.config = BotConfig.fromMap(config.toMap());
+  Future<void> saveBotConfig(BotConfig config) async {
+    if (this.config.appId.isNotEmpty) {
+      profiles[this.config.appId] = getBotConfig();
+    }
+    this.config = BotConfig.fromMap(config.toMap());
+    if (config.appId.isNotEmpty) profiles[config.appId] = getBotConfig();
+  }
 
   @override
   List<MessageModel> getMessages(String sessionId) =>

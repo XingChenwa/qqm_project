@@ -40,6 +40,7 @@ class WebSocketService {
   Future<String?> Function()? refreshAccessToken;
 
   Stream<Map<String, dynamic>> get messageStream => _messageController.stream;
+  int get transportGeneration => _generation;
   ConnectionState get state => _state;
   String get lastError => _lastError;
 
@@ -163,18 +164,22 @@ class WebSocketService {
 
         switch (eventType) {
           case String type when _isRecallEvent(type):
-            _messageController.add(_parseRecallEvent(eventData, type));
+            _messageController.add({
+              ..._parseRecallEvent(eventData, type),
+              '_transportGeneration': _generation,
+            });
             break;
           case 'C2C_MESSAGE_CREATE': // Friend message
           case 'GROUP_AT_MESSAGE_CREATE': // Group @message
           case 'GROUP_MESSAGE_CREATE':
-            _messageController.add(
-              _parseMessageEvent(
+            _messageController.add({
+              ..._parseMessageEvent(
                 eventData,
                 eventType,
                 message['id']?.toString(),
               ),
-            );
+              '_transportGeneration': _generation,
+            });
             break;
           case 'READY':
             _sessionId = eventData['session_id']?.toString();

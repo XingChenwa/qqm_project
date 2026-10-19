@@ -57,6 +57,7 @@ class _MainScreenState extends State<MainScreen> {
   bool _startupConnectTried = false;
   int _chatOpenRevision = 0;
   int _chatSentRevision = 0;
+  int _accountEpoch = -1;
 
   @override
   void initState() {
@@ -64,6 +65,7 @@ class _MainScreenState extends State<MainScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final client = context.read<BotClient>();
       _botClient = client;
+      _accountEpoch = client.accountEpoch;
       client.refresh();
       _selectFirstSessionIfNeeded(client);
       client.addListener(_onBotUpdate);
@@ -110,6 +112,16 @@ class _MainScreenState extends State<MainScreen> {
 
   void _onBotUpdate() {
     if (!mounted) return;
+    final epoch = _botClient?.accountEpoch ?? -1;
+    if (epoch != _accountEpoch) {
+      _accountEpoch = epoch;
+      _selectedSession = null;
+      _replyToMessage = null;
+      _sessionSearch = '';
+      _sessionTypeFilter = null;
+      _mobileChatOpen = false;
+      _chatOpenRevision++;
+    }
     _selectFirstSessionIfNeeded(_botClient);
     setState(() {});
   }
@@ -134,6 +146,8 @@ class _MainScreenState extends State<MainScreen> {
     if (!mounted || !context.read<BotClient>().shouldAutoRespondTo(message)) {
       return false;
     }
+    final activeBot = context.read<BotClient>();
+    final epoch = activeBot.accountEpoch;
     final rawContent =
         message.extra?['rawContent']?.toString() ?? message.content;
     final content = message.extra?['eventType'] == 'GROUP_AT_MESSAGE_CREATE'
@@ -173,10 +187,11 @@ class _MainScreenState extends State<MainScreen> {
     final responses = await context.read<PluginManager>().processMessage(
       pluginMessage,
     );
-    if (!mounted) return false;
+    if (!mounted || activeBot.accountEpoch != epoch) return false;
 
-    final bot = context.read<BotClient>();
+    final bot = activeBot;
     for (final response in responses) {
+      if (!mounted || bot.accountEpoch != epoch) return false;
       final sent = await _sendPluginResponse(
         bot,
         message,
@@ -515,6 +530,75 @@ class _MainScreenState extends State<MainScreen> {
     }
   }
 
+  Future<void> _chooseBot(BotClient bot) async {
+    final selected = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (sheet) => SafeArea(
+        child: SizedBox(
+          height: math.min(440, MediaQuery.sizeOf(sheet).height * .75),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                child: Text(
+                  '切换机器人',
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800),
+                ),
+              ),
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 20, vertical: 6),
+                child: Text('每个 AppID 的会话、OpenID 和聊天记录分别保存。'),
+              ),
+              Expanded(
+                child: ListView(
+                  children: [
+                    for (final profile in bot.botProfiles)
+                      ListTile(
+                        leading: const Icon(Icons.smart_toy_outlined),
+                        title: Text('AppID · ${profile.appId}'),
+                        subtitle: Text(
+                          profile.appId == bot.config.appId
+                              ? '当前机器人'
+                              : '切换后使用独立会话',
+                        ),
+                        trailing: profile.appId == bot.config.appId
+                            ? const Icon(
+                                Icons.check_circle,
+                                color: AppTheme.qqBlue,
+                              )
+                            : null,
+                        onTap: () => Navigator.pop(sheet, profile.appId),
+                      ),
+                    ListTile(
+                      leading: const Icon(Icons.add_circle_outline),
+                      title: const Text('添加 / 配置机器人'),
+                      onTap: () => Navigator.pop(sheet, '__add__'),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (!mounted || selected == null) return;
+    if (selected == '__add__') {
+      await _openSettings();
+      return;
+    }
+    try {
+      await bot.switchBot(selected);
+    } catch (_) {
+      if (mounted) {
+        AppDialogs.show(context, '切换失败，原配置仍保留。请检查本地存储。', error: true);
+      }
+    }
+  }
+
   Future<void> _toggleConnection(BotClient bot) async {
     if (bot.isConnecting) return;
     if (bot.isConnected) {
@@ -545,7 +629,6 @@ class _MainScreenState extends State<MainScreen> {
       },
       child: Scaffold(
         key: _scaffoldKey,
-        drawer: Drawer(child: SafeArea(child: _navigationRail(bot))),
         appBar: AppBar(
           automaticallyImplyLeading: false,
           title: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
@@ -557,6 +640,12 @@ class _MainScreenState extends State<MainScreen> {
                 )
               : null,
           actions: [
+            if (chatting)
+              IconButton(
+                tooltip: '会话信息',
+                onPressed: () => _navigateTo(1),
+                icon: const Icon(Icons.info_outline),
+              ),
             IconButton(
               tooltip: bot.isConnected ? '断开机器人' : '连接机器人',
               onPressed: bot.isConnecting ? null : () => _toggleConnection(bot),
@@ -566,10 +655,16 @@ class _MainScreenState extends State<MainScreen> {
               ),
             ),
             IconButton(
-              tooltip: '打开功能菜单',
-              onPressed: () => _scaffoldKey.currentState?.openDrawer(),
-              icon: const Icon(Icons.menu),
+              tooltip: '切换机器人',
+              onPressed: () => _chooseBot(bot),
+              icon: const Icon(Icons.swap_horiz_rounded),
             ),
+            if (!chatting)
+              IconButton(
+                tooltip: '设置',
+                onPressed: _openSettings,
+                icon: const Icon(Icons.settings_outlined),
+              ),
           ],
         ),
         bottomNavigationBar: chatting
@@ -744,6 +839,11 @@ class _MainScreenState extends State<MainScreen> {
             ),
           ),
           const SizedBox(width: 12),
+          IconButton(
+            tooltip: '切换机器人',
+            onPressed: () => _chooseBot(bot),
+            icon: const Icon(Icons.swap_horiz_rounded),
+          ),
           _pill(
             connected ? '已连接' : '未连接',
             connected ? AppTheme.qqGreen : AppTheme.muted,
@@ -1134,7 +1234,8 @@ class _MainScreenState extends State<MainScreen> {
       child: LayoutBuilder(
         builder: (context, constraints) => Column(
           children: [
-            _conversationHeader(session),
+            if (MediaQuery.sizeOf(context).width >= 700)
+              _conversationHeader(session),
             Expanded(
               child: session == null
                   ? _emptyState(
@@ -1155,7 +1256,7 @@ class _MainScreenState extends State<MainScreen> {
                   maxHeight: math.max(
                     0,
                     constraints.maxHeight -
-                        74 -
+                        (MediaQuery.sizeOf(context).width >= 700 ? 74 : 0) -
                         math.min(80, constraints.maxHeight * .15),
                   ),
                 ),
@@ -1242,7 +1343,7 @@ class _MainScreenState extends State<MainScreen> {
       );
     }
     return ChatTimeline(
-      key: ValueKey('timeline-${session.id}'),
+      key: ValueKey('timeline-${bot.config.appId}-${session.id}'),
       sessionId: session.id,
       messages: messages,
       controller: _messageScrollController,
@@ -1525,7 +1626,16 @@ class _MainScreenState extends State<MainScreen> {
 
   Widget _composer(ChatSession session) {
     return ChatInput(
-      key: ValueKey(session.id),
+      mentionCandidates: {
+        for (final message
+            in context
+                .read<BotClient>()
+                .getMessagesForSession(session.id)
+                .take(400))
+          if (!message.isBotAuthor && message.senderId.isNotEmpty)
+            message.senderId: message.senderName,
+      },
+      key: ValueKey('${context.read<BotClient>().config.appId}:${session.id}'),
       isGroup: session.sessionType == 1,
       latestEventId: context.read<BotClient>().latestReplyEventId(session.id),
       defaultMarkdownTemplateId: context
@@ -1580,7 +1690,7 @@ class _MainScreenState extends State<MainScreen> {
       onSlashCommand: (command, args) async {
         final replyAtStart = _replyToMessage;
         final botAtStart = context.read<BotClient>();
-        final appIdAtStart = botAtStart.config.appId;
+        final epochAtStart = botAtStart.accountEpoch;
         final result = await context.read<PluginManager>().processCommandReply(
           command,
           args,
@@ -1596,7 +1706,7 @@ class _MainScreenState extends State<MainScreen> {
             timestamp: DateTime.now(),
           ),
         );
-        if (!mounted || botAtStart.config.appId != appIdAtStart) return false;
+        if (!mounted || botAtStart.accountEpoch != epochAtStart) return false;
         if (result == null) {
           throw const FormatException('未找到可用命令，请检查插件是否启用');
         }

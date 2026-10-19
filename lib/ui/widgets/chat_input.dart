@@ -33,6 +33,7 @@ class ChatInput extends StatefulWidget {
   final Future<bool> Function(OutgoingMessage)? onSendConfigured;
   final Map<String, dynamic> Function(OutgoingMessage)? previewConfigured;
   final bool isGroup;
+  final Map<String, String> mentionCandidates;
   final String latestEventId;
   final String defaultMarkdownTemplateId;
   final List<Map<String, String>> defaultTemplateParams;
@@ -51,6 +52,7 @@ class ChatInput extends StatefulWidget {
     this.onSendConfigured,
     this.previewConfigured,
     this.isGroup = false,
+    this.mentionCandidates = const {},
     this.latestEventId = '',
     this.defaultMarkdownTemplateId = '',
     this.defaultTemplateParams = const [],
@@ -158,6 +160,29 @@ class _ChatInputState extends State<ChatInput> {
         _showTemplateEditor = false;
       }
     });
+  }
+
+  Future<void> _mentionUser() async {
+    if (_isSending || !widget.isGroup) return;
+    final selected = await showDialog<String>(
+      context: context,
+      builder: (_) => _MentionPicker(members: widget.mentionCandidates),
+    );
+    if (!mounted || selected == null) return;
+    if (!RegExp(r'^[A-Za-z0-9_-]{1,128}$').hasMatch(selected)) {
+      _showSendError('请输入有效的成员 OpenID，不能包含空格、引号或标签。');
+      return;
+    }
+    final draft = _activeController;
+    final selection = draft.selection;
+    final start = selection.isValid ? selection.start : draft.text.length;
+    final end = selection.isValid ? selection.end : start;
+    final mention = '<qqbot-at-user id="$selected" /> ';
+    draft.value = TextEditingValue(
+      text: draft.text.replaceRange(start, end, mention),
+      selection: TextSelection.collapsed(offset: start + mention.length),
+    );
+    _focusNode.requestFocus();
   }
 
   bool get _isSlashCommand => _activeController.text.trimLeft().startsWith('/');
@@ -386,6 +411,13 @@ class _ChatInputState extends State<ChatInput> {
                             selected: _sendSettings.isConfigured,
                             tooltip: '消息设置',
                             onPressed: _openSettings,
+                          ),
+                        if (widget.isGroup)
+                          _toolButton(
+                            icon: Icons.alternate_email_rounded,
+                            selected: false,
+                            tooltip: '@ 群成员',
+                            onPressed: _mentionUser,
                           ),
                         _toolButton(
                           icon: Icons.code_rounded,
@@ -764,4 +796,80 @@ class _ChatInputState extends State<ChatInput> {
       ),
     );
   }
+}
+
+class _MentionPicker extends StatefulWidget {
+  final Map<String, String> members;
+  const _MentionPicker({required this.members});
+  @override
+  State<_MentionPicker> createState() => _MentionPickerState();
+}
+
+class _MentionPickerState extends State<_MentionPicker> {
+  final _controller = TextEditingController();
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: const Text('@ 群成员'),
+    content: SizedBox(
+      width: 420,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Text(
+            '选择当前机器人收到过消息的成员，或输入该 AppID 下的成员 OpenID。群聊不支持 @ 全体。',
+            style: TextStyle(fontSize: 12),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _controller,
+            decoration: const InputDecoration(
+              labelText: '成员 OpenID',
+              hintText: '不是 QQ 号，也不能使用其他机器人的 OpenID',
+            ),
+          ),
+          if (widget.members.isNotEmpty)
+            Flexible(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 220),
+                child: ListView(
+                  shrinkWrap: true,
+                  children: [
+                    for (final member in widget.members.entries)
+                      ListTile(
+                        dense: true,
+                        leading: const Icon(Icons.alternate_email),
+                        title: Text(
+                          member.value.isEmpty ? '群成员' : member.value,
+                        ),
+                        subtitle: Text(
+                          member.key,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        onTap: () => Navigator.pop(context, member.key),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+        ],
+      ),
+    ),
+    actions: [
+      TextButton(
+        onPressed: () => Navigator.pop(context),
+        child: const Text('取消'),
+      ),
+      FilledButton(
+        onPressed: () => Navigator.pop(context, _controller.text.trim()),
+        child: const Text('插入 @'),
+      ),
+    ],
+  );
 }

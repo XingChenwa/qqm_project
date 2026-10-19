@@ -226,7 +226,7 @@ class QqQrLoginService extends ChangeNotifier {
           qrUri = null;
           credentials = QrBotCredentials(appId, secret);
           phase = QrLoginPhase.authorized;
-          message = '授权成功，点击“保存并连接”后才会写入当前设备。';
+          message = '授权成功，正在自动保存新密钥并连接机器人。';
         case 3:
           _expire();
           return;

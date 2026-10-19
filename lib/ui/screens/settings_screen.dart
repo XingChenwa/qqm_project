@@ -35,8 +35,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final TextEditingController _appIdController = TextEditingController();
   final TextEditingController _clientSecretController = TextEditingController();
   final TextEditingController _apiUrlController = TextEditingController();
-  final TextEditingController _markdownTemplateController =
-      TextEditingController();
 
   bool _useSandbox = false;
   bool _autoReconnect = true;
@@ -51,6 +49,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   int _reconnectInterval = 5;
   int _tabIndex = 0;
   int _connectionMethod = 0;
+  int _qrRevision = 0;
+  bool _addingBot = false;
 
   @override
   void initState() {
@@ -63,16 +63,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _appIdController.dispose();
     _clientSecretController.dispose();
     _apiUrlController.dispose();
-    _markdownTemplateController.dispose();
     super.dispose();
   }
 
   void _loadConfig() {
+    _addingBot = false;
     final config = context.read<StorageService>().getBotConfig();
     _appIdController.text = config.appId;
     _clientSecretController.text = config.clientSecret;
     _apiUrlController.text = config.apiBaseUrl;
-    _markdownTemplateController.text = config.markdownTemplateId;
     _useSandbox = config.useSandbox;
     _autoReconnect = config.autoReconnect;
     _receiveAllGroupMessages = config.receiveAllGroupMessages;
@@ -85,6 +84,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _saveConfig() async {
     if (_isSaving) return;
+    if (_addingBot &&
+        (_appIdController.text.trim().isEmpty ||
+            _clientSecretController.text.trim().isEmpty)) {
+      _showError('请先填写 AppID 和机器人密钥，或使用扫码连接。');
+      return;
+    }
     final baseUrl = AppConstants.normalizeApiBaseUrl(_apiUrlController.text);
     final uri = Uri.tryParse(baseUrl);
     if (uri == null ||
@@ -122,7 +127,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       skipCloseConfirmation: _windowPreferencesDirty
           ? _skipCloseConfirmation
           : previous.skipCloseConfirmation,
-      markdownTemplateId: _markdownTemplateController.text.trim(),
+      markdownTemplateId: previous.markdownTemplateId,
       markdownTemplateParams: previous.markdownTemplateParams,
     );
 
@@ -151,46 +156,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
     setState(() => _isSaving = true);
     try {
       final bot = context.read<BotClient>();
-      final previous = context.read<StorageService>().getBotConfig();
-      if (previous.appId.isNotEmpty &&
-          (previous.appId != credentials.appId ||
-              previous.clientSecret != credentials.appSecret)) {
-        final accepted = await AppDialogs.present<bool>(
-          context,
-          builder: (dialog) => AlertDialog(
-            title: const Text('更新当前机器人凭据？'),
-            content: Text(
-              '当前 AppID：${previous.appId}\n本次 AppID：${credentials.appId}\n\n保存会断开当前连接，再用新凭据连接。不会删除聊天记录、插件或其他设置。',
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(dialog, false),
-                child: const Text('取消'),
-              ),
-              FilledButton(
-                onPressed: () => Navigator.pop(dialog, true),
-                child: const Text('确认更新并连接'),
-              ),
-            ],
-          ),
-        );
-        if (accepted != true || !mounted) return false;
-      }
-      final latest = context.read<StorageService>().getBotConfig();
-      if (latest.appId != previous.appId ||
-          latest.clientSecret != previous.clientSecret) {
-        _showError('当前机器人配置已变化，请重新确认后再连接。');
-        return false;
-      }
-      final replacement = BotConfig.fromMap(latest.toMap())
+      final matching = bot.botProfiles
+          .where((profile) => profile.appId == credentials.appId)
+          .firstOrNull;
+      final replacement = BotConfig.fromMap((matching ?? BotConfig()).toMap())
         ..appId = credentials.appId
         ..clientSecret = credentials.appSecret;
       await bot.updateConfig(replacement);
       saved = true;
       if (!mounted) return true;
       setState(() {
-        _appIdController.text = credentials.appId;
-        _clientSecretController.text = credentials.appSecret;
+        _loadConfig();
         _credentialTestStatus = '';
       });
       final connected = await bot.connect();
@@ -234,8 +210,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _testCredentials() async {
     if (_isTestingCredentials) return;
-    if (_appIdController.text.trim().isEmpty ||
-        _clientSecretController.text.trim().isEmpty) {
+    if (_addingBot &&
+        (_appIdController.text.trim().isEmpty ||
+            _clientSecretController.text.trim().isEmpty)) {
       _showError('请先填写 AppID 和机器人密钥');
       return;
     }
@@ -538,20 +515,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                   ),
                 ),
-                Padding(
-                  padding: const EdgeInsets.only(right: 14),
-                  child: FilledButton.icon(
-                    onPressed: _isSaving ? null : _saveConfig,
-                    icon: _isSaving
-                        ? const SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.save_rounded, size: 18),
-                    label: Text(_isSaving ? '保存中' : '保存'),
-                  ),
-                ),
               ],
             ),
           ),
@@ -615,12 +578,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             runSpacing: 12,
             children: [
               _credentialsCard(),
-              _connectionCard(),
-              if (isDesktopPlatform) _windowCard(),
               _loggingCard(),
-              _dataManagementCard(),
-              _dataSummaryCard(bot),
-              _dangerZoneCard(),
             ].map((card) => SizedBox(width: cardWidth, child: card)).toList(),
           ),
         );
@@ -633,6 +591,59 @@ class _SettingsScreenState extends State<SettingsScreen> {
       title: '机器人凭据',
       icon: Icons.verified_user_outlined,
       children: [
+        if (context.read<BotClient>().botProfiles.isNotEmpty) ...[
+          DropdownButtonFormField<String>(
+            key: ValueKey(context.read<BotClient>().config.appId),
+            initialValue: context.read<BotClient>().config.appId.isEmpty
+                ? null
+                : context.read<BotClient>().config.appId,
+            isExpanded: true,
+            decoration: const InputDecoration(labelText: '已保存的机器人'),
+            items: [
+              for (final profile in context.read<BotClient>().botProfiles)
+                DropdownMenuItem(
+                  value: profile.appId,
+                  child: Text(
+                    'AppID · ${profile.appId}',
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+            ],
+            onChanged: _isSaving
+                ? null
+                : (value) async {
+                    if (value == null) return;
+                    setState(() => _isSaving = true);
+                    try {
+                      await context.read<BotClient>().switchBot(value);
+                      if (mounted) {
+                        setState(() {
+                          _loadConfig();
+                          _qrRevision++;
+                        });
+                      }
+                    } catch (_) {
+                      if (mounted) _showError('切换失败，原配置仍保留，请检查本地存储。');
+                    } finally {
+                      if (mounted) setState(() => _isSaving = false);
+                    }
+                  },
+          ),
+          TextButton.icon(
+            onPressed: _isSaving
+                ? null
+                : () => setState(() {
+                    _addingBot = true;
+                    _appIdController.clear();
+                    _clientSecretController.clear();
+                    _connectionMethod = 0;
+                    _qrRevision++;
+                  }),
+            icon: const Icon(Icons.add),
+            label: const Text('添加其他机器人'),
+          ),
+          const SizedBox(height: 12),
+        ],
         Wrap(
           spacing: 10,
           runSpacing: 8,
@@ -656,6 +667,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         const SizedBox(height: 16),
         if (_connectionMethod == 0)
           QqQrLoginPanel(
+            key: ValueKey(_qrRevision),
             onConfirm: _saveQrCredentials,
             serviceFactory: widget.qrServiceFactory,
             enabled: !_isSaving,
@@ -693,7 +705,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
         ],
         const SizedBox(height: 16),
-        _field('Markdown 模板 ID', _markdownTemplateController),
       ],
     );
   }
@@ -744,6 +755,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
           title: const Text('启用日志'),
           value: _enableLogging,
           onChanged: (value) => setState(() => _enableLogging = value),
+        ),
+        FilledButton(
+          onPressed: _isSaving ? null : _saveConfig,
+          child: const Text('保存日志设置'),
         ),
       ],
     );
@@ -1109,7 +1124,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       context: context,
       builder: (dialogContext) => AlertDialog(
         title: const Text('重置机器人配置'),
-        content: const Text('仅重置机器人凭据和连接设置，保留聊天记录、表情和插件配置。'),
+        content: const Text('重置当前 AppID 的密钥和连接设置，保留聊天记录、表情和插件配置。不影响其他已保存的机器人。'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(dialogContext, false),
@@ -1124,7 +1139,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
     if (confirmed != true || !mounted) return;
     context.read<BotClient>().disconnect();
-    await context.read<BotClient>().updateConfig(BotConfig());
+    final bot = context.read<BotClient>();
+    await bot.updateConfig(BotConfig(appId: bot.config.appId));
     if (!mounted) return;
     setState(_loadConfig);
     AppDialogs.show(context, '机器人配置已重置，聊天记录已保留');

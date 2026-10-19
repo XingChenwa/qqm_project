@@ -320,6 +320,16 @@ void main() {
     await bot.updateConfig(
       BotConfig(appId: '100312991', enableOiapiNickname: true),
     );
+    expect(bot.sessions, isEmpty);
+    expect(api.calls.length, 2);
+    gateway.events.add(
+      profileEvent('new-bot-user', group: false, session: 'u'),
+    );
+    await until(
+      () =>
+          api.calls.length == 3 &&
+          bot.sessions.single.nicknameSource == 'oiapi',
+    );
     await bot.refreshSessionProfile('u');
     expect(api.calls.last.$1, '100312991');
     expect(bot.sessions.single.nicknameAppId, '100312991');

@@ -72,6 +72,14 @@
 
 模板变量：`{{content}}`、`{{args}}`、`{{sender_name}}`、`{{sender_id}}`、`{{session_id}}`、`{{sender_role}}`、`{{now}}`、`{{config.键}}`。`now` 为北京时间；未知变量为空，secret 不插值，只替换一次。命令参数规范化空白，但多行代码块保留。需要原文用 `content`。富文本模板中的用户参数不会自动转义，开发者应使用纯文本或在 HTTP 服务转义。
 
+### @ 群成员
+
+文本或 Markdown 正文使用 `<qqbot-at-user id="成员OpenID" />`，不要继续使用将弃用的 `<@userid>`。群聊不支持 @ 全体；`<qqbot-at-everyone />` 仅文字子频道可用，本客户端不会在 QQ 群提供该入口。[官方文本交互说明](https://bot.q.qq.com/wiki/develop/api-v2/server-inter/message/trans/text-chain.html)
+
+例如规则回复 `{"format":"text","content":"<qqbot-at-user id=\"{{sender_id}}\" /> 收到你的指令了。"}`，配合 `"scope":"group"` 即可 @ 触发命令的成员。完整示例见 [群成员 @ 插件](../plugins/examples/group_mentions/plugin.json)。成员 OpenID 必须来自**当前 AppID**，不能用 QQ 号或另一机器人的 OpenID；HTTP 服务也应校验返回的 ID，不能将用户输入直接拼成标签。
+
+切换机器人后，会话、头像／昵称缓存、回复序号和玩法数据按 AppID 隔离。尚未完成的旧机器人插件结果不会发到新机器人；Dart 插件内 `host.store` 固定使用本次执行开始时的 AppID，不会因异步等待后切换而写错归属。
+
 ## 5. 清单与结构化回复
 
 [JSON Schema](../plugins/schema/plugin.schema.json) 提供编辑器提示；应用还会交叉检查权限、配置、URL 和域名。清单不执行代码。最大 256 KB、16 层、10000 节点，最多 64 条规则、32 个配置项、32 个第三方插件；未知字段直接拒绝。

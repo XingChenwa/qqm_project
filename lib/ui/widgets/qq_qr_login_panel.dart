@@ -28,6 +28,8 @@ class _QqQrLoginPanelState extends State<QqQrLoginPanel>
     with WidgetsBindingObserver {
   late final QqQrLoginService _service;
   bool _saving = false;
+  bool _starting = false;
+  QrBotCredentials? _attemptedCredentials;
   QrLoginPhase? _notified;
   Uri? _previewedCode;
   final _codeKey = GlobalKey();
@@ -67,6 +69,17 @@ class _QqQrLoginPanelState extends State<QqQrLoginPanel>
       AppDialogs.show(context, _service.message, title: '扫码连接失败', error: true);
     }
     _notified = _service.phase;
+    final credentials = _service.credentials;
+    if (authorized &&
+        credentials != null &&
+        !identical(credentials, _attemptedCredentials)) {
+      _attemptedCredentials = credentials;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && identical(_service.credentials, credentials)) {
+          unawaited(_confirm());
+        }
+      });
+    }
   }
 
   @override
@@ -80,6 +93,37 @@ class _QqQrLoginPanelState extends State<QqQrLoginPanel>
     _service.removeListener(_updated);
     _service.dispose();
     super.dispose();
+  }
+
+  Future<void> _start() async {
+    if (_starting || _saving || !widget.enabled) return;
+    setState(() => _starting = true);
+    try {
+      final accepted = await AppDialogs.present<bool>(
+        context,
+        builder: (dialog) => AlertDialog(
+          title: const Text('扫码前请确认'),
+          content: const Text(
+            '在 QQ 授权后会重置该机器人的密钥，其他使用旧密钥的程序需要同步更新。\n\n授权成功后，本应用会自动保存新密钥、切换到对应 AppID 并连接。其他机器人的配置和聊天记录不会被删除。取消本地等待不能撤销已经完成的 QQ 授权。',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialog, false),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialog, true),
+              child: const Text('我已了解，继续扫码'),
+            ),
+          ],
+        ),
+      );
+      if (accepted != true || !mounted || !widget.enabled) return;
+      _attemptedCredentials = null;
+      await _service.start();
+    } finally {
+      if (mounted) setState(() => _starting = false);
+    }
   }
 
   Future<void> _confirm() async {
@@ -125,14 +169,14 @@ class _QqQrLoginPanelState extends State<QqQrLoginPanel>
   @override
   Widget build(BuildContext context) {
     final phase = _service.phase;
-    final busy = _saving || !widget.enabled;
+    final busy = _saving || _starting || !widget.enabled;
     final code = _service.qrUri;
     final authorized = phase == QrLoginPhase.authorized;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const Text(
-          '用手机 QQ 扫码并确认，自动获取当前机器人的 AppID 和密钥。不是个人 QQ 账号登录。',
+          '用手机 QQ 授权后自动保存并连接机器人。授权会重置机器人密钥，不是个人 QQ 账号登录。',
           style: TextStyle(fontSize: 13),
         ),
         const SizedBox(height: 14),
@@ -209,13 +253,13 @@ class _QqQrLoginPanelState extends State<QqQrLoginPanel>
               FilledButton.icon(
                 onPressed: busy ? null : _confirm,
                 icon: const Icon(Icons.login_rounded, size: 18),
-                label: Text(_saving ? '正在保存并连接…' : '保存并连接'),
+                label: Text(_saving ? '正在保存并连接…' : '重试保存并连接'),
               )
             else
               FilledButton.icon(
                 onPressed: busy || phase == QrLoginPhase.creating
                     ? null
-                    : () => unawaited(_service.start()),
+                    : _start,
                 icon: const Icon(Icons.qr_code_rounded, size: 18),
                 label: Text(
                   code != null ||

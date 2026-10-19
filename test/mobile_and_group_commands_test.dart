@@ -177,10 +177,12 @@ void main() {
       await tester.tap(find.byTooltip('返回会话列表'));
       await tester.pumpAndSettle();
       expect(find.byType(ChatInput), findsNothing);
-      await tester.tap(find.byTooltip('打开功能菜单'));
-      await tester.pumpAndSettle();
+      expect(find.byType(Drawer), findsNothing);
       await tester.tap(
-        find.descendant(of: find.byType(Drawer), matching: find.text('插件')),
+        find.descendant(
+          of: find.byType(NavigationBar),
+          matching: find.text('插件'),
+        ),
       );
       await tester.pumpAndSettle();
       expect(find.byTooltip('配置高德天气与 IP 查询'), findsOneWidget);

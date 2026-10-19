@@ -46,6 +46,7 @@ class UpdatePanel extends StatelessWidget {
     return ListView(
       padding: const EdgeInsets.all(20),
       children: [
+        if (updates.usesGitHubPages) _UpdateNodeCard(updates: updates),
         Card(
           child: Padding(
             padding: const EdgeInsets.all(20),
@@ -84,6 +85,100 @@ class UpdatePanel extends StatelessWidget {
       ],
     );
   }
+}
+
+class _UpdateNodeCard extends StatelessWidget {
+  final AppUpdateService updates;
+  const _UpdateNodeCard({required this.updates});
+  @override
+  Widget build(BuildContext context) => Card(
+    clipBehavior: Clip.antiAlias,
+    child: Padding(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.alt_route_rounded, size: 22),
+              const SizedBox(width: 8),
+              const Expanded(
+                child: Text(
+                  '更新线路',
+                  style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16),
+                ),
+              ),
+              IconButton(
+                tooltip: '重新检测两条线路',
+                onPressed: updates.busy || !updates.configured
+                    ? null
+                    : updates.check,
+                icon: const Icon(Icons.speed_rounded),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final node in UpdateNode.values)
+                ChoiceChip(
+                  label: Text(node.label),
+                  selected: updates.preferences.node == node,
+                  onSelected: updates.busy
+                      ? null
+                      : (_) => updates.setNode(node),
+                ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          for (final node in [UpdateNode.github, UpdateNode.gitcode])
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 6),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(
+                    updates.nodeStatuses[node]?.available == true
+                        ? Icons.check_circle_rounded
+                        : Icons.radio_button_unchecked,
+                    size: 17,
+                    color: updates.nodeStatuses[node]?.available == true
+                        ? const Color(0xFF158257)
+                        : Theme.of(context).hintColor,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      '${node.label}\n${updates.nodeStatuses[node]?.detail ?? (updates.phase == UpdatePhase.checking ? '正在检测…' : '尚未检测')}',
+                      style: const TextStyle(fontSize: 12, height: 1.6),
+                    ),
+                  ),
+                  if (updates.nodeStatuses[node]?.milliseconds != null)
+                    Text(
+                      '${updates.nodeStatuses[node]!.milliseconds} ms',
+                      style: const TextStyle(fontSize: 12),
+                    ),
+                ],
+              ),
+            ),
+          const Divider(),
+          Text(
+            updates.activeNode == null
+                ? '自动模式会并行检测两条线路，优先选择版本完整、响应较快的节点。'
+                : '当前：${updates.activeNodeLabel}${updates.preferences.node == UpdateNode.auto ? ' · 自动优选' : ' · 手动指定'}',
+            style: TextStyle(fontSize: 12, color: Theme.of(context).hintColor),
+          ),
+          const SizedBox(height: 6),
+          const Text(
+            '测速仅请求版本资料；两线路使用同一签名与安装包校验。手动指定的线路失败时不会擅自更改。',
+            style: TextStyle(fontSize: 11, height: 1.5),
+          ),
+        ],
+      ),
+    ),
+  );
 }
 
 class _UpdateDialog extends StatelessWidget {
@@ -173,6 +268,8 @@ class _UpdateDialog extends StatelessWidget {
                       '当前版本 ${AppConstants.appVersion}（构建 ${AppConstants.appBuild}）',
                     ),
                     const SizedBox(height: 16),
+                    if (updates.usesGitHubPages)
+                      _UpdateNodeCard(updates: updates),
                     if (!updates.configured)
                       const Text('更新服务尚未配置，暂时无法检查更新。')
                     else if (!updates.hasUpdate &&

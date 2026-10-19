@@ -242,8 +242,10 @@ void main() {
     expect(bot.sessions.single.avatarUrl, '');
   });
 
-  test('旧群聊和私聊立即补用 CDN，切换 AppID 后替换旧地址，清空 AppID 则回退占位', () async {
-    final storage = MemoryStorage(config: BotConfig(appId: '100312990'));
+  test('旧记录仅在原 AppID 显示，切换账号不复用 OpenID；新记录使用新 CDN', () async {
+    final storage = MemoryStorage(
+      config: BotConfig(appId: '100312990', enableOiapiNickname: false),
+    );
     for (final session in ['old-user', 'old-group']) {
       storage.storedSessions[session] = ChatSession(
         id: session,
@@ -278,23 +280,44 @@ void main() {
     // Also cover a persisted fallback from the previous bot's AppID.
     storage.storedMessages['old-user'] = storage.storedMessages['old-user']!
         .copyWith(senderAvatarUrl: oldUrl);
-    await bot.updateConfig(BotConfig(appId: '100312991'));
-    final newUrl = qqOpenIdAvatar('100312991', 'old-user');
-    expect(
-      bot.sessions.firstWhere((s) => s.sessionType == 0).avatarUrl,
-      newUrl,
+    await bot.updateConfig(
+      BotConfig(appId: '100312991', enableOiapiNickname: false),
+    );
+    expect(bot.sessions, isEmpty);
+    expect(bot.getMessagesForSession('old-user'), isEmpty);
+    expect(bot.getMessagesForSession('old-group'), isEmpty);
+    await bot.addSession('new-user', isGroup: false);
+    await storage.saveMessage(
+      MessageModel(
+        id: 'new-message',
+        sessionId: 'new-user',
+        senderId: 'new-user',
+        senderName: '新用户',
+        content: '新机器人消息',
+        messageType: 0,
+        timestamp: DateTime.now(),
+      ),
     );
     expect(
-      bot.getMessagesForSession('old-user').single.senderAvatarUrl,
-      newUrl,
+      bot.sessions.single.avatarUrl,
+      qqOpenIdAvatar('100312991', 'new-user'),
     );
     expect(
-      bot.getMessagesForSession('old-group').single.senderAvatarUrl,
-      newUrl,
+      bot.getMessagesForSession('new-user').single.senderAvatarUrl,
+      qqOpenIdAvatar('100312991', 'new-user'),
     );
     await bot.updateConfig(BotConfig());
-    expect(bot.sessions.firstWhere((s) => s.sessionType == 0).avatarUrl, '');
-    expect(bot.getMessagesForSession('old-user').single.senderAvatarUrl, '');
+    expect(bot.sessions, isEmpty);
+    expect(bot.getMessagesForSession('new-user'), isEmpty);
+    await bot.switchBot('100312990');
+    expect(
+      bot.getMessagesForSession('old-user').single.senderAvatarUrl,
+      oldUrl,
+    );
+    expect(
+      bot.sessions.firstWhere((s) => s.sessionType == 0).avatarUrl,
+      oldUrl,
+    );
   });
 
   test('没有消息历史时也保留会话真实头像，不把机器人作者当普通用户拼接 CDN', () async {
@@ -528,7 +551,9 @@ void main() {
       ApiResult.success({'group_openid': 'g', 'group_name': '旧账号结果'}),
     );
     await pending;
-    expect(bot.sessions.single.name, isNot('旧账号结果'));
+    expect(bot.sessions, isEmpty);
+    await bot.switchBot('test-app');
+    expect(bot.sessions.single.name, '更新后的群名');
   });
 
   test('机器人资料接口补齐头像，发送气泡使用机器人自己的昵称和头像', () async {

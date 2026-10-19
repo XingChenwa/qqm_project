@@ -14,6 +14,8 @@ import 'package:uuid/uuid.dart';
 import '../models/app_release.dart';
 import '../utils/constants.dart';
 import 'update_preferences.dart';
+import 'update_node.dart';
+export 'update_node.dart';
 
 enum UpdatePhase {
   idle,
@@ -48,6 +50,48 @@ class AppUpdateService extends ChangeNotifier {
   double progress = 0;
   File? downloadedFile;
   int dismissedBuild = 0;
+  static const gitCodeRepository = 'xiaoshutiaoya/QQm_project';
+  static final gitCodeApi = Uri.parse(
+    'https://api.gitcode.com/api/v5/repos/$gitCodeRepository/releases',
+  );
+  UpdateNode? activeNode;
+  final Map<UpdateNode, UpdateNodeStatus> nodeStatuses = {};
+  final Map<UpdateNode, AppRelease> _nodeReleases = {};
+  final Set<CancelToken> _probes = {};
+  String get activeNodeLabel => activeNode?.label ?? preferences.node.label;
+
+  Future<void> setNode(UpdateNode node) async {
+    if (busy) return;
+    await preferences.setNode(node);
+    activeNode = null;
+    release = null;
+    downloadedFile = null;
+    phase = UpdatePhase.idle;
+    error = '';
+    _changed();
+    await check();
+  }
+
+  static Uri gitCodeAsset(String tag, String name) {
+    if (!RegExp(r'^v\d+\.\d+\.\d+$').hasMatch(tag) ||
+        !RegExp(r'^[A-Za-z0-9][A-Za-z0-9._-]{0,180}$').hasMatch(name)) {
+      throw const FormatException('GitCode 资源参数无效');
+    }
+    return Uri.parse('$gitCodeApi/$tag/attach_files/$name/download');
+  }
+
+  static bool _trustedGitCodeUrl(Uri url) =>
+      url.scheme == 'https' &&
+      url.port == 443 &&
+      url.userInfo.isEmpty &&
+      !url.hasFragment &&
+      ((url.host == 'api.gitcode.com' &&
+              url.path.startsWith(
+                '/api/v5/repos/$gitCodeRepository/releases/',
+              )) ||
+          (url.host == 'gitcode.com' &&
+              url.path.startsWith('/$gitCodeRepository/releases/download/')) ||
+          url.host == 'file-cdn.gitcode.com');
 
   AppUpdateService(
     this.preferences, {
@@ -135,32 +179,173 @@ class AppUpdateService extends ChangeNotifier {
   Uri _url(String path, [Map<String, String>? query]) =>
       server.replace(path: path, queryParameters: query);
 
-  Future<Map<String, dynamic>> _json(
-    String path, {
-    Map<String, String>? query,
+  Future<Response<ResponseBody>> _staticResponse(
+    Uri url, {
+    bool gitcode = false,
+    CancelToken? cancel,
   }) async {
-    final response = await _http.getUri<ResponseBody>(
-      _url(path, query),
-      options: Options(
-        responseType: ResponseType.stream,
-        followRedirects: false,
-        receiveTimeout: const Duration(seconds: 10),
-        validateStatus: (status) =>
-            status != null && status >= 200 && status < 300,
-      ),
+    for (var hop = 0; hop < 6; hop++) {
+      final response = await _http.getUri<ResponseBody>(
+        url,
+        cancelToken: cancel,
+        options: Options(
+          responseType: ResponseType.stream,
+          followRedirects: false,
+          receiveTimeout: const Duration(seconds: 8),
+          validateStatus: (status) =>
+              status == 200 ||
+              (gitcode && {301, 302, 303, 307, 308}.contains(status)),
+        ),
+      );
+      if (response.statusCode == 200) return response;
+      await response.data?.stream.listen((_) {}).cancel();
+      final location = response.headers.value('location');
+      final next = location == null ? null : url.resolve(location);
+      if (next == null || !_trustedGitCodeUrl(next)) {
+        throw const FormatException('GitCode 资源跳转不可信');
+      }
+      url = next;
+    }
+    throw const FormatException('GitCode 资源跳转次数过多');
+  }
+
+  Future<Map<String, dynamic>> _jsonUri(
+    Uri uri, {
+    bool gitcode = false,
+    CancelToken? cancel,
+  }) async {
+    final response = await _staticResponse(
+      uri,
+      gitcode: gitcode,
+      cancel: cancel,
     );
     final bytes = BytesBuilder(copy: false);
     final body = response.data;
     if (body == null) throw const FormatException('接口响应为空');
-    await for (final chunk in body.stream.timeout(
-      const Duration(seconds: 10),
-    )) {
+    await for (final chunk in body.stream.timeout(const Duration(seconds: 8))) {
       if (bytes.length + chunk.length > 65536) {
         throw const FormatException('接口响应过大');
       }
       bytes.add(chunk);
     }
-    return jsonDecode(utf8.decode(bytes.takeBytes())) as Map<String, dynamic>;
+    final decoded = jsonDecode(utf8.decode(bytes.takeBytes()));
+    if (decoded is! Map<String, dynamic>) {
+      throw const FormatException('接口没有返回有效清单');
+    }
+    return decoded;
+  }
+
+  Future<Map<String, dynamic>> _json(
+    String path, {
+    Map<String, String>? query,
+  }) => _jsonUri(_url(path, query));
+
+  Future<void> _probeNode(UpdateNode node) async {
+    final watch = Stopwatch()..start();
+    final cancel = CancelToken();
+    _probes.add(cancel);
+    final deadline = Timer(
+      const Duration(seconds: 12),
+      () => cancel.cancel('probe timeout'),
+    );
+    try {
+      Map<String, dynamic> envelope;
+      String? mirrorTag;
+      if (node == UpdateNode.github) {
+        envelope = await _jsonUri(
+          _url('/qqm_project/updates/stable.json'),
+          cancel: cancel,
+        );
+      } else {
+        final latest = await _jsonUri(
+          Uri.parse('$gitCodeApi/latest'),
+          cancel: cancel,
+        );
+        final tag = latest['tag_name'];
+        if (latest['prerelease'] == true ||
+            tag is! String ||
+            !RegExp(r'^v\d+\.\d+\.\d+$').hasMatch(tag)) {
+          throw const FormatException('国内节点尚未发布正式版本');
+        }
+        mirrorTag = tag;
+        envelope = await _jsonUri(
+          gitCodeAsset(tag, 'update-manifest.json'),
+          gitcode: true,
+          cancel: cancel,
+        );
+      }
+      final found = await AppRelease.verifyGitHubEnvelope(
+        envelope,
+        publicKey: publicKey,
+        platform: platform,
+        arch: arch,
+        minimumBuild: preferences.highestGitHubBuild,
+      );
+      if (found == null ||
+          (mirrorTag != null && mirrorTag != 'v${found.version}')) {
+        throw const FormatException('节点版本与签名清单不一致');
+      }
+      if (_disposed) return;
+      _nodeReleases[node] = found;
+      nodeStatuses[node] = UpdateNodeStatus(
+        node,
+        milliseconds: watch.elapsedMilliseconds,
+        build: found.build,
+        detail: '签名已验证 · v${found.version}',
+      );
+    } catch (exception) {
+      if (_disposed) return;
+      _nodeReleases.remove(node);
+      nodeStatuses[node] = UpdateNodeStatus(
+        node,
+        detail: exception is FormatException
+            ? exception.message
+            : node == UpdateNode.gitcode
+            ? '不可用或尚未同步版本'
+            : '连接失败或清单无效',
+      );
+    } finally {
+      deadline.cancel();
+      _probes.remove(cancel);
+    }
+    _changed();
+  }
+
+  Future<AppRelease> _selectStaticRelease() async {
+    _nodeReleases.clear();
+    await Future.wait([
+      _probeNode(UpdateNode.github),
+      _probeNode(UpdateNode.gitcode),
+    ]);
+    final candidates = _nodeReleases.entries.toList();
+    if (candidates.isEmpty) throw const FormatException('两条更新线路均不可用，请稍后重试');
+    final requested = preferences.node;
+    MapEntry<UpdateNode, AppRelease> choice;
+    if (requested != UpdateNode.auto) {
+      choice = candidates.firstWhere(
+        (entry) => entry.key == requested,
+        orElse: () =>
+            throw FormatException('${requested.label}不可用，请切换线路或使用自动优选'),
+      );
+    } else {
+      candidates.sort((a, b) {
+        final byBuild = b.value.build.compareTo(a.value.build);
+        if (byBuild != 0) return byBuild;
+        return nodeStatuses[a.key]!.milliseconds!.compareTo(
+          nodeStatuses[b.key]!.milliseconds!,
+        );
+      });
+      choice = candidates.first;
+    }
+    for (final candidate in candidates) {
+      if (candidate.value.build == choice.value.build &&
+          (candidate.value.sha256 != choice.value.sha256 ||
+              candidate.value.version != choice.value.version)) {
+        throw const FormatException('两节点同一构建号内容不一致，已阻止更新');
+      }
+    }
+    activeNode = choice.key;
+    return choice.value;
   }
 
   Future<void> check() async {
@@ -171,28 +356,23 @@ class AppUpdateService extends ChangeNotifier {
     _changed();
     try {
       final nonce = const Uuid().v4();
-      final envelope = usesGitHubPages
-          ? await _json('/qqm_project/updates/stable.json')
-          : await _json(
-              '/api/v1/update',
-              query: {'platform': platform, 'arch': arch, 'nonce': nonce},
-            );
-      final found = usesGitHubPages
-          ? await AppRelease.verifyGitHubEnvelope(
-              envelope,
-              publicKey: publicKey,
-              platform: platform,
-              arch: arch,
-              minimumBuild: preferences.highestGitHubBuild,
-            )
-          : await AppRelease.verifyEnvelope(
-              envelope,
-              publicKey: publicKey,
-              nonce: nonce,
-              platform: platform,
-              arch: arch,
-              server: server,
-            );
+      final AppRelease? found;
+      if (usesGitHubPages) {
+        found = await _selectStaticRelease();
+      } else {
+        final envelope = await _json(
+          '/api/v1/update',
+          query: {'platform': platform, 'arch': arch, 'nonce': nonce},
+        );
+        found = await AppRelease.verifyEnvelope(
+          envelope,
+          publicKey: publicKey,
+          nonce: nonce,
+          platform: platform,
+          arch: arch,
+          server: server,
+        );
+      }
       if (usesGitHubPages && found != null) {
         await preferences.rememberGitHubBuild(found.build);
       }
@@ -278,7 +458,7 @@ class AppUpdateService extends ChangeNotifier {
       if (!await validFile(target, selected)) {
         part = File('${target.path}.part');
         final transfer = usesGitHubPages
-            ? _downloadGitHub(selected, part, cancel)
+            ? _downloadStatic(selected, part, cancel)
             : _http.downloadUri(
                 selected.url,
                 part.path,
@@ -336,14 +516,58 @@ class AppUpdateService extends ChangeNotifier {
     }
   }
 
-  Future<void> _downloadGitHub(
+  Future<void> _downloadStatic(
     AppRelease selected,
     File part,
     CancelToken cancel,
   ) async {
+    final candidates = <UpdateNode>[activeNode ?? UpdateNode.github];
+    if (preferences.node == UpdateNode.auto) {
+      candidates.addAll(
+        _nodeReleases.entries
+            .where(
+              (entry) =>
+                  entry.key != activeNode &&
+                  entry.value.build == selected.build &&
+                  entry.value.sha256 == selected.sha256,
+            )
+            .map((entry) => entry.key),
+      );
+    }
+    for (var index = 0; index < candidates.length; index++) {
+      try {
+        await _downloadGitHub(selected, part, cancel, node: candidates[index]);
+        if (!await validFile(part, selected)) {
+          throw const FormatException('安装包大小或 SHA-256 校验失败，已阻止安装');
+        }
+        activeNode = candidates[index];
+        return;
+      } catch (_) {
+        if (index == candidates.length - 1 || cancel.isCancelled || _disposed) {
+          rethrow;
+        }
+        progress = 0;
+        activeNode = candidates[index + 1];
+        _changed();
+      }
+    }
+  }
+
+  Future<void> _downloadGitHub(
+    AppRelease selected,
+    File part,
+    CancelToken cancel, {
+    UpdateNode node = UpdateNode.github,
+  }) async {
     var url = selected.url;
     if (!AppRelease.isGitHubAsset(url, tag: 'v${selected.version}')) {
       throw const FormatException('安装包不是受信任的 GitHub Release 资源');
+    }
+    if (node == UpdateNode.gitcode) {
+      url = gitCodeAsset(
+        'v${selected.version}',
+        selected.url.pathSegments.last,
+      );
     }
     for (var hop = 0; hop < 6; hop++) {
       final response = await _http.getUri<ResponseBody>(
@@ -364,16 +588,17 @@ class AppUpdateService extends ChangeNotifier {
         final location = response.headers.value('location');
         if (location == null) throw const FormatException('安装包跳转无效');
         final next = url.resolve(location);
-        final allowed =
-            AppRelease.isGitHubAsset(next, tag: 'v${selected.version}') ||
-            (next.scheme == 'https' &&
-                next.port == 443 &&
-                next.userInfo.isEmpty &&
-                !next.hasFragment &&
-                {
-                  'release-assets.githubusercontent.com',
-                  'objects.githubusercontent.com',
-                }.contains(next.host));
+        final allowed = node == UpdateNode.gitcode
+            ? _trustedGitCodeUrl(next)
+            : AppRelease.isGitHubAsset(next, tag: 'v${selected.version}') ||
+                  (next.scheme == 'https' &&
+                      next.port == 443 &&
+                      next.userInfo.isEmpty &&
+                      !next.hasFragment &&
+                      {
+                        'release-assets.githubusercontent.com',
+                        'objects.githubusercontent.com',
+                      }.contains(next.host));
         if (!allowed) throw const FormatException('安装包跳转到不受信任的地址，已阻止下载');
         url = next;
         continue;
@@ -546,6 +771,9 @@ class AppUpdateService extends ChangeNotifier {
   void dispose() {
     _disposed = true;
     _updateTimer?.cancel();
+    for (final probe in _probes) {
+      probe.cancel('disposed');
+    }
     _downloadCancel?.cancel('disposed');
     _http.close(force: true);
     super.dispose();

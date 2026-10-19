@@ -12,6 +12,7 @@ import 'package:qqm_plugins/built_in_registry.dart';
 import 'plugins/manifest_plugin.dart';
 
 class PluginManager extends ChangeNotifier {
+  static final _botScope = Object();
   final Logger _log = Logger('PluginManager');
   final StorageService _storage;
   final List<BotPlugin> _plugins = [];
@@ -48,7 +49,7 @@ class PluginManager extends ChangeNotifier {
       help: commandHelp,
       store: () {
         final scope = jsonEncode([
-          _storage.getBotConfig().appId,
+          Zone.current[_botScope] as String? ?? _storage.activeBotAppId,
           plugin.info.id,
         ]);
         return _stores.putIfAbsent(
@@ -280,7 +281,7 @@ class PluginManager extends ChangeNotifier {
     String? onlyPluginId,
   }) async {
     final responses = <PluginResponse>[];
-    final appId = _storage.getBotConfig().appId;
+    final appId = _storage.activeBotAppId;
 
     final candidates = _plugins
         .where(
@@ -300,7 +301,7 @@ class PluginManager extends ChangeNotifier {
     for (final plugin in candidates) {
       // 等待前一个插件期间可能发生停用或卸载，执行前再检查一次。
       if (_disposed ||
-          _storage.getBotConfig().appId != appId ||
+          _storage.activeBotAppId != appId ||
           !plugin.info.isEnabled ||
           !_plugins.contains(plugin)) {
         continue;
@@ -314,6 +315,7 @@ class PluginManager extends ChangeNotifier {
       }
       if ((_active[plugin.info.id] ?? 0) >= 4) continue;
       final cooldownKey = jsonEncode([
+        appId,
         plugin.info.id,
         message.sessionId,
         message.senderId,
@@ -327,11 +329,12 @@ class PluginManager extends ChangeNotifier {
       }
       _active[plugin.info.id] = (_active[plugin.info.id] ?? 0) + 1;
       try {
-        final result = await plugin
-            .execute(message)
-            .timeout(plugin.executionTimeout);
+        final result = await runZoned(
+          () => plugin.execute(message),
+          zoneValues: {_botScope: appId},
+        ).timeout(plugin.executionTimeout);
         if (_disposed ||
-            _storage.getBotConfig().appId != appId ||
+            _storage.activeBotAppId != appId ||
             !plugin.info.isEnabled ||
             !_plugins.contains(plugin)) {
           continue;

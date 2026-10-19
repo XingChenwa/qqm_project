@@ -32,7 +32,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-      - run: node --test tool/tests/github_release.test.mjs tool/tests/github_site_sync.test.mjs
+      - run: node --test tool/tests/github_release.test.mjs tool/tests/github_site_sync.test.mjs tool/tests/gitcode_release.test.mjs
       - name: 检查标签、构建号和更新密钥
         run: node tool/github_release.mjs preflight
         env:
@@ -218,3 +218,5 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           WEBSITE_DIRECTORY: build/website
           UPDATE_SIGNING_PRIVATE_KEY: ${{ secrets.UPDATE_SIGNING_PRIVATE_KEY }}
+          # GitCode personal token is publisher-only; never a dart-define.
+          GITCODE_TOKEN: ${{ secrets.GITCODE_TOKEN }}

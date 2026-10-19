@@ -12,6 +12,10 @@ class StorageService {
   late Box<String> _pluginsBox;
   late Box<String> _pluginDataBox;
   late SharedPreferences _prefs;
+  String? _chatAppId;
+  Future<void> _configWrites = Future<void>.value();
+  String get activeBotAppId => _chatAppId ?? getBotConfig().appId;
+  void selectChatAccount(String appId) => _chatAppId = appId;
 
   Future<void> init() async {
     _messagesBox = await Hive.openBox<String>('messages');
@@ -20,6 +24,12 @@ class StorageService {
     _pluginsBox = await Hive.openBox<String>('plugins');
     _pluginDataBox = await Hive.openBox<String>('plugin_data');
     _prefs = await SharedPreferences.getInstance();
+    selectChatAccount(getBotConfig().appId);
+    // Legacy records belong ONLY to the bot configured before multi-bot support.
+    // An unknown owner stays unassigned; never attach old OpenIDs to a new bot.
+    if (!_prefs.containsKey('chat_legacy_owner')) {
+      await _prefs.setString('chat_legacy_owner', getBotConfig().appId);
+    }
 
     // 只迁移一次旧版的默认关闭状态，后续用户主动关闭不再被重置。
     final savedConfig = _prefs.getString('bot_config');
@@ -46,8 +56,61 @@ class StorageService {
     return BotConfig.fromMap(jsonDecode(json));
   }
 
-  Future<void> saveBotConfig(BotConfig config) async {
-    await _prefs.setString('bot_config', jsonEncode(config.toMap()));
+  Future<void> saveBotConfig(BotConfig config) {
+    final snapshot = BotConfig.fromMap(config.toMap());
+    final pending = _configWrites.then((_) => _persistBotConfig(snapshot));
+    _configWrites = pending.catchError((Object _) {});
+    return pending;
+  }
+
+  Future<void> _persistBotConfig(BotConfig config) async {
+    final profiles = {
+      for (final bot in getBotProfiles()) bot.appId: bot.toMap(),
+    };
+    if (config.appId.isNotEmpty) profiles[config.appId] = config.toMap();
+    if (!await _prefs.setString('bot_profiles', jsonEncode(profiles)) ||
+        !await _prefs.setString('bot_config', jsonEncode(config.toMap()))) {
+      throw StateError('无法保存机器人配置');
+    }
+  }
+
+  List<BotConfig> getBotProfiles() {
+    final saved = _prefs.getString('bot_profiles');
+    final profiles = saved == null
+        ? <String, dynamic>{}
+        : Map<String, dynamic>.from(jsonDecode(saved) as Map);
+    final active = getBotConfig();
+    if (active.appId.isNotEmpty) profiles[active.appId] = active.toMap();
+    return profiles.values
+        .map((value) => BotConfig.fromMap(Map<String, dynamic>.from(value)))
+        .toList();
+  }
+
+  String get _chatPrefix =>
+      'bot:${base64Url.encode(utf8.encode(_chatAppId ?? getBotConfig().appId))}:';
+  bool get _ownsLegacy =>
+      (_chatAppId ?? getBotConfig().appId).isNotEmpty &&
+      _prefs.getString('chat_legacy_owner') ==
+          (_chatAppId ?? getBotConfig().appId);
+  String _key(String id) => '$_chatPrefix$id';
+  String? _read(Box<String> box, String id) =>
+      box.get(_key(id)) ??
+      (_ownsLegacy && !id.startsWith('bot:') ? box.get(id) : null);
+  Iterable<String> _chatValues(Box<String> box) sync* {
+    final prefix = _chatPrefix;
+    // New scoped records override a legacy record with the same message ID.
+    if (_ownsLegacy) {
+      for (final key in box.keys.where(
+        (key) => !key.toString().startsWith('bot:'),
+      )) {
+        if (!box.containsKey('$prefix$key')) yield box.get(key)!;
+      }
+    }
+    for (final key in box.keys.where(
+      (key) => key.toString().startsWith(prefix),
+    )) {
+      yield box.get(key)!;
+    }
   }
 
   // --- Theme ---
@@ -59,15 +122,15 @@ class StorageService {
 
   // --- Messages ---
   Future<void> saveMessage(MessageModel message) async {
-    await _messagesBox.put(message.id, jsonEncode(message.toMap()));
+    await _messagesBox.put(_key(message.id), jsonEncode(message.toMap()));
   }
 
   Future<void> updateMessage(MessageModel message) async {
-    await _messagesBox.put(message.id, jsonEncode(message.toMap()));
+    await _messagesBox.put(_key(message.id), jsonEncode(message.toMap()));
   }
 
   List<MessageModel> getMessages(String sessionId) {
-    return _messagesBox.values
+    return _chatValues(_messagesBox)
         .map((json) => MessageModel.fromMap(jsonDecode(json)))
         .where((m) => m.sessionId == sessionId)
         .toList()
@@ -75,33 +138,37 @@ class StorageService {
   }
 
   MessageModel? getMessageById(String messageId) {
-    final json = _messagesBox.get(messageId);
+    final json = _read(_messagesBox, messageId);
     if (json == null) return null;
     return MessageModel.fromMap(jsonDecode(json));
   }
 
   Future<void> markMessageRead(String messageId) async {
-    final json = _messagesBox.get(messageId);
+    final json = _read(_messagesBox, messageId);
     if (json != null) {
       final msg = MessageModel.fromMap(jsonDecode(json));
       msg.isRead = true;
-      await _messagesBox.put(messageId, jsonEncode(msg.toMap()));
+      await _messagesBox.put(_key(messageId), jsonEncode(msg.toMap()));
     }
   }
 
   Future<void> deleteMessage(String messageId) async {
-    await _messagesBox.delete(messageId);
+    final keys = [
+      _key(messageId),
+      if (_ownsLegacy && !messageId.startsWith('bot:')) messageId,
+    ];
+    await _messagesBox.deleteAll(keys);
   }
 
   // --- Chat Sessions ---
   Future<void> saveSession(ChatSession session) async {
-    await _sessionsBox.put(session.id, jsonEncode(session.toMap()));
+    await _sessionsBox.put(_key(session.id), jsonEncode(session.toMap()));
   }
 
   List<ChatSession> getSessions() {
-    return _sessionsBox.values
-        .map((json) => ChatSession.fromMap(jsonDecode(json)))
-        .toList()
+    return _chatValues(
+        _sessionsBox,
+      ).map((json) => ChatSession.fromMap(jsonDecode(json))).toList()
       ..sort((a, b) => b.lastMessageTime.compareTo(a.lastMessageTime));
   }
 
@@ -111,12 +178,12 @@ class StorageService {
     DateTime time, {
     bool incrementUnread = true,
   }) async {
-    final json = _sessionsBox.get(sessionId);
+    final json = _read(_sessionsBox, sessionId);
     if (json != null) {
       final session = ChatSession.fromMap(jsonDecode(json));
       if (incrementUnread) session.unreadCount++;
       await _sessionsBox.put(
-        sessionId,
+        _key(sessionId),
         jsonEncode({
           ...session.toMap(),
           'lastMessage': lastMessage,
@@ -128,11 +195,11 @@ class StorageService {
   }
 
   Future<void> markSessionRead(String sessionId) async {
-    final json = _sessionsBox.get(sessionId);
+    final json = _read(_sessionsBox, sessionId);
     if (json != null) {
       final session = ChatSession.fromMap(jsonDecode(json));
       session.unreadCount = 0;
-      await _sessionsBox.put(sessionId, jsonEncode(session.toMap()));
+      await _sessionsBox.put(_key(sessionId), jsonEncode(session.toMap()));
     }
   }
 

@@ -146,7 +146,9 @@ void main() {
     await updates.check();
     expect(updates.phase, UpdatePhase.available, reason: updates.error);
     expect(preferences.highestGitHubBuild, 18);
-    final request = adapter.requests.single;
+    final request = adapter.requests.singleWhere(
+      (request) => request.uri.host == 'xingchenwa.github.io',
+    );
     expect(
       request.uri.toString(),
       'https://xingchenwa.github.io/qqm_project/updates/stable.json',
@@ -206,7 +208,10 @@ void main() {
         allowed ? UpdatePhase.ready : UpdatePhase.failed,
         reason: updates.error,
       );
-      expect(adapter.requests.length, allowed ? 3 : 2);
+      expect(
+        adapter.requests.where((r) => r.uri.host != 'api.gitcode.com').length,
+        allowed ? 3 : 2,
+      );
       if (allowed) {
         expect(
           await AppUpdateService.validFile(
@@ -278,11 +283,204 @@ void main() {
         (request) =>
             request.method == 'GET' &&
             request.data == null &&
-            request.uri.path.endsWith('/updates/stable.json'),
+            (request.uri.path.endsWith('/updates/stable.json') ||
+                request.uri ==
+                    Uri.parse('${AppUpdateService.gitCodeApi}/latest')),
       ),
       isTrue,
     );
-    expect(adapter.requests.length, 1);
+    expect(adapter.requests.length, 2);
+  });
+
+  for (final mode in [UpdateNode.auto, UpdateNode.github, UpdateNode.gitcode]) {
+    test('双线路测速和持久化选择 ${mode.name}', () async {
+      final envelope = await sign(manifest());
+      await preferences.setNode(mode);
+      final adapter = UpdateAdapter((request) async {
+        if (request.uri.host == 'xingchenwa.github.io') {
+          await Future<void>.delayed(const Duration(milliseconds: 60));
+        }
+        return ResponseBody.fromString(
+          jsonEncode(
+            request.uri.path.endsWith('/latest')
+                ? {'tag_name': 'v1.3.7', 'prerelease': false}
+                : envelope,
+          ),
+          200,
+        );
+      });
+      final updates = service(adapter);
+      await updates.check();
+      expect(updates.phase, UpdatePhase.available, reason: updates.error);
+      expect(
+        updates.nodeStatuses.values.every((node) => node.available),
+        isTrue,
+      );
+      expect(
+        updates.activeNode,
+        mode == UpdateNode.auto ? UpdateNode.gitcode : mode,
+      );
+      expect(UpdatePreferences(preferences.preferences).node, mode);
+      expect(
+        adapter.requests.every(
+          (request) =>
+              !request.headers.containsKey('Authorization') &&
+              request.data == null,
+        ),
+        isTrue,
+      );
+      expect(preferences.highestGitHubBuild, 18);
+    });
+  }
+
+  test('自动模式优先版本完整度，不为了快选择旧版国内镜像', () async {
+    final newest = await sign(manifest(build: 20));
+    final older = await sign(manifest(build: 19));
+    final updates = service(
+      UpdateAdapter((request) async {
+        if (request.uri.host == 'xingchenwa.github.io') {
+          await Future<void>.delayed(const Duration(milliseconds: 30));
+          return ResponseBody.fromString(jsonEncode(newest), 200);
+        }
+        return ResponseBody.fromString(
+          jsonEncode(
+            request.uri.path.endsWith('/latest')
+                ? {'tag_name': 'v1.3.7', 'prerelease': false}
+                : older,
+          ),
+          200,
+        );
+      }),
+    );
+    await updates.check();
+    expect(updates.activeNode, UpdateNode.github);
+    expect(updates.release!.build, 20);
+  });
+
+  test('GitHub 不可达时，GitCode 的原签名清单仍可更新；跨节点拒绝回退', () async {
+    var envelope = await sign(manifest(build: 20));
+    final updates = service(
+      UpdateAdapter((request) async {
+        if (request.uri.host == 'xingchenwa.github.io') {
+          return ResponseBody.fromString('', 503);
+        }
+        return ResponseBody.fromString(
+          jsonEncode(
+            request.uri.path.endsWith('/latest')
+                ? {'tag_name': 'v1.3.7'}
+                : envelope,
+          ),
+          200,
+        );
+      }),
+    );
+    await updates.check();
+    expect(updates.activeNode, UpdateNode.gitcode);
+    expect(updates.release!.build, 20);
+    envelope = await sign(manifest(build: 19));
+    await updates.check();
+    expect(updates.phase, UpdatePhase.failed);
+    expect(preferences.highestGitHubBuild, 20);
+  });
+
+  test('同构建签名内容冲突时拒绝选择任一节点', () async {
+    final first = manifest();
+    final second = manifest();
+    second['releases'][0]['sha256'] = 'a' * 64;
+    final github = await sign(first), gitcode = await sign(second);
+    final updates = service(
+      UpdateAdapter(
+        (request) async => ResponseBody.fromString(
+          jsonEncode(
+            request.uri.host == 'xingchenwa.github.io'
+                ? github
+                : request.uri.path.endsWith('/latest')
+                ? {'tag_name': 'v1.3.7'}
+                : gitcode,
+          ),
+          200,
+        ),
+      ),
+    );
+    await updates.check();
+    expect(updates.phase, UpdatePhase.failed);
+    expect(updates.error, contains('内容不一致'));
+  });
+
+  test('自动下载失败才切到同版同 SHA 的备用线路，手动不擅自切换', () async {
+    final directory = await Directory.systemTemp.createTemp(
+      'qqm-route-download-',
+    );
+    addTearDown(() => directory.delete(recursive: true));
+    final envelope = await sign(manifest());
+    final adapter = UpdateAdapter((request) async {
+      if (request.uri.host == 'xingchenwa.github.io') {
+        await Future<void>.delayed(const Duration(milliseconds: 40));
+        return ResponseBody.fromString(jsonEncode(envelope), 200);
+      }
+      if (request.uri.path.endsWith('/latest')) {
+        return ResponseBody.fromString('{"tag_name":"v1.3.7"}', 200);
+      }
+      if (request.uri.path.contains('update-manifest.json')) {
+        return ResponseBody.fromString(jsonEncode(envelope), 200);
+      }
+      if (request.uri.host == 'api.gitcode.com') {
+        return ResponseBody.fromString('', 503);
+      }
+      return ResponseBody.fromBytes(package, 200);
+    });
+    final updates = service(adapter, directory: directory);
+    await updates.check();
+    expect(updates.activeNode, UpdateNode.gitcode);
+    await updates.download();
+    expect(updates.phase, UpdatePhase.ready, reason: updates.error);
+    expect(updates.activeNode, UpdateNode.github);
+    await updates.setNode(UpdateNode.gitcode);
+    await updates.download();
+    expect(
+      adapter.requests.where((r) => r.uri.host == 'github.com'),
+      hasLength(1),
+    );
+  });
+
+  test('GitCode 跳转到本地地址被拒绝，且从不携带发布令牌', () async {
+    final directory = await Directory.systemTemp.createTemp(
+      'qqm-route-reject-',
+    );
+    addTearDown(() => directory.delete(recursive: true));
+    await preferences.setNode(UpdateNode.gitcode);
+    final envelope = await sign(manifest());
+    final adapter = UpdateAdapter((request) async {
+      if (request.uri.path.endsWith('/latest')) {
+        return ResponseBody.fromString('{"tag_name":"v1.3.7"}', 200);
+      }
+      if (request.uri.path.endsWith('stable.json') ||
+          request.uri.path.contains('update-manifest.json')) {
+        return ResponseBody.fromString(jsonEncode(envelope), 200);
+      }
+      return ResponseBody.fromString(
+        '',
+        302,
+        headers: {
+          'location': ['https://127.0.0.1/evil.exe'],
+        },
+      );
+    });
+    final updates = service(adapter, directory: directory);
+    await updates.check();
+    await updates.download();
+    expect(updates.phase, UpdatePhase.failed);
+    expect(updates.error, contains('不受信任'));
+    expect(
+      adapter.requests.any(
+        (r) => r.uri.host == '127.0.0.1' || r.uri.host == 'github.com',
+      ),
+      isFalse,
+    );
+    expect(
+      adapter.requests.every((r) => !r.headers.containsKey('Authorization')),
+      isTrue,
+    );
   });
   test('GitHub Actions YAML 可解析，发布任务受四端依赖与 Pages 权限保护', () {
     final yaml = loadYaml(

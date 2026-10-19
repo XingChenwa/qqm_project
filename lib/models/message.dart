@@ -92,6 +92,7 @@ class MessageModel {
   });
 
   MessageModel copyWith({
+    Map<String, dynamic>? extra,
     bool? isRead,
     String? content,
     bool? isRecalled,
@@ -116,7 +117,7 @@ class MessageModel {
       isRecalled: isRecalled ?? this.isRecalled,
       imageUrl: imageUrl,
       markdownContent: markdownContent,
-      extra: extra,
+      extra: extra ?? this.extra,
     );
   }
 

@@ -4,6 +4,7 @@ import {execFileSync} from 'node:child_process';
 import {join, resolve} from 'node:path';
 import {tmpdir} from 'node:os';
 import {repository, pagesUrl, websiteBranch, manifestName, base64, signingKeys, readVersion, sha256, assetDefinitions, signManifest, verifyManifest} from './github_release_core.mjs';
+import {mirrorRelease} from './gitcode_release.mjs';
 import {syncWebsiteMetadata} from './github_site_sync.mjs';
 
 const command = process.argv[2];
@@ -134,6 +135,12 @@ try {
       } else gh('release','upload',info.tag,file.file,'--repo',repository);
     }
     await syncAndBuildWebsite({data,envelope});
+    if (process.env.GITCODE_TOKEN) {
+      await mirrorRelease({token:process.env.GITCODE_TOKEN,envelope,publicKey,files});
+      console.log('GitCode 国内节点已同步并完成公共下载校验。');
+    } else {
+      console.warn('::warning::尚未配置 GITCODE_TOKEN，本次仅发布 GitHub 国际线路。');
+    }
     console.log('四端安装包与签名清单已发布到 '+repository+' '+info.tag+'。');
   } else if(command==='pages') {
     await syncAndBuildWebsite(await newestSignedRelease());

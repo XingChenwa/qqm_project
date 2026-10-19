@@ -43,6 +43,20 @@ class BotClient extends ChangeNotifier {
   int _fullGroupMessageCount = 0;
   Future<String?>? _tokenRequest;
   int _configRevision = 0;
+  int _accountEpoch = 0;
+  Future<void> _configWrites = Future<void>.value();
+  int get accountEpoch => _accountEpoch;
+  List<BotConfig> get botProfiles => _storage.getBotProfiles();
+
+  Future<void> switchBot(String appId) async {
+    final selected = botProfiles.where((bot) => bot.appId == appId).firstOrNull;
+    if (selected == null) throw StateError('机器人配置不存在');
+    if (selected.appId == _config.appId) return;
+    final reconnect = isConnected || isConnecting;
+    await updateConfig(selected);
+    if (reconnect && !_disposed && _config.appId == appId) await connect();
+  }
+
   Timer? _tokenRefreshTimer;
   String _lastSendError = '';
   bool _disposed = false;
@@ -120,7 +134,10 @@ class BotClient extends ChangeNotifier {
   int get heartbeatIntervalMs => _heartbeatIntervalMs;
   int get fullGroupMessageCount => _fullGroupMessageCount;
   bool shouldAutoRespondTo(MessageModel message) =>
-      !message.isBotAuthor && !message.isRecalled;
+      _ownsMessage(message) && !message.isBotAuthor && !message.isRecalled;
+  bool _ownsMessage(MessageModel message) =>
+      message.extra?['botAppId'] == null ||
+      message.extra?['botAppId'] == _config.appId;
   String get botDisplayName => _botName.isNotEmpty ? _botName : '未获取机器人资料';
 
   /// Get a valid access token, refreshing if expired.
@@ -171,6 +188,7 @@ class BotClient extends ChangeNotifier {
     _config.tokenExpiresAt =
         DateTime.now().millisecondsSinceEpoch ~/ 1000 + data.expiresIn;
     await _storage.saveBotConfig(_config);
+    if (_disposed || requestedRevision != _configRevision) return null;
     _wsService.updateAccessToken(data.accessToken);
     _scheduleTokenRefresh();
     _addLog('access_token 获取成功 (有效期 ${data.expiresIn}秒)');
@@ -202,6 +220,7 @@ class BotClient extends ChangeNotifier {
 
   void _loadConfig() {
     _config = _storage.getBotConfig();
+    _storage.selectChatAccount(_config.appId);
   }
 
   void _addLog(String message) {
@@ -426,6 +445,7 @@ class BotClient extends ChangeNotifier {
         messageType: 0,
         timestamp: DateTime.now(),
         extra: {
+          'botAppId': _config.appId,
           'isGroup': group.isNotEmpty,
           'pluginEventId': replyEventId,
           'callbackData': callback,
@@ -438,14 +458,15 @@ class BotClient extends ChangeNotifier {
     String interactionId,
     Map<String, dynamic> data,
   ) async {
+    final epoch = _accountEpoch;
     final token = await _getAccessToken();
-    if (token == null || _disposed) return;
+    if (token == null || _disposed || epoch != _accountEpoch) return;
     final result = await _apiService.acknowledgeInteraction(
       baseUrl: _config.resolvedApiBaseUrl,
       accessToken: token,
       interactionId: interactionId,
     );
-    if (_disposed) return;
+    if (_disposed || epoch != _accountEpoch) return;
     if (!result.isSuccess) _acknowledgedInteractions.remove(interactionId);
     final resolved = data['data'] is Map ? data['data']['resolved'] : null;
     _addLog(
@@ -942,6 +963,10 @@ class BotClient extends ChangeNotifier {
 
   void _handleIncomingMessage(Map<String, dynamic> data) {
     if (_disposed) return;
+    if (data['_transportGeneration'] != null &&
+        data['_transportGeneration'] != _wsService.transportGeneration) {
+      return;
+    }
     if (data['isRecallEvent'] == true) {
       _handleRecallEvent(data);
       return;
@@ -1014,7 +1039,7 @@ class BotClient extends ChangeNotifier {
       isFromBot: false,
       imageUrl: imageUrl,
       markdownContent: markdownContent,
-      extra: data,
+      extra: {...data, 'botAppId': _config.appId},
     );
 
     final existing = _messages.where((m) => m.id == messageId).firstOrNull;
@@ -1119,18 +1144,20 @@ class BotClient extends ChangeNotifier {
     final previous =
         _pendingPluginDispatches[message.id] ?? Future<void>.value();
     final appId = _config.appId;
+    final epoch = _accountEpoch;
     late final Future<void> pending;
     pending = previous
         .then((_) async {
           if (_disposed ||
               _config.appId != appId ||
+              epoch != _accountEpoch ||
               _autoDispatchedMessageIds.contains(message.id)) {
             return;
           }
           // The host returns false when a full-group event did not match a plugin.
           // A later @ delivery of the same message can then run a mention-only rule.
           final handled = await onMessageReceived?.call(message);
-          if (handled != false) {
+          if (handled != false && epoch == _accountEpoch && !_disposed) {
             if (_autoDispatchedMessageIds.length >= 4000) {
               _autoDispatchedMessageIds.remove(_autoDispatchedMessageIds.first);
             }
@@ -1149,6 +1176,7 @@ class BotClient extends ChangeNotifier {
   }
 
   Future<void> _handleRecallEvent(Map<String, dynamic> data) async {
+    final epoch = _accountEpoch;
     final messageId = data['id'] as String? ?? '';
     final sessionId = data['sessionId'] as String? ?? '';
     final senderId = data['senderId'] as String? ?? '';
@@ -1187,6 +1215,7 @@ class BotClient extends ChangeNotifier {
       _messages.add(recalled);
     }
     await _storage.updateMessage(recalled);
+    if (_disposed || epoch != _accountEpoch) return;
 
     final targetSessionId = recalled.sessionId.isNotEmpty
         ? recalled.sessionId
@@ -1237,13 +1266,14 @@ class BotClient extends ChangeNotifier {
     bool isGroup = false,
     MessageModel? replyTo,
   }) async {
+    final epoch = _accountEpoch;
     final error = message.validate(isGroup: isGroup);
     if (error != null) {
       _setSendError(error);
       return false;
     }
     final token = await _prepareSend(targetId);
-    if (token == null) return false;
+    if (token == null || _disposed || epoch != _accountEpoch) return false;
     final context = _configuredContext(
       targetId,
       message.options,
@@ -1263,6 +1293,7 @@ class BotClient extends ChangeNotifier {
       msgSeq: context.sequence,
       referenceId: context.referenceId,
     );
+    if (_disposed || epoch != _accountEpoch) return false;
     if (!result.isSuccess) {
       _setSendError(result.error ?? '消息发送失败');
       return false;
@@ -1309,6 +1340,10 @@ class BotClient extends ChangeNotifier {
     MessageModel? replyTo,
     required bool reserve,
   }) {
+    if (replyTo != null && !_ownsMessage(replyTo)) {
+      _setSendError('引用消息不属于当前 AppID，请重新选择');
+      return null;
+    }
     var messageId = '';
     var eventId = '';
     int? sequence;
@@ -1392,8 +1427,9 @@ class BotClient extends ChangeNotifier {
     bool isGroup = false,
     MessageModel? replyTo,
   }) async {
+    final epoch = _accountEpoch;
     final token = await _prepareSend(targetId);
-    if (token == null) return false;
+    if (token == null || _disposed || epoch != _accountEpoch) return false;
     final reply = _replyContext(targetId, isGroup, replyTo);
     if (reply == null) return false;
     final result = await _apiService.sendQQMessage(
@@ -1405,6 +1441,7 @@ class BotClient extends ChangeNotifier {
       msgId: reply.messageId,
       msgSeq: reply.sequence,
     );
+    if (_disposed || epoch != _accountEpoch) return false;
     if (result.isSuccess) {
       _saveSentMessage(
         targetId,
@@ -1432,8 +1469,9 @@ class BotClient extends ChangeNotifier {
     String? templateId,
     List<Map<String, String>>? templateParams,
   }) async {
+    final epoch = _accountEpoch;
     final token = await _prepareSend(targetId);
-    if (token == null) return false;
+    if (token == null || _disposed || epoch != _accountEpoch) return false;
     final reply = _replyContext(targetId, isGroup, replyTo);
     if (reply == null) return false;
     final effectiveTemplateId = useTemplate
@@ -1454,6 +1492,7 @@ class BotClient extends ChangeNotifier {
       msgId: reply.messageId,
       msgSeq: reply.sequence,
     );
+    if (_disposed || epoch != _accountEpoch) return false;
     if (result.isSuccess) {
       _saveSentMessage(
         targetId,
@@ -1489,8 +1528,9 @@ class BotClient extends ChangeNotifier {
     bool isGroup = false,
     MessageModel? replyTo,
   }) async {
+    final epoch = _accountEpoch;
     final token = await _prepareSend(targetId);
-    if (token == null) return false;
+    if (token == null || _disposed || epoch != _accountEpoch) return false;
     final reply = _replyContext(targetId, isGroup, replyTo);
     if (reply == null) return false;
     final result = await _apiService.sendQQImage(
@@ -1502,6 +1542,7 @@ class BotClient extends ChangeNotifier {
       msgId: reply.messageId,
       msgSeq: reply.sequence,
     );
+    if (_disposed || epoch != _accountEpoch) return false;
     if (result.isSuccess) {
       _saveSentMessage(
         targetId,
@@ -1572,7 +1613,10 @@ class BotClient extends ChangeNotifier {
       isRead: true,
       imageUrl: imageUrl,
       markdownContent: markdown,
-      extra: extra ?? {'localOnly': true},
+      extra: {
+        ...(extra ?? {'localOnly': true}),
+        'botAppId': _config.appId,
+      },
     );
     _messages.add(msg);
     _storage.saveMessage(msg);
@@ -1588,6 +1632,7 @@ class BotClient extends ChangeNotifier {
 
   bool canRecallMessage(MessageModel message) {
     return message.isFromBot &&
+        _ownsMessage(message) &&
         !message.isRecalled &&
         message.extra?['localOnly'] != true &&
         DateTime.now().difference(message.timestamp) <=
@@ -1595,12 +1640,13 @@ class BotClient extends ChangeNotifier {
   }
 
   Future<bool> recallMessage(MessageModel message) async {
+    final epoch = _accountEpoch;
     if (!canRecallMessage(message)) {
       _addLog('撤回失败: 只能撤回机器人 2 分钟内发送的消息');
       return false;
     }
     final token = await _prepareSend(message.sessionId);
-    if (token == null) return false;
+    if (token == null || _disposed || epoch != _accountEpoch) return false;
     ChatSession? session;
     for (final item in _sessions) {
       if (item.id == message.sessionId) {
@@ -1615,6 +1661,7 @@ class BotClient extends ChangeNotifier {
       messageId: message.id,
       isGroup: session?.sessionType == 1,
     );
+    if (_disposed || epoch != _accountEpoch) return false;
     if (result.isSuccess) {
       final recalled = message.copyWith(isRecalled: true);
       final index = _messages.indexWhere((m) => m.id == message.id);
@@ -1624,6 +1671,7 @@ class BotClient extends ChangeNotifier {
         _messages.add(recalled);
       }
       await _storage.updateMessage(recalled);
+      if (_disposed || epoch != _accountEpoch) return false;
       await _storage.updateSessionLastMessage(
         message.sessionId,
         '[你撤回了一条消息]',
@@ -1665,7 +1713,9 @@ class BotClient extends ChangeNotifier {
       _setSendError('会话 OpenID 不能为空');
       return null;
     }
+    final epoch = _accountEpoch;
     final token = await _getAccessToken();
+    if (_disposed || epoch != _accountEpoch) return null;
     if (token == null) {
       _setSendError(
         _connectionError.isEmpty ? '未获取到访问凭证，请先配置并连接机器人' : _connectionError,
@@ -1682,6 +1732,10 @@ class BotClient extends ChangeNotifier {
   }) {
     final history = getMessagesForSession(sessionId);
     MessageModel? inbound = replyTo;
+    if (inbound != null && !_ownsMessage(inbound)) {
+      _setSendError('回复消息不属于当前 AppID，请重新选择');
+      return null;
+    }
     if (inbound != null &&
         (inbound.isFromBot ||
             inbound.isRecalled ||
@@ -1731,7 +1785,13 @@ class BotClient extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> updateConfig(BotConfig newConfig) async {
+  Future<void> updateConfig(BotConfig newConfig) {
+    final pending = _configWrites.then((_) => _applyConfig(newConfig));
+    _configWrites = pending.catchError((Object _) {});
+    return pending;
+  }
+
+  Future<void> _applyConfig(BotConfig newConfig) async {
     _configRevision++;
     final nicknameSettingChanged =
         _config.enableOiapiNickname != newConfig.enableOiapiNickname;
@@ -1747,7 +1807,23 @@ class BotClient extends ChangeNotifier {
     }
     // Do not disconnect or replace working credentials if persistence fails.
     await _storage.saveBotConfig(newConfig);
+    final accountChanged = _config.appId != newConfig.appId;
     if (credentialsChanged) {
+      _accountEpoch++;
+      _messages.clear();
+      _sessions.clear();
+      _lastInboundMessageIds.clear();
+      _replySequences.clear();
+      _replyEvents.clear();
+      _acknowledgedInteractions.clear();
+      _dispatchedInteractions.clear();
+      _autoDispatchedMessageIds.clear();
+      _pendingPluginDispatches.clear();
+      _fullGroupMessageCount = 0;
+      _lastEventType = '';
+      _lastEventAt = null;
+      _lastHeartbeatAckAt = null;
+      _lastSendError = '';
       _resetProfileLookups();
       disconnect();
       _tokenRequest = null;
@@ -1755,8 +1831,9 @@ class BotClient extends ChangeNotifier {
       _resetNicknameLookups();
     }
     _config = newConfig;
+    _storage.selectChatAccount(newConfig.appId);
     if (credentialsChanged) _loadSessions();
-    _addLog('配置已更新');
+    _addLog(accountChanged ? '已切换机器人 AppID：${newConfig.appId}' : '配置已更新');
     notifyListeners();
   }
 
@@ -1779,6 +1856,11 @@ class BotClient extends ChangeNotifier {
   }
 
   MessageModel _withUserAvatar(MessageModel message) {
+    if (message.extra?['botAppId'] == null) {
+      message = message.copyWith(
+        extra: {...?message.extra, 'botAppId': _config.appId},
+      );
+    }
     if (message.isBotAuthor) return message;
     final avatar = userProfileAvatar(_config.appId, message.senderId, [
       message.senderAvatarUrl,
@@ -1802,11 +1884,13 @@ class BotClient extends ChangeNotifier {
   }
 
   Future<void> markSessionRead(String sessionId) async {
+    final epoch = _accountEpoch;
     final session = _sessions
         .where((value) => value.id == sessionId)
         .firstOrNull;
     if (session != null) _putSession(session.copyWith(unreadCount: 0));
     await _storage.markSessionRead(sessionId);
+    if (_disposed || epoch != _accountEpoch) return;
     _loadSessions();
   }
 
@@ -1815,6 +1899,7 @@ class BotClient extends ChangeNotifier {
     required bool isGroup,
     String name = '',
   }) async {
+    final epoch = _accountEpoch;
     final id = openId.trim();
     if (id.isEmpty || _sessions.any((s) => s.id == id)) return;
     await _storage.saveSession(
@@ -1827,7 +1912,7 @@ class BotClient extends ChangeNotifier {
         lastMessageTime: DateTime.now(),
       ),
     );
-    if (_disposed) return;
+    if (_disposed || epoch != _accountEpoch) return;
     _loadSessions();
     unawaited(refreshSessionProfile(id));
   }
@@ -1844,6 +1929,8 @@ class BotClient extends ChangeNotifier {
   }
 
   void resetLocalState() {
+    _accountEpoch++;
+    _configRevision++;
     _resetProfileLookups();
     _messages.clear();
     _lastInboundMessageIds.clear();
