@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="description" content="QQ机器人管理器 Linux 网页版：Ubuntu 22.04 无桌面部署、23336 端口访问、HTTPS 反向代理与数据备份。"><title>Linux 网页版 · QQ机器人管理器</title><link rel="icon" href="assets/logo.png"><link rel="stylesheet" href="assets/site.css?v=2"><script src="assets/docs.js?v=2" defer></script></head>
+<body class="docs-page">
+<a class="skip-link" href="#guide">跳到正文</a>
+<header class="site-header wrap"><a class="brand" href="./"><img src="assets/logo.png" width="38" height="38" alt=""><span>QQ机器人管理器<small>BOT MANAGER</small></span></a><nav aria-label="主导航"><a href="./#downloads">下载</a><a href="plugins.html">插件开发</a><a class="nav-github" href="https://github.com/XingChenwa/qqm_project">GitHub ↗</a></nav></header>
+<div class="docs-heading wrap"><p class="eyebrow">UBUNTU 22.04 / WEB CONSOLE</p><h1>在服务器，让机器人持续在线。</h1><p>无需图形桌面。用电脑或手机浏览器，通过 23336 端口管理聊天、Markdown、插件和日志。</p><div class="doc-meta"><a href="./#linux-download">下载服务包 ↓</a><a href="https://github.com/XingChenwa/qqm_project/blob/main/server/README.md">完整部署说明 ↗</a></div></div>
+<div class="docs-layout wrap"><aside class="docs-toc"><nav aria-label="本页目录"><a href="#start">解压与启动</a><a href="#access">安全访问</a><a href="#service">开机运行</a><a href="#update">更新与备份</a><a href="#features">功能说明</a></nav></aside>
+<article id="guide" class="docs-article">
+<h2 id="start">1. 解压与启动</h2><p>当前支持 <strong>Ubuntu 22.04 x86_64</strong>，不是 ARM 包。从同一版本的 GitHub Release 下载 Linux <code>.tar.gz</code> 和 <code>.sha256</code> 文件，放在同一目录。</p>
+<div class="code-example"><pre><code>sha256sum -c qqbotmanager-linux-v1.3.8-beta.5-build24-web-x64.tar.gz.sha256
+tar -xzf qqbotmanager-linux-v1.3.8-beta.5-build24-web-x64.tar.gz
+cd qqbotmanager
+./start.sh</code></pre></div><p>默认监听 <code>127.0.0.1:23336</code>，仅服务器本机可访问。首次启动会生成 <code>data/admin-password.txt</code>；在服务器终端查看里面的管理密码，然后登录网页。不要在这里填写个人 QQ 密码。</p>
+<h2 id="access">2. 从电脑和手机安全访问</h2><h3>推荐：HTTPS 反向代理</h3><p>使用宝塔或 Nginx 将自己的 HTTPS 域名代理到 <code>http://127.0.0.1:23336</code>。保留 Host 请求头，并在启动参数添加 <code>--public-url https://你的域名</code>。应用会校验请求来源，为登录 Cookie 启用 Secure。</p><div class="code-example"><pre><code>./start.sh --public-url https://bot.example.com</code></pre></div><p>反向代理保留 <code>proxy_set_header Host $http_host;</code>，云防火墙和系统防火墙不必开放 23336。<strong>不要把 data 或 /var/lib/qqbotmanager 设为静态网站根目录。</strong></p>
+<h3>可选：SSH 隧道</h3><div class="code-example"><pre><code>ssh -L 23336:127.0.0.1:23336 用户@服务器IP</code></pre></div><p>随后在电脑打开 <code>http://127.0.0.1:23336</code>。</p><h3>受信局域网临时测试</h3><p>运行 <code>./start.sh --host 0.0.0.0</code>，访问 <code>http://服务器局域网IP:23336</code>。HTTP 不加密，不要用于公网。界面会按电脑、手机的屏幕自动适配。</p>
+<h2 id="service">3. 开机运行</h2><p>将程序文件放到 <code>/opt/qqbotmanager</code>，以专用低权限用户运行。程序包附带 <code>qqbotmanager.service</code>，使用前确认路径与本机环境一致。</p><div class="code-example"><pre><code>useradd --system --home-dir /var/lib/qqbotmanager --shell /usr/sbin/nologin qqbotmanager
+cp /opt/qqbotmanager/qqbotmanager.service /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable --now qqbotmanager
+systemctl status qqbotmanager</code></pre></div><p>已有同名用户时跳过创建命令。数据目录为 <code>/var/lib/qqbotmanager</code>，密码文件也在此目录。HTTPS 反代时，在 service 的 ExecStart 尾部追加 public-url 参数后重载、重启服务。关闭浏览器不会停止机器人。</p>
+<h2 id="update">4. 更新与备份</h2><p>Linux 版是独立服务包，目前不参与 Windows 等四端客户端的自动替换流程。下载新版本，停止服务，备份私有数据目录，替换程序及随附资源，保留原有数据，再启动服务。不要将新的空数据目录覆盖旧记录。</p><p>聊天、机器人配置、自定义插件和插件数据保存在服务器；不会自动与手机或桌面客户端同步。私有目录含凭据，请限制访问并妥善备份。</p>
+<h2 id="features">5. 网页工作台</h2><ul><li>通过 AppID 和机器人密钥接入，支持多机器人切换与聊天隔离。</li><li>文字、Markdown 编辑与实时预览、HTTPS 图片链接发送；新消息不抢阅读位置，发送成功后定位最新。</li><li>七个随附插件与第三方使用同一加载器，可导入 JSON/YAML/脚本定义、编辑工作区文件、保存并安装；默认关闭。</li><li>日志按状态着色，支持全部复制和导出 TXT/LOG；支持浅色、深色及跟随系统。</li><li>IPv4 诊断显示的是服务器的公网出口，不是浏览网页的手机或电脑。</li><li>群聊使用本地群组图标，个人头像仍可展示。网页内嵌链接保留访问设备的浏览器标识；第三方网站禁止嵌入时可复制链接。</li></ul><p>默认展示会话最近 500 条消息，更早记录仍保留在服务器本地。QQ 官方平台的接口权限、IP 白名单与消息额度限制仍适用。</p>
+</article></div><footer class="wrap"><span>QQ机器人管理器 · 学习交流项目</span><span><a href="./">项目首页</a> · <a href="plugins.html">插件手册</a> · <a href="https://github.com/XingChenwa/qqm_project">欢迎 Star ↗</a></span></footer>
+</body></html>

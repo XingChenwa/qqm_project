@@ -58,3 +58,24 @@ async function load() {
   } catch (error) { fallback(error.message || '读取版本失败，请稍后重试。'); }
 }
 load();
+
+async function loadLinux() {
+  try {
+    const candidates = await Promise.all(['releases.json','releases-beta.json'].map(async file => {
+      try { const response = await fetch(file,{cache:'no-store'}); return response.ok ? await response.json() : null; } catch { return null; }
+    }));
+    const valid = candidates.filter(data => data?.schema === 2 && data.repository === repository &&
+      typeof data.version === 'string' && /^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/.test(data.version) &&
+      data.version.length < 80 && data.tag === 'v'+data.version &&
+      Number.isSafeInteger(data.build) && data.build >= 24 && data.build <= 2147483647 &&
+      Array.isArray(data.releases) && data.releases.length === 4);
+    const selected = valid.find(data => !data.version.includes('-')) ?? valid.sort((a,b)=>b.build-a.build)[0];
+    if (!selected) { $('#linux-version').textContent = 'Linux 服务包从 Beta 5 起提供，构建完成后这里会显示下载。'; return; }
+    const filename = `qqbotmanager-linux-v${selected.version}-build${selected.build}-web-x64.tar.gz`;
+    const url = `https://github.com/${repository}/releases/download/${selected.tag}/${filename}`;
+    $('#linux-package').href = url; $('#linux-package').textContent = '下载 Linux 服务包 ↓';
+    $('#linux-checksum').href = url+'.sha256';
+    $('#linux-version').textContent = `v${selected.version} · 构建 ${selected.build} · Ubuntu 22.04 x86_64${selected.version.includes('-')?' · Beta 预发行版':''}`;
+  } catch { $('#linux-version').textContent = '请前往 GitHub Releases 查看 Linux 服务包。'; }
+}
+loadLinux();
