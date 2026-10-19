@@ -50,6 +50,13 @@ async function fixture(t, {corrupt = false, redirect = false, badUpload = false}
     if (url.pathname.endsWith('/latest') || url.pathname.includes('/tags/')) {
       return json({error_message: '未找到 release'}, 400);
     }
+    if (url.pathname.endsWith('/branches')) return json([]);
+    if (url.pathname.endsWith('/contents/README.md')) {
+      const body = JSON.parse(options.body);
+      assert.equal(body.branch, 'main');
+      assert.ok(Buffer.from(body.content, 'base64').toString().includes('国内下载镜像'));
+      return json({commit: {sha: 'fixture-only'}});
+    }
     if (options.method === 'PATCH') {
       assert.equal(uploaded.size, 5);
       assert.equal(JSON.parse(options.body).release_status, 'latest');

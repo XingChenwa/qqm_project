@@ -47,8 +47,8 @@ export async function mirrorRelease({token, envelope, publicKey, files, request 
   // Manifest is last; promote to latest only AFTER public read-back succeeds.
   prepared.push({name: manifestName, content: Buffer.from(JSON.stringify(envelope))});
 
-  async function api(path, {method = 'GET', body, missing = false} = {}) {
-    const url = new URL(apiBase + path);
+  async function api(path, {method = 'GET', body, missing = false, repositoryPath = false} = {}) {
+    const url = new URL((repositoryPath ? apiBase.slice(0, -'/releases'.length) : apiBase) + path);
     url.searchParams.set('access_token', token);
     let response;
     try {
@@ -87,6 +87,19 @@ export async function mirrorRelease({token, envelope, publicKey, files, request 
     requireThat(previous.tag === latest.tag_name && data.build >= previous.build, '拒绝将 GitCode 最新版本回退');
     requireThat(previous.build !== data.build || previous.tag === data.tag,
       '同一构建号不可发布到不同版本标签');
+  }
+  if (!latest) {
+    const branches = await api('/branches', {repositoryPath: true});
+    requireThat(Array.isArray(branches), 'GitCode 分支列表格式无效');
+    if (branches.length === 0) {
+      // Release creation needs a commit. Bootstrap ONLY a verified empty repo;
+      // the create-file API cannot overwrite an existing README or branch.
+      await api('/contents/README.md', {repositoryPath: true, method: 'POST', body: {
+        branch: 'main', message: 'docs: initialize QQ bot manager download mirror',
+        'author[name]': 'xiaoshutiaoya', 'author[email]': 'xiaoshutiaoya@noreply.gitcode.com',
+        content: Buffer.from('# QQ机器人管理器 · 国内下载镜像\n\n此仓库的 Release 提供与 GitHub 正式版相同的安装包和更新签名清单。\n\n- 项目源码：https://github.com/XingChenwa/qqm_project\n- 项目首页：https://xingchenwa.github.io/qqm_project/\n- 开源许可：GPL-2.0-only，以原项目 LICENSE 为准。\n').toString('base64'),
+      }});
+    }
   }
   let release = await api('/tags/' + data.tag, {missing: true});
   const body = `与 GitHub ${data.repository} ${data.tag} 相同的四端安装包。\n\nhttps://github.com/${data.repository}/releases/tag/${data.tag}`;
