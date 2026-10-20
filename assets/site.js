@@ -75,7 +75,7 @@ async function loadLinux() {
     const url = `https://github.com/${repository}/releases/download/${selected.tag}/${filename}`;
     $('#linux-package').href = url; $('#linux-package').textContent = '下载 Linux 服务包 ↓';
     $('#linux-checksum').href = url+'.sha256';
-    $('#linux-version').textContent = `v${selected.version} · 构建 ${selected.build} · Ubuntu 22.04 x86_64${selected.version.includes('-')?' · Beta 预发行版':''}`;
+    $('#linux-version').textContent = `v${selected.version} · 构建 ${selected.build} · Linux x86_64${selected.version.includes('-')?' · Beta 预发行版':''}`;
   } catch { $('#linux-version').textContent = '请前往 GitHub Releases 查看 Linux 服务包。'; }
 }
 loadLinux();

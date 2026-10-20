@@ -1,68 +1,78 @@
 <!doctype html>
 <html lang="zh-CN">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="description" content="QQ机器人管理器 Linux 网页版：Ubuntu 22.04 无桌面部署、23336 端口访问、HTTPS 反向代理与数据备份。"><title>Linux 网页版 · QQ机器人管理器</title><link rel="icon" href="assets/logo.png"><link rel="stylesheet" href="assets/site.css?v=2"><script src="assets/docs.js?v=2" defer></script></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="description" content="QQ机器人管理器 Linux 网页版：自动安装、SHA-256 自动校验、首次网页设置密码和安全入口、局域网与公网访问。"><title>Linux 安装 · QQ机器人管理器</title><link rel="icon" href="assets/logo.png"><link rel="stylesheet" href="assets/site.css?v=2"><script src="assets/docs.js?v=2" defer></script></head>
 <body class="docs-page">
 <a class="skip-link" href="#guide">跳到正文</a>
 <header class="site-header wrap"><a class="brand" href="./"><img src="assets/logo.png" width="38" height="38" alt=""><span>QQ机器人管理器<small>BOT MANAGER</small></span></a><nav aria-label="主导航"><a href="./#downloads">下载</a><a href="plugins.html">插件开发</a><a class="nav-github" href="https://github.com/XingChenwa/qqm_project">GitHub ↗</a></nav></header>
-<div class="docs-heading wrap"><p class="eyebrow">UBUNTU 22.04 / WEB CONSOLE</p><h1>Linux 安装与使用。</h1><p>从下载、首次设置密码到后台运行，一步步部署 QQ机器人管理器。无需桌面环境，用电脑或手机浏览器访问。</p><div class="doc-meta"><a href="./#linux-download">下载服务包 ↓</a><a href="https://github.com/XingChenwa/qqm_project/blob/main/server/README.md">GitHub 版安装文档 ↗</a></div></div>
-<div class="docs-layout wrap"><aside class="docs-toc"><nav aria-label="本页目录"><a href="#requirements">安装前确认</a><a href="#start">下载与启动</a><a href="#access">打开网页</a><a href="#password">首次设置密码</a><a href="#service">后台与开机运行</a><a href="#https">宝塔与 HTTPS</a><a href="#update">更新与备份</a><a href="#faq">常见问题</a><a href="#features">功能说明</a></nav></aside>
+<div class="docs-heading wrap"><p class="eyebrow">LINUX / WEB CONSOLE</p><h1>安装简单，入口专属。</h1><p>服务器后台运行，用电脑或手机浏览器管理。第一次打开网页，再设置管理员密码和你的安全入口。</p><div class="doc-meta"><a href="./#linux-download">下载服务包 ↓</a><a href="https://github.com/XingChenwa/qqm_project/blob/main/server/README.md">完整安装文档 ↗</a></div></div>
+<div class="docs-layout wrap"><aside class="docs-toc"><nav aria-label="本页目录"><a href="#requirements">支持哪些系统</a><a href="#start">自动安装</a><a href="#password">首次网页设置</a><a href="#access">局域网与公网</a><a href="#https">HTTPS 安全访问</a><a href="#service">管理后台服务</a><a href="#update">升级与离线安装</a><a href="#faq">常见问题</a><a href="#features">工作台功能</a></nav></aside>
 <article id="guide" class="docs-article">
-<h2 id="requirements">1. 安装前确认</h2>
-<ul><li>系统为 <strong>Ubuntu 22.04，x86_64 / amd64</strong>。执行 <code>uname -m</code> 应显示 <code>x86_64</code>，当前安装包不适用于 ARM / aarch64。</li><li>不需要图形桌面、Flutter、Dart、PHP 或数据库，安装包包含可执行程序。</li><li>服务器需要能访问 QQ 开放平台。机器人源 IP 白名单填写服务器的公网 IPv4，不是电脑或手机的 IP。</li><li>默认端口 <strong>23336</strong>，仅监听本机；不会自动向公网开放。</li></ul>
-<p>先安装下载与解压工具：</p>
-<div class="code-example"><pre><code>sudo apt update
-sudo apt install -y ca-certificates curl tar libstdc++6 libgcc-s1</code></pre></div>
-<h2 id="start">2. 下载并启动（普通用户）</h2>
-<p>从 <a href="https://github.com/XingChenwa/qqm_project/releases">GitHub Releases</a> 下载同一版本的 Linux <code>.tar.gz</code> 和同名 <code>.sha256</code>，不要下载源码 ZIP。下面以 <strong>1.3.8-beta.7.2+28</strong> 为例；该版本附件上传后即可执行。已有安装请看“更新与备份”，不要重新初始化数据。</p>
-<div class="code-example"><pre><code>mkdir -p "$HOME/qqm-downloads"
-cd "$HOME/qqm-downloads"
-curl -fL --retry 3 -O https://github.com/XingChenwa/qqm_project/releases/download/v1.3.8-beta.7.2/qqbotmanager-linux-v1.3.8-beta.7.2-build28-web-x64.tar.gz
-curl -fL --retry 3 -O https://github.com/XingChenwa/qqm_project/releases/download/v1.3.8-beta.7.2/qqbotmanager-linux-v1.3.8-beta.7.2-build28-web-x64.tar.gz.sha256
-sha256sum -c qqbotmanager-linux-v1.3.8-beta.7.2-build28-web-x64.tar.gz.sha256
-# 只有出现 OK / 成功，才继续解压。
-tar -xzf qqbotmanager-linux-v1.3.8-beta.7.2-build28-web-x64.tar.gz
-cd qqbotmanager
-./start.sh</code></pre></div>
-<p>保持这个终端运行，停止时按 <code>Ctrl+C</code>。关闭 SSH 后仍要运行，请使用后面的 systemd 服务。</p>
-<h2 id="access">3. 用浏览器打开网页</h2>
-<p>服务器本机浏览器打开 <code>http://127.0.0.1:23336</code>。默认只监听本机，直接访问公网 IP 的 23336 端口不会通，这是正常的安全设置。</p>
-<h3>远程电脑：SSH 隧道</h3><p>在<strong>你的电脑终端</strong>执行下面的命令，不是在服务器终端：</p>
-<div class="code-example"><pre><code>ssh -L 23336:127.0.0.1:23336 你的服务器用户@服务器IP</code></pre></div>
-<p>保持隧道打开，在电脑浏览器访问 <code>http://127.0.0.1:23336</code>。</p>
-<h3>手机或多人访问</h3><p>推荐配置后面的 HTTPS 反向代理，然后用手机浏览器打开你的 HTTPS 域名，页面自动适配手机布局。受信局域网临时测试可用 <code>./start.sh --host 0.0.0.0</code>，再访问 <code>http://服务器局域网IP:23336</code>。HTTP 不加密，不要直接用于公网。</p>
-<h2 id="password">4. 首次设置自己的管理密码</h2>
-<p><strong>第一次安装必须先设置管理密码，不能跳过。</strong> 普通用户模式启动后，在服务器另开一个终端查看初始化码：</p>
-<div class="code-example"><pre><code>cd "$HOME/qqm-downloads/qqbotmanager"
-cat data/setup-token.txt</code></pre></div>
-<ol><li>在网页首次设置页粘贴初始化码。</li><li>输入并确认至少 <strong>12 个字符</strong>的管理密码，完成后进入工作台。</li><li>以后使用自己设置的密码登录；初始化码完成设置后失效并移除。</li></ol>
-<p>初始化码只用来防止别人抢先设置密码，不是日后的登录密码。不要填写个人 QQ 密码，也不要将初始化码、管理密码或机器人密钥发送到反馈中。密码未设置前，所有管理接口、机器人自动连接与插件定时任务均不可用。</p>
-<p>使用 <code>--data</code> 时，请在该私有数据目录寻找初始化码。已初始化的服务重启和升级后保留原密码。旧版随机密码会迁移为初始化码，仍需设置自己的密码，不会清空机器人或聊天数据。</p>
-<h2 id="service">5. 后台运行与开机启动</h2>
-<p>下面按<strong>新安装</strong>举例，先用 <code>Ctrl+C</code> 停止普通用户模式，在解压后的 <code>qqbotmanager</code> 目录执行：</p>
-<div class="code-example"><pre><code>sudo mkdir -p /opt/qqbotmanager
-sudo cp -a qqm-server start.sh qqbotmanager.service server assets plugins LICENSE README.md /opt/qqbotmanager/
-id qqbotmanager &gt;/dev/null 2&gt;&amp;1 || sudo useradd --system --user-group --home-dir /var/lib/qqbotmanager --shell /usr/sbin/nologin qqbotmanager
-sudo install -m 644 /opt/qqbotmanager/qqbotmanager.service /etc/systemd/system/qqbotmanager.service
-sudo systemctl daemon-reload
-sudo systemctl enable --now qqbotmanager
-sudo systemctl status qqbotmanager --no-pager
-sudo cat /var/lib/qqbotmanager/setup-token.txt</code></pre></div>
-<p>使用最后一条命令显示的初始化码，到网页设置密码；已经初始化的服务不会再生成该文件。systemd 以专用低权限用户运行，关闭网页或 SSH 不会停止机器人。</p>
-<p><strong>注意：systemd 的数据目录是 <code>/var/lib/qqbotmanager</code>，普通用户模式默认是程序目录下的 <code>data</code>。</strong> 切换运行方式不会自动迁移数据。已有机器人和聊天时，请先停止服务、备份，再完整迁移数据并交给服务用户读写，不要把两个目录混合。</p>
-<div class="code-example"><pre><code>sudo systemctl restart qqbotmanager
+<p><strong>版本说明：</strong>本文适用于 <strong>1.3.9 及以上</strong>。1.3.8 系列旧包不包含自动安装器与安全入口，安装器会拒绝不支持的旧包。请等对应 Release 的 Linux 附件上传齐备后安装。</p>
+<h2 id="requirements">1. 不只支持 Ubuntu</h2>
+<ul><li>Linux <strong>x86_64 / amd64</strong>，glibc <strong>2.31 或以上</strong>。适用于满足要求的 Ubuntu、Debian、Rocky Linux / AlmaLinux、Fedora、Arch 等，不按发行版名称限制安装。</li><li>自动安装需要正在运行的 <strong>systemd</strong>；其他 init 系统可使用服务包中的 <code>start.sh</code> 手动运行。</li><li>目前不是 ARM / aarch64 包，也不适用于 Alpine / musl。安装器会检查，不会替换系统运行库。</li><li>无需桌面、Flutter、Dart、PHP 或数据库。服务器需能访问 QQ 开放平台，源 IP 白名单填写服务器公网 IPv4。</li></ul>
+<p>发布流程会在 Ubuntu 22.04、Debian 12、Rocky Linux 9 容器中检查服务启动，实际兼容以相应 Release 的验证结果为准。</p>
+<h2 id="start">2. 自动下载、校验、安装</h2>
+<p>下载安装器，查看来源与内容后执行。默认选择正式版 <code>--channel stable</code>：</p>
+<div class="code-example"><pre><code>curl -fL --proto '=https' --proto-redir '=https' \
+  https://raw.githubusercontent.com/XingChenwa/qqm_project/main/server/install.sh \
+  -o qqm-install.sh
+sudo bash qqm-install.sh --channel stable --install-deps</code></pre></div>
+<p>没有 curl 时，Ubuntu / Debian 先安装 <code>curl ca-certificates</code>；Rocky / AlmaLinux / Fedora 使用 dnf 安装。<code>--install-deps</code> 支持 apt、dnf、yum、zypper、pacman，不修改防火墙或 SSH。只检查环境可用 <code>bash qqm-install.sh --check-only</code>。</p>
+<h3>SHA-256 是什么？不需要手动算。</h3>
+<p>它是文件的“指纹”，用于发现安装包损坏或被修改。安装器自动下载校验值、验证后才解压，还会拒绝越界路径、链接和特殊文件。请只从可信 HTTPS 来源下载；单独一个校验值不代表来源可信。</p>
+<p>安装后服务自动后台运行：程序 <code>/opt/qqbotmanager</code>，私有数据 <code>/var/lib/qqbotmanager</code>，默认端口 <strong>23336</strong>。密码不在安装终端设置，下一步在浏览器完成。</p>
+<h2 id="password">3. 第一次打开，设置密码和安全入口</h2>
+<p>打开 <code>http://服务器局域网IP:23336</code> 会显示首次设置页。安装终端还会提供私有链接，自动填入一次性初始化码：</p>
+<div class="code-example"><pre><code>http://服务器IP:23336/#setup=一次性初始化码</code></pre></div>
+<p>不要分享这条私有链接。它用于证明你拥有服务器，防止陌生人从公网抢先设置管理员；初始化码不是管理密码。网页会清除地址片段，片段不进入服务端 URL 或访问日志；HTTP 提交仍不加密，请优先使用 HTTPS。</p>
+<ol><li>在网页设置至少 <strong>12 个字符</strong>的管理员密码，并再次确认。</li><li>填写 <strong>8–64 位字母、数字、短横线或下划线</strong>的安全入口，也可以点击“随机生成”，不要使用容易猜的 <code>xxxx</code>。</li><li>保存后进入类似 <code>http://服务器IP:23336/mybot_7rK92p/</code> 的地址，<strong>收藏完整入口</strong>。</li></ol>
+<p>完成前，不能使用管理接口、连接机器人或运行插件定时任务。完成后，根地址和错误入口返回 <strong>404</strong>，不会跳转或泄露正确入口；正确入口仍需密码登录。设置保留到重启和升级，只保存加盐密码哈希，初始化码自动失效并删除。</p>
+<p>没有使用私有链接时，可在服务器查看初始化码并在页面粘贴：</p>
+<div class="code-example"><pre><code>sudo cat /var/lib/qqbotmanager/setup-token.txt</code></pre></div>
+<p>已设置密码的旧版安装升级后，使用原密码登录，再补设入口，机器人和聊天保留。不要删除密码文件或清空数据目录。</p>
+<h2 id="access">4. 局域网能访问，公网也能配置</h2>
+<p>自动安装默认监听 <code>0.0.0.0:23336</code>。局域网地址只在对应网络可用；公网须使用公网 IP / 域名，并放行云安全组与系统防火墙的 TCP 23336：</p>
+<div class="code-example"><pre><code>http://服务器局域网IP:23336/你的安全入口/
+http://服务器公网IP:23336/你的安全入口/
+https://你的域名/你的安全入口/</code></pre></div>
+<p>家用网络通常还需路由器端口映射和可入站公网地址；运营商 CGNAT 下仅开放端口不一定能访问。安装器不自动修改防火墙。请按自己的系统与安全要求放行，尽量限制来源 IP，不要关闭整个防火墙。</p>
+<p><strong>HTTP 不加密密码、Cookie 或聊天，安全入口也不能加密。</strong> 公网长期使用推荐 HTTPS 或 VPN。仅本机访问可在安装时加 <code>--host 127.0.0.1</code>，远程电脑通过 SSH 隧道访问：</p>
+<div class="code-example"><pre><code>ssh -L 23336:127.0.0.1:23336 用户@服务器IP</code></pre></div>
+<p>随后访问本机 23336。手机和电脑浏览器自动显示对应布局。</p>
+<h2 id="https">5. HTTPS 反向代理（推荐）</h2>
+<ol><li>配置指向服务器的域名及有效 HTTPS 证书。</li><li>编辑 <code>/etc/qqbotmanager.env</code>，填写下面的设置，不在域名后加安全入口。</li><li>反向代理整个网站到本机 23336，保留原始 Host 和完整入口路径，重启服务。</li><li>使用 HTTPS 域名及完整入口。此模式校验域名与 Origin，并启用 Secure 登录 Cookie。</li></ol>
+<div class="code-example"><pre><code>QQM_HOST=127.0.0.1
+QQM_PORT=23336
+QQM_PUBLIC_URL=https://你的域名</code></pre></div>
+<div class="code-example"><pre><code>location / {
+    proxy_pass http://127.0.0.1:23336;
+    proxy_set_header Host $http_host;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    client_max_body_size 1m;
+    proxy_read_timeout 90s;
+}</code></pre></div>
+<p>仅公开 HTTPS 所需端口，无需把 23336 暴露公网。不要将私有数据目录设成网站根目录，不缓存管理页面和 API。</p>
+<h2 id="service">6. 后台服务与找回入口</h2>
+<div class="code-example"><pre><code>sudo systemctl status qqbotmanager --no-pager
+sudo systemctl restart qqbotmanager
 sudo systemctl stop qqbotmanager
-sudo journalctl -u qqbotmanager -n 100 --no-pager</code></pre></div>
-<h2 id="https">6. 宝塔 / Nginx 配置 HTTPS</h2>
-<ol><li>创建自己的 HTTPS 站点，反向代理到 <code>http://127.0.0.1:23336</code>。</li><li>保留原始 Host 请求头：<code>proxy_set_header Host $http_host;</code>。</li><li>普通用户启动时添加 <code>--public-url https://你的域名</code>；systemd 模式在 service 的 <code>ExecStart</code> 尾部追加该参数后重载和重启。</li><li>手机和电脑打开 HTTPS 域名，应用会校验请求来源，并为登录 Cookie 启用 Secure。</li></ol>
-<div class="code-example"><pre><code>./start.sh --public-url https://bot.example.com</code></pre></div>
-<p>云防火墙和系统防火墙只需开放 HTTPS / SSH 所需端口，不必对公网开放 23336。<strong>不要把 data 或 /var/lib/qqbotmanager 设为静态网站根目录。</strong></p>
-<h2 id="update">7. 更新与备份</h2>
-<ol><li>下载新版 Linux 服务包与校验文件，先验证校验值。</li><li>停止正在运行的程序或执行 <code>sudo systemctl stop qqbotmanager</code>。</li><li>备份原私有数据目录：普通用户为程序目录下的 <code>data</code>，systemd 为 <code>/var/lib/qqbotmanager</code>。</li><li>替换程序、网页和随附资源，<strong>保留原有数据，不要用空 data 覆盖旧记录</strong>。</li><li>启动原来的运行方式，确认机器人、聊天、插件与管理密码仍在。</li></ol>
-<p>Linux 服务包目前不参加四端客户端的自动替换流程，需要手动更新。聊天和插件保存在服务器本地，不会自动与手机、桌面客户端同步；私有数据包含凭据，请妥善备份。</p>
+sudo journalctl -u qqbotmanager -n 100 --no-pager
+# 仅在服务器终端显示私有入口，不重置任何设置：
+sudo bash /opt/qqbotmanager/install.sh --print-link
+# 需要显示实际公网访问地址时：
+sudo bash /opt/qqbotmanager/install.sh --print-link --access-url http://公网IP:23336</code></pre></div>
+<p>首次使用显示一次性设置链接，已设置后显示安全入口。正常服务日志不输出这些私有链接。分享日志、截图前去除初始化码、入口、密码、密钥与 Token。</p>
+<h2 id="update">7. 更新、备份与离线安装</h2>
+<p>更新时重复运行安装器，同一渠道安装最新可用包；也可用 <code>--version v版本号</code> 指定 Release。<code>--channel stable</code> 与 <code>--channel beta</code> 分开，不会自动跨渠道：</p>
+<div class="code-example"><pre><code>sudo bash qqm-install.sh --channel stable
+# 离线：先上传 tar.gz 和同名 .sha256，再自动校验安装：
+sudo bash qqm-install.sh --archive /下载目录/完整Linux安装包文件名.tar.gz</code></pre></div>
+<p>升级会保留密码、入口、聊天与插件数据。私有数据和旧程序备份在 <code>/var/backups/qqbotmanager/时间编号</code>，启动检查失败恢复旧程序，不重置数据。备份包含凭据，请勿公开。不是由安装器管理的旧安装目录会被拒绝覆盖，需先备份并按完整文档迁移。</p>
+<p>已解压可信新包可运行 <code>sudo bash install.sh --local</code>。没有 systemd 的系统可在包目录手动执行 <code>./start.sh --host 0.0.0.0 --port 23336</code>，另一个终端执行 <code>./qqm-server --data ./data --access-link http://服务器IP:23336</code> 获取私有链接；自己配置守护程序。程序目录的 <code>data</code> 与系统服务数据不会自动混合。</p>
 <h2 id="faq">常见问题</h2>
-<ul><li><strong>下载 404：</strong>确认安装包已上传，版本、构建号和文件名与 Release 附件一致。</li><li><strong>Permission denied：</strong>进入程序目录执行 <code>chmod +x qqm-server start.sh</code>；不要使用 <code>chmod -R 777</code>。</li><li><strong>Exec format error：</strong>通常是 CPU 架构不匹配，本包只适用于 x86_64。</li><li><strong>网页打不开：</strong>先在服务器执行 <code>curl -f http://127.0.0.1:23336/health</code> 确认程序在运行，远程再用 SSH 隧道或 HTTPS 域名。</li><li><strong>端口已占用：</strong>确认是否已运行一个服务；临时可用 <code>./start.sh --port 23337</code>，隧道与反向代理端口也要同步修改。</li><li><strong>初始化码找不到：</strong>确认当前运行方式和数据目录；已设置密码后该文件会被移除，这是正常现象。</li><li><strong>QQ 提示 IP 不在白名单：</strong>把服务器实际公网 IPv4 加到对应 AppID 的 QQ 机器人开发设置。</li></ul>
+<ul><li><strong>根地址 404：</strong>初始化后正常，请用完整安全入口；忘记入口用服务器上的 <code>--print-link</code>，不要重新初始化。</li><li><strong>网页不通：</strong>先检查服务，再用 <code>curl -f http://127.0.0.1:23336/health</code>；HTTPS 模式加正确 Host。外网不通时检查监听、安全组、防火墙和端口映射。</li><li><strong>公网 IP 显示错：</strong>安装器看到的本机 IP 不一定是路由器出口，可在显示链接时指定 <code>--access-url</code>。</li><li><strong>初始化码不见了：</strong>设置成功会删除，未初始化先核对实际数据目录。</li><li><strong>SHA-256 不符：</strong>重新从可信 Release 下载，不跳过校验，不用源码 ZIP。</li><li><strong>端口占用：</strong>安装加 <code>--port 23337</code> 或改环境文件后重启，并同步修改访问地址和网络规则。</li><li><strong>QQ 源 IP 白名单：</strong>使用服务器出口 IPv4，不是浏览者 IP。</li></ul>
 <h2 id="features">网页工作台支持什么</h2>
-<ul><li>多机器人切换、聊天隔离，文字、Markdown、图片链接与按钮消息。</li><li>群通知中心、入群审核、群人数、成员资料与禁言状态；长按成员头像可禁言、解除禁言或移出群聊，移出需二次确认且不拉黑。</li><li>长按会话可屏蔽提醒，保留消息与插件收发；收到新消息不抢阅读位置，主动发送后定位最新。</li><li>七个随附插件与第三方共用加载器，可导入、编辑源码、保存并安装，插件默认关闭。</li><li>电脑与手机布局、浅色 / 深色主题、日志按状态着色，支持复制和导出。</li></ul>
-<p>部分群管理能力需要 QQ 平台内邀 / 白名单，机器人还需要相应群管理员身份。网页不申请系统通知权限；Android / iOS 系统通知也不保证 App 被挂起或关闭后的离线推送。</p>
+<ul><li>多机器人切换和聊天隔离；文字、Markdown、图片链接与按钮消息。</li><li>群通知、入群审核、成员资料与禁言状态；长按成员头像可禁言、解除禁言或移出，移出二次确认、不默认拉黑。</li><li>会话免打扰；收到新消息不抢阅读位置，主动发送后定位最新。</li><li>七个随附插件与第三方共用加载器，支持源码编辑和导入，默认关闭。</li><li>电脑与手机布局、浅色 / 深色主题、按状态着色的日志与复制导出。</li></ul>
+<p>群管理能力受 QQ 平台白名单和管理员身份约束。网页不申请系统通知权限；移动客户端也不保证 App 挂起后的离线推送。Linux 服务暂不参加四端客户端的自动替换更新流程。</p>
 </article></div><footer class="wrap"><span>QQ机器人管理器 · 学习交流项目</span><span><a href="./">项目首页</a> · <a href="plugins.html">插件手册</a> · <a href="https://github.com/XingChenwa/qqm_project">欢迎 Star ↗</a></span></footer>
 </body></html>
