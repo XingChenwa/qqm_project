@@ -352,21 +352,31 @@ class _SettingsScreenState extends State<SettingsScreen> {
       color: Theme.of(context).colorScheme.surface,
       child: Column(
         children: [
-          SizedBox(
-            height: 62,
+          Padding(
+            padding: const EdgeInsets.fromLTRB(18, 18, 14, 12),
             child: Row(
               children: [
-                const SizedBox(width: 18),
                 const AppLogo(size: 28),
                 const SizedBox(width: 10),
-                const Expanded(
-                  child: Text(
-                    'QQ 机器人管理器',
-                    style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16),
+                Expanded(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'QQ 机器人管理器',
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontWeight: FontWeight.w900,
+                          fontSize: 16,
+                        ),
+                      ),
+                      const SizedBox(height: 5),
+                      _versionChip('v${AppConstants.appVersion}'),
+                    ],
                   ),
                 ),
-                _versionChip('v${AppConstants.appVersion}'),
-                const SizedBox(width: 10),
               ],
             ),
           ),
@@ -1296,6 +1306,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ),
       child: Text(
         label,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
         style: const TextStyle(
           fontSize: 11,
           color: AppTheme.qqBlue,

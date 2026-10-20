@@ -26,16 +26,16 @@ sudo apt install -y ca-certificates curl tar libstdc++6 libgcc-s1
 
 从 [GitHub Releases](https://github.com/XingChenwa/qqm_project/releases) 选择要安装的版本，下载 Linux 的 `.tar.gz` 和同名 `.sha256`。不要下载源码 ZIP，也不要下载 Windows / Android 安装包。
 
-下面以 `1.3.8-beta.7.1+27` 为例。**已有安装请看后面的“更新与备份”，不要重新初始化数据目录。** 等该版本的安装包上传后执行：
+下面以 `1.3.8-beta.7.2+28` 为例。**已有安装请看后面的“更新与备份”，不要重新初始化数据目录。** 等该版本的安装包上传后执行：
 
 ```bash
 mkdir -p "$HOME/qqm-downloads"
 cd "$HOME/qqm-downloads"
-curl -fL --retry 3 -O https://github.com/XingChenwa/qqm_project/releases/download/v1.3.8-beta.7.1/qqbotmanager-linux-v1.3.8-beta.7.1-build27-web-x64.tar.gz
-curl -fL --retry 3 -O https://github.com/XingChenwa/qqm_project/releases/download/v1.3.8-beta.7.1/qqbotmanager-linux-v1.3.8-beta.7.1-build27-web-x64.tar.gz.sha256
-sha256sum -c qqbotmanager-linux-v1.3.8-beta.7.1-build27-web-x64.tar.gz.sha256
+curl -fL --retry 3 -O https://github.com/XingChenwa/qqm_project/releases/download/v1.3.8-beta.7.2/qqbotmanager-linux-v1.3.8-beta.7.2-build28-web-x64.tar.gz
+curl -fL --retry 3 -O https://github.com/XingChenwa/qqm_project/releases/download/v1.3.8-beta.7.2/qqbotmanager-linux-v1.3.8-beta.7.2-build28-web-x64.tar.gz.sha256
+sha256sum -c qqbotmanager-linux-v1.3.8-beta.7.2-build28-web-x64.tar.gz.sha256
 # 只有出现 OK / 成功，才继续解压。
-tar -xzf qqbotmanager-linux-v1.3.8-beta.7.1-build27-web-x64.tar.gz
+tar -xzf qqbotmanager-linux-v1.3.8-beta.7.2-build28-web-x64.tar.gz
 cd qqbotmanager
 ./start.sh
 ```
