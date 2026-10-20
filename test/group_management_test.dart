@@ -12,6 +12,11 @@ import 'support/fakes.dart';
 class GroupFixtureApi extends RecordingApi {
   final approvals = <Map<String, dynamic>>[];
   final mutes = <Map<String, dynamic>>[];
+  final removals = <Map<String, dynamic>>[];
+  String botRole = 'admin', memberRole = 'member';
+  String? returnedMemberId;
+  bool memberIsBot = false, failRemoval = false;
+  Completer<ApiResult<bool>>? delayedRemoval;
   int botStateCalls = 0;
   Completer<ApiResult<Map<String, dynamic>>>? delayedState;
   Completer<ApiResult<bool>>? delayedApproval;
@@ -38,7 +43,8 @@ class GroupFixtureApi extends RecordingApi {
     return delayedState?.future ??
         Future.value(
           ApiResult.success({
-            'member_role': 'admin',
+            'member_role': botRole,
+            'member_openid': 'fixture-bot',
             'recv_msg_setting': 'all',
             'allow_proactive_msg': true,
           }),
@@ -78,10 +84,10 @@ class GroupFixtureApi extends RecordingApi {
     required String groupId,
     required String memberId,
   }) async => ApiResult.success({
-    'member_openid': memberId,
+    'member_openid': returnedMemberId ?? memberId,
     'username': '群成员',
-    'member_role': 'member',
-    'bot': false,
+    'member_role': memberRole,
+    'bot': memberIsBot,
   });
   @override
   Future<ApiResult<Map<String, dynamic>>> getGroupJoinRequests({
@@ -131,6 +137,26 @@ class GroupFixtureApi extends RecordingApi {
     mutes.add({'group': groupId, 'member': memberId, 'op': operation});
     return ApiResult.success(true);
   }
+
+  @override
+  Future<ApiResult<bool>> removeGroupMembers({
+    required String baseUrl,
+    required String accessToken,
+    required String groupId,
+    required List<String> memberIds,
+  }) {
+    removals.add({
+      'group': groupId,
+      'members': List.of(memberIds),
+      'token': accessToken,
+    });
+    return delayedRemoval?.future ??
+        Future.value(
+          failRemoval
+              ? ApiResult.failure('应用无接口访问权限：11253')
+              : ApiResult.success(true),
+        );
+  }
 }
 
 Map<String, dynamic> joinBody({String request = 'request1'}) => {
@@ -160,6 +186,67 @@ void main() {
       );
     });
     const base = 'https://api.bot.qq.com', token = 'fixture-token';
+    test('移除使用官方POST单人列表、路径编码且不拉黑，只有明确success才成功', () async {
+      adapter.response = {
+        'remove_members_result': 'success',
+        'add_to_member_blacklist_fail_openids': [],
+      };
+      final result = await api.removeGroupMembers(
+        baseUrl: base,
+        accessToken: token,
+        groupId: 'g/path',
+        memberIds: ['m'],
+      );
+      expect(result.isSuccess, true);
+      final request = adapter.requests.single;
+      expect(request.method, 'POST');
+      expect(
+        request.path,
+        endsWith('/v2/groups/g%2Fpath/batch_remove_members'),
+      );
+      expect(request.headers['Authorization'], 'QQBot $token');
+      expect(request.followRedirects, false);
+      expect(request.data, {
+        'member_openids': ['m'],
+        'add_to_member_blacklist': false,
+      });
+      adapter.response = {'remove_members_result': 'failed'};
+      expect(
+        (await api.removeGroupMembers(
+          baseUrl: base,
+          accessToken: token,
+          groupId: 'g',
+          memberIds: ['m'],
+        )).isSuccess,
+        false,
+      );
+      adapter.response = {'err_code': 11253, 'message': '应用无接口访问权限'};
+      final denied = await api.removeGroupMembers(
+        baseUrl: base,
+        accessToken: token,
+        groupId: 'g',
+        memberIds: ['m'],
+      );
+      expect(denied.isSuccess, false);
+      expect(denied.errorCode, 11253);
+      for (final ids in [
+        <String>[],
+        [''],
+        ['m', 'm'],
+        List.generate(21, (i) => 'm$i'),
+      ]) {
+        expect(
+          (await api.removeGroupMembers(
+            baseUrl: base,
+            accessToken: token,
+            groupId: 'g',
+            memberIds: ids,
+          )).isSuccess,
+          false,
+        );
+      }
+      expect(adapter.requests.length, 3);
+    });
     test('列表分页使用 GET 查询参数，AppID Token 仅发送至官方地址', () async {
       await api.getGroupMembers(
         baseUrl: base,
@@ -378,6 +465,79 @@ void main() {
       expect(bot.groups.unreadCount, 4);
       bot.groups.markAllRead();
       expect(bot.groups.unreadCount, 0);
+    });
+    test('禁言和移除必须重新获取角色，不能信任缓存的管理员身份', () async {
+      final target = bot.groups.target('g');
+      await bot.groups.loadBotState(target);
+      api.botRole = 'member';
+      await expectLater(
+        bot.groups.removeMember(target, 'm1'),
+        throwsA(isA<GroupApiException>()),
+      );
+      await expectLater(
+        bot.groups.setMemberMute(target, 'm1', operation: 'del'),
+        throwsA(isA<GroupApiException>()),
+      );
+      expect(api.removals, isEmpty);
+      expect(api.mutes, isEmpty);
+      api.botRole = 'admin';
+      for (final role in ['owner', 'admin', '']) {
+        api.memberRole = role;
+        await expectLater(
+          bot.groups.removeMember(target, 'm1'),
+          throwsA(isA<GroupApiException>()),
+        );
+      }
+      api.memberRole = 'member';
+      api.memberIsBot = true;
+      await expectLater(
+        bot.groups.removeMember(target, 'm1'),
+        throwsA(isA<GroupApiException>()),
+      );
+      api.memberIsBot = false;
+      api.returnedMemberId = 'another-member';
+      await expectLater(
+        bot.groups.removeMember(target, 'm1'),
+        throwsA(isA<GroupApiException>()),
+      );
+      api.returnedMemberId = null;
+      await expectLater(
+        bot.groups.removeMember(target, 'fixture-bot'),
+        throwsA(isA<GroupApiException>()),
+      );
+      expect(api.removals, isEmpty);
+      await bot.groups.removeMember(target, 'm1');
+      expect(api.removals.single['members'], ['m1']);
+    });
+    test('移除不重复提交，失败不伪造成功，切换后旧菜单不能移除另一机器人成员', () async {
+      final target = bot.groups.target('g');
+      api.delayedRemoval = Completer();
+      final first = bot.groups.removeMember(target, 'm1');
+      await Future<void>.delayed(Duration.zero);
+      await expectLater(
+        bot.groups.removeMember(target, 'm1'),
+        throwsA(isA<GroupApiException>()),
+      );
+      await expectLater(
+        bot.groups.setMemberMute(target, 'm1', operation: 'del'),
+        throwsA(isA<GroupApiException>()),
+      );
+      expect(api.removals.length, 1);
+      api.delayedRemoval!.complete(ApiResult.failure('11253 未授权'));
+      await expectLater(first, throwsA(isA<GroupApiException>()));
+      api.delayedRemoval = null;
+      api.failRemoval = true;
+      await expectLater(
+        bot.groups.removeMember(target, 'm1'),
+        throwsA(isA<GroupApiException>()),
+      );
+      expect(api.removals.length, 2);
+      await bot.updateConfig(validConfig()..appId = 'another-app');
+      await expectLater(
+        bot.groups.removeMember(target, 'm1'),
+        throwsA(isA<GroupApiException>()),
+      );
+      expect(api.removals.length, 2);
     });
     test('审核请求只执行一次，成功后再同步不会恢复为待处理', () async {
       gateway.onDispatch!('GROUP_JOIN_REQUEST', joinBody());

@@ -554,6 +554,9 @@ function renderMessages() {
           "撤回",
         ),
       );
+    const senderAvatar = avatar(message.senderName, message.senderAvatarUrl);
+    window.bindQQMMemberMenu?.(senderAvatar, message,
+      S.state.sessions.find((session) => session.id === S.session));
     area.append(
       el(
         "article",
@@ -561,7 +564,7 @@ function renderMessages() {
           class: "message" + (message.isFromBot ? " mine" : ""),
           "data-render-id": `${S.state.config.appId}/${S.session}/${message.id}`,
         },
-        avatar(message.senderName, message.senderAvatarUrl),
+        senderAvatar,
         main,
       ),
     );

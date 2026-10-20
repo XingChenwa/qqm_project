@@ -4,6 +4,8 @@
 
 设置左侧的铃铛打开独立的群通知中心，支持筛选加入／退出、未读、待审核与已处理申请，支持分页同步和手动审批。会话内的齿轮打开群聊／用户设置，可查看群人数、机器人身份与消息权限、分页成员、成员资料、群禁言状态并管理普通成员禁言。长按／右击会话也能屏蔽消息提醒，消息与插件仍正常收发。群管理接口受 QQ 平台权限约束，审核与禁言要求机器人为群管理员；成员查询部分能力仍为内邀／白名单。网页不申请系统通知权限，系统通知仅 Android／iOS 客户端提供。
 
+长按／右击聊天消息中普通成员的头像，可设置禁言、解除禁言或将该成员移出群聊。移出需再次确认，不加入群黑名单；提交前重新核实官方角色，不能管理群主、管理员或机器人。移除接口同样需要 QQ 平台内邀／白名单权限。
+
 网页版通过 AppID / 机器人密钥接入，密钥只在保存时发往你自己的服务，不在读取配置接口中回传；首次使用需要填写凭据。QQ 官方接口的权限、额度和白名单限制仍适用。公网出口查询显示的是 **服务器 IPv4**，不是浏览者的 IP。内嵌浏览页使用访问设备自己的浏览器标识，第三方站点可能禁止 iframe，此时可复制链接。
 
 ## 启动
@@ -11,8 +13,8 @@
 在 GitHub 对应版本的 Release 下载 `qqbotmanager-linux-v版本-build构建号-web-x64.tar.gz` 及 `.sha256`，在同一目录验证、解压：
 
 ```bash
-sha256sum -c qqbotmanager-linux-v1.3.8-beta.6-build25-web-x64.tar.gz.sha256
-tar -xzf qqbotmanager-linux-v1.3.8-beta.6-build25-web-x64.tar.gz
+sha256sum -c qqbotmanager-linux-v1.3.8-beta.7-build26-web-x64.tar.gz.sha256
+tar -xzf qqbotmanager-linux-v1.3.8-beta.7-build26-web-x64.tar.gz
 cd qqbotmanager
 ./start.sh
 ```

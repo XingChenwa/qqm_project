@@ -5,6 +5,18 @@ class ServerFixtureApi extends ApiService {
   final approvals = <Map<String, dynamic>>[];
   final recalls = <String>[];
   final mutes = <String, String>{};
+  final removedMembers = <String>[];
+  @override
+  Future<ApiResult<bool>> removeGroupMembers({
+    required String baseUrl,
+    required String accessToken,
+    required String groupId,
+    required List<String> memberIds,
+  }) async {
+    removedMembers.addAll(memberIds);
+    return ApiResult.success(true);
+  }
+
   @override
   Future<ApiResult<AccessTokenResult>> getAccessToken({
     required String appId,

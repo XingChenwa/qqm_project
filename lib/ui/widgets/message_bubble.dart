@@ -18,6 +18,7 @@ class MessageBubble extends StatelessWidget {
   final bool canRecall;
   final VoidCallback? onRecall;
   final VoidCallback? onReply;
+  final VoidCallback? onSenderLongPress;
 
   const MessageBubble({
     super.key,
@@ -26,6 +27,7 @@ class MessageBubble extends StatelessWidget {
     this.canRecall = false,
     this.onRecall,
     this.onReply,
+    this.onSenderLongPress,
   });
 
   @override
@@ -73,10 +75,31 @@ class MessageBubble extends StatelessWidget {
   Widget _avatar(BuildContext context) {
     // A message's avatar belongs to its sender, even inside a group. Only
     // the group conversation itself uses ProfileAvatar(isGroup: true).
-    return ProfileAvatar(
+    final avatar = ProfileAvatar(
       name: message.senderName,
       url: message.senderAvatarUrl,
       radius: 17,
+    );
+    if (message.isBotAuthor || onSenderLongPress == null) return avatar;
+    return Semantics(
+      button: true,
+      label: '管理群成员 ${message.senderName}',
+      child: Tooltip(
+        message: '长按管理此群成员',
+        triggerMode: TooltipTriggerMode.manual,
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onLongPress: onSenderLongPress,
+          onSecondaryTap: onSenderLongPress,
+          // Avatar placeholders have their own tooltips. They must not win the
+          // long-press gesture arena when an image is loading/unavailable.
+          child: SizedBox(
+            width: 42,
+            height: 42,
+            child: Center(child: IgnorePointer(child: avatar)),
+          ),
+        ),
+      ),
     );
   }
 

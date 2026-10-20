@@ -163,6 +163,13 @@ BotConfig validConfig() => BotConfig(
 
 class RecordingApi extends ApiService {
   @override
+  Future<ApiResult<bool>> removeGroupMembers({
+    required String baseUrl,
+    required String accessToken,
+    required String groupId,
+    required List<String> memberIds,
+  }) async => ApiResult.failure('测试：移除成员未授权', errorCode: 11253);
+  @override
   Future<ApiResult<Map<String, dynamic>>> getGroupBotState({
     required String baseUrl,
     required String accessToken,

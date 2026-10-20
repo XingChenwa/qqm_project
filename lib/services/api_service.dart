@@ -278,12 +278,40 @@ class ApiService {
     );
   }
 
+  /// Official group removal endpoint (platform invitation/whitelist required).
+  /// Avatar moderation passes exactly one member and never adds a blacklist.
+  Future<ApiResult<bool>> removeGroupMembers({
+    required String baseUrl,
+    required String accessToken,
+    required String groupId,
+    required List<String> memberIds,
+  }) {
+    if (groupId.isEmpty ||
+        memberIds.isEmpty ||
+        memberIds.length > 20 ||
+        memberIds.any((id) => id.trim().isEmpty) ||
+        memberIds.toSet().length != memberIds.length) {
+      return Future.value(ApiResult.failure('请选择 1–20 位不同的群成员'));
+    }
+    return _postGroupAction(
+      baseUrl,
+      accessToken,
+      '/v2/groups/${Uri.encodeComponent(groupId)}/batch_remove_members',
+      {
+        'member_openids': List<String>.of(memberIds),
+        'add_to_member_blacklist': false,
+      },
+      successField: 'remove_members_result',
+    );
+  }
+
   Future<ApiResult<bool>> _postGroupAction(
     String baseUrl,
     String token,
     String endpoint,
-    Map<String, dynamic> body,
-  ) async {
+    Map<String, dynamic> body, {
+    String? successField,
+  }) async {
     try {
       final response = await _dio.post(
         '$baseUrl$endpoint',
@@ -293,7 +321,12 @@ class ApiService {
           followRedirects: false,
         ),
       );
-      return _toBoolResult(response);
+      if (!_isSuccessfulResponse(response)) return _failure(response);
+      if (successField != null &&
+          (response.data is! Map || response.data[successField] != 'success')) {
+        return ApiResult.failure('平台未确认群成员移除成功，请刷新成员列表确认；不要重复提交');
+      }
+      return ApiResult.success(true);
     } on DioException catch (error) {
       return ApiResult.failure(_dioErrorMsg(error));
     } catch (_) {

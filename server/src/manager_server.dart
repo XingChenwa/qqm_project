@@ -456,6 +456,7 @@ class ManagerServer {
     'senderName': message.senderName,
     'senderAvatarUrl': message.senderAvatarUrl,
     'isFromBot': message.isFromBot,
+    'isBotAuthor': message.isBotAuthor,
     'content': message.content,
     'markdownContent': message.markdownContent,
     'isRecalled': message.isRecalled,
@@ -481,6 +482,11 @@ class ManagerServer {
           target,
           query['member'] ?? '',
         ),
+        '/api/group/moderatable-member' =>
+          await bot.groups.inspectModeratableMember(
+            target,
+            query['member'] ?? '',
+          ),
         '/api/group/requests' => {
           'next_cursor': await bot.groups.syncRequests(
             target,
@@ -631,6 +637,10 @@ class ManagerServer {
           operation: operation,
           expiresAt: expiry,
         );
+      case '/api/group/remove':
+        final target = _groupTarget(body);
+        if (body['confirmed'] != true) throw const FormatException('移出群成员需要确认');
+        await bot.groups.removeMember(target, _str(body, 'member', 512));
       case '/api/session/mute':
         _checkEpoch(body);
         if (body['muted'] is! bool) throw const FormatException('屏蔽设置必须为开关');

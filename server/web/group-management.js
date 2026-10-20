@@ -423,6 +423,12 @@ function setGroupMute(ref, member, remove, back) {
     ],
     [
       formButton(remove ? "确认解除" : "确认禁言", async () => {
+        if (!currentGroupScope(ref)) throw Error("机器人已切换，请重新打开成员菜单");
+        if (!remove) {
+          const mute = await groupRead("mute", ref);
+          if (!Array.isArray(mute.members)) throw Error("禁言列表格式异常，未提交操作");
+          knownGroupMutes.set(groupMuteKey(ref), new Set(mute.members.map(m => m.member_openid)));
+        }
         await post("group/mute", {
           ...ref,
           member: member.member_openid,
@@ -444,6 +450,78 @@ function setGroupMute(ref, member, remove, back) {
       formButton("取消", back, false),
     ],
   );
+}
+
+window.bindQQMMemberMenu = (element, message, session) => {
+  if (session?.sessionType !== 1 || message.isFromBot || message.isBotAuthor || !message.senderId) return;
+  const ref = groupTarget(session);
+  const member = { member_openid: message.senderId, username: message.senderName };
+  const open = () => {
+    if (currentGroupScope(ref)) showMemberActions(ref, member).catch(error => notice(error.message));
+  };
+  element.title = "长按管理此群成员";
+  element.setAttribute("aria-label", `管理群成员 ${message.senderName || "用户"}`);
+  element.setAttribute("role", "button");
+  element.tabIndex = 0;
+  element.style.touchAction = "pan-y";
+  let timer, start;
+  const cancel = () => { clearTimeout(timer); start = null; };
+  element.addEventListener("contextmenu", event => { event.preventDefault(); cancel(); open(); });
+  element.addEventListener("pointerdown", event => {
+    cancel();
+    if (event.pointerType === "mouse") return;
+    start = [event.clientX, event.clientY];
+    timer = setTimeout(() => { cancel(); open(); }, 600);
+  });
+  element.addEventListener("pointermove", event => {
+    if (start && Math.hypot(event.clientX - start[0], event.clientY - start[1]) > 10) cancel();
+  });
+  for (const type of ["pointerup", "pointercancel", "pointerleave"]) element.addEventListener(type, cancel);
+  element.addEventListener("keydown", event => {
+    if (["Enter", " ", "ContextMenu"].includes(event.key)) { event.preventDefault(); open(); }
+  });
+};
+
+async function showMemberActions(ref, summary) {
+  if (!currentGroupScope(ref)) return;
+  const loading = el("p", {}, "正在核实机器人权限和成员身份…");
+  modal("群成员管理", loading, [el("button", { onclick: closeModal }, "关闭")]);
+  let member;
+  try {
+    member = await groupRead("moderatable-member", ref, { member: summary.member_openid });
+  } catch (error) {
+    if (loading.isConnected && currentGroupScope(ref)) notice(error.message, "群成员管理");
+    return;
+  }
+  let mute;
+  try { mute = await groupRead("mute", ref); } catch (_) { /* Can still request removal. */ }
+  if (!loading.isConnected || !currentGroupScope(ref)) return;
+  const muted = Array.isArray(mute?.members) && mute.members.some(m => m.member_openid === member.member_openid);
+  const back = () => showMemberActions(ref, member);
+  modal("群成员管理", [
+    el("h3", {}, member.username || summary.username || "群成员"),
+    el("p", {}, muted ? "当前已被禁言" : "禁言及移出均需机器人管理员与平台接口权限。"),
+  ], [
+    formButton("设置禁言", () => setGroupMute(ref, member, false, back)),
+    ...(muted ? [formButton("解除禁言", () => setGroupMute(ref, member, true, back), false)] : []),
+    formButton("踢出群聊", () => removeGroupMember(ref, member, back), false),
+    el("button", { onclick: closeModal }, "关闭"),
+  ]);
+}
+
+function removeGroupMember(ref, member, back) {
+  if (!currentGroupScope(ref)) return;
+  modal("将此成员移出群聊？", [
+    el("h3", {}, member.username || "群成员"),
+    el("p", {}, "确认后会将该成员踢出当前群聊，不加入群黑名单。此操作不能在管理器中撤销。"),
+  ], [
+    formButton("确认移出", async () => {
+      if (!currentGroupScope(ref)) throw Error("机器人已切换，未提交移出操作");
+      await post("group/remove", { ...ref, member: member.member_openid, confirmed: true });
+      if (currentGroupScope(ref)) notice("该成员已移出群聊，未加入群黑名单。", "移出成功");
+    }),
+    formButton("取消", back, false),
+  ]);
 }
 
 async function showGroupNotices(initialGroup = "") {

@@ -9,6 +9,7 @@ import '../../models/message.dart';
 import '../../utils/profile_helpers.dart';
 import '../widgets/app_dialogs.dart';
 import '../widgets/profile_avatar.dart';
+import '../widgets/group_member_actions.dart';
 import 'notifications_screen.dart';
 
 String groupDate(Object? value) {
@@ -141,7 +142,15 @@ class _GroupSettingsScreenState extends State<GroupSettingsScreen> {
             ),
             if (_bot.groups.isAdministrator(_target.groupId) &&
                 member['member_role'] == 'member' &&
-                member['bot'] != true)
+                member['bot'] != true) ...[
+              TextButton.icon(
+                onPressed: () {
+                  Navigator.pop(dialog);
+                  GroupMemberActions.remove(context, _bot, _target, member);
+                },
+                icon: const Icon(Icons.person_remove_outlined),
+                label: const Text('踢出群聊'),
+              ),
               FilledButton(
                 onPressed: () {
                   Navigator.pop(dialog);
@@ -149,6 +158,7 @@ class _GroupSettingsScreenState extends State<GroupSettingsScreen> {
                 },
                 child: const Text('设置禁言'),
               ),
+            ],
           ],
         ),
       );
@@ -475,12 +485,14 @@ class _GroupSettingsScreenState extends State<GroupSettingsScreen> {
                   for (final member in members)
                     Card(
                       child: ListTile(
-                        leading: ProfileAvatar(
-                          name: groupText(member['username']),
-                          url: userProfileAvatar(
-                            _target.appId,
-                            groupText(member['member_openid']),
-                            const [],
+                        leading: IgnorePointer(
+                          child: ProfileAvatar(
+                            name: groupText(member['username']),
+                            url: userProfileAvatar(
+                              _target.appId,
+                              groupText(member['member_openid']),
+                              const [],
+                            ),
                           ),
                         ),
                         title: Text(
@@ -493,6 +505,13 @@ class _GroupSettingsScreenState extends State<GroupSettingsScreen> {
                         ),
                         trailing: const Icon(Icons.chevron_right),
                         onTap: () => _memberDetails(member),
+                        onLongPress: () => GroupMemberActions.show(
+                          context,
+                          _bot,
+                          _target,
+                          groupText(member['member_openid']),
+                          name: groupText(member['username']),
+                        ),
                       ),
                     ),
                   if (!_membersLoaded ||

@@ -21,6 +21,7 @@ import '../widgets/chat_input.dart';
 import '../widgets/mobile_workspace.dart';
 import '../widgets/emoji_picker.dart';
 import '../widgets/message_bubble.dart';
+import '../widgets/group_member_actions.dart';
 import '../widgets/chat_timeline.dart';
 import '../widgets/plugin_panel.dart';
 import '../widgets/dashboard_panel.dart';
@@ -1575,6 +1576,7 @@ class _MainScreenState extends State<MainScreen> {
       sentRevision: _chatSentRevision,
       itemBuilder: (_, chronologicalIndex) {
         final message = messages[chronologicalIndex];
+        final memberTarget = bot.groups.target(session.id);
         final showSender =
             chronologicalIndex == 0 ||
             messages[chronologicalIndex - 1].senderId != message.senderId;
@@ -1582,6 +1584,19 @@ class _MainScreenState extends State<MainScreen> {
           key: ValueKey('${session.id}:${message.id}'),
           message: message,
           showSender: showSender,
+          onSenderLongPress:
+              session.sessionType == 1 &&
+                  !message.isBotAuthor &&
+                  message.senderId.isNotEmpty
+              ? () => GroupMemberActions.show(
+                  context,
+                  bot,
+                  memberTarget,
+                  message.senderId,
+                  name: message.senderName,
+                  avatarUrl: message.senderAvatarUrl,
+                )
+              : null,
           canRecall: bot.canRecallMessage(message),
           onRecall: () async {
             if (!message.isFromBot) {

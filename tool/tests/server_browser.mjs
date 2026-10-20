@@ -158,6 +158,32 @@ try {
     return m.scrollHeight - m.scrollTop - m.clientHeight < 3;
   });
   await page.screenshot({ path: join(shots, "chat-desktop.png") });
+  // Right-click on desktop, long press on touch screens. The real HTTP service
+  // validates fresh bot/member roles for every confirmed moderation action.
+  const memberAvatar = page.locator('#messages .avatar[role="button"]').last();
+  await memberAvatar.click({ button: "right" });
+  await page.getByRole("button", { name: "踢出群聊", exact: true }).waitFor();
+  await page.getByRole("button", { name: "设置禁言", exact: true }).click();
+  await page.getByRole("combobox", { name: "禁言时长" }).selectOption("5");
+  await page.getByRole("button", { name: "确认禁言", exact: true }).click();
+  await page.getByRole("button", { name: "解除禁言", exact: true }).waitFor();
+  await page.getByRole("button", { name: "踢出群聊", exact: true }).click();
+  await page.getByText("将此成员移出群聊？", { exact: true }).waitFor();
+  await page.getByRole("button", { name: "取消", exact: true }).click();
+  await page.getByRole("button", { name: "踢出群聊", exact: true }).click();
+  await page.getByRole("button", { name: "确认移出", exact: true }).click();
+  await page.getByText("移出成功", { exact: true }).waitFor();
+  await page.locator("#modal-close").click();
+  // Ordinary touches can scroll/cancel without moderation; a stationary hold
+  // on a 320px page opens the same permission-checked menu.
+  await page.setViewportSize({ width: 320, height: 850 });
+  await memberAvatar.dispatchEvent("pointerdown", { pointerType: "touch", clientX: 20, clientY: 100 });
+  await page.getByRole("button", { name: "踢出群聊", exact: true }).waitFor();
+  await memberAvatar.dispatchEvent("pointerup", { pointerType: "touch" });
+  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+  await page.screenshot({ path: join(shots, "member-actions-mobile.png") });
+  await page.locator("#modal-close").click();
+  await page.setViewportSize({ width: 1360, height: 900 });
   // Group settings and notifications use the real server routes and offline
   // QQ API fixture, rather than intercepting any management action.
   await page.locator("#chat-settings").click();

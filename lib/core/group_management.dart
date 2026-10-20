@@ -339,9 +339,11 @@ class GroupManagement {
     required String operation,
     DateTime? expiresAt,
   }) async {
-    final key = '${ref.appId}:${ref.epoch}:mute:${ref.groupId}:$memberId';
-    if (!_busy.add(key)) throw const GroupApiException('此成员的禁言设置正在保存');
+    syncScope();
+    final key = _memberActionKey(ref, memberId);
+    if (!_busy.add(key)) throw const GroupApiException('此成员的管理操作正在处理');
     try {
+      await inspectModeratableMember(ref, memberId);
       final result = await request<bool>(
         ref,
         (token, base) => api.setGroupMemberMute(
@@ -358,6 +360,64 @@ class GroupManagement {
       _mute.remove(ref.groupId);
       changed();
       log(operation == 'del' ? '已解除成员禁言' : '已设置成员禁言');
+    } finally {
+      _busy.remove(key);
+    }
+  }
+
+  String _memberActionKey(GroupTarget ref, String memberId) =>
+      '${ref.appId}:${ref.epoch}:moderation:${ref.groupId}:$memberId';
+
+  /// Never elevate the bot using a message author's claimed role or a stale
+  /// cache. Recheck official roles before presenting and before committing.
+  Future<Map<String, dynamic>> inspectModeratableMember(
+    GroupTarget ref,
+    String memberId,
+  ) async {
+    if (!isCurrent(ref) || ref.groupId.isEmpty || memberId.trim().isEmpty) {
+      throw const GroupApiException('机器人已切换或成员信息无效，请重新打开成员菜单');
+    }
+    final state = await loadBotState(ref);
+    if (!['owner', 'admin'].contains(state['member_role'])) {
+      throw const GroupApiException('机器人需要是此群的群主或管理员，才能管理群成员');
+    }
+    if (memberId == state['member_openid']) {
+      throw const GroupApiException('不能对机器人自身执行禁言或移除');
+    }
+    final value = await member(ref, memberId);
+    if (value['member_openid'] != memberId ||
+        value['member_role'] != 'member' ||
+        value['bot'] == true) {
+      throw const GroupApiException('仅可管理普通群成员，不能禁言或移除群主、管理员和机器人');
+    }
+    return value;
+  }
+
+  Future<void> removeMember(GroupTarget ref, String memberId) async {
+    syncScope();
+    final key = _memberActionKey(ref, memberId);
+    if (!_busy.add(key)) throw const GroupApiException('此成员的管理操作正在处理');
+    try {
+      await inspectModeratableMember(ref, memberId);
+      final result = await request<bool>(
+        ref,
+        (token, base) => api.removeGroupMembers(
+          baseUrl: base,
+          accessToken: token,
+          groupId: ref.groupId,
+          memberIds: [memberId],
+        ),
+      );
+      if (!isCurrent(ref)) {
+        throw const GroupApiException('机器人已切换，请回原机器人刷新群成员确认结果');
+      }
+      if (!result.isSuccess || result.data != true) {
+        throw GroupApiException(result.error ?? '平台未确认成员移除成功');
+      }
+      _info.remove(ref.groupId);
+      _mute.remove(ref.groupId);
+      changed();
+      log('已移除群成员（未加入黑名单）');
     } finally {
       _busy.remove(key);
     }

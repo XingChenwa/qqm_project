@@ -19,18 +19,7 @@ class StorageService {
   void selectChatAccount(String appId) => _chatAppId = appId;
 
   Future<void> init({void Function(String)? report}) async {
-    try {
-      await _initialize(report);
-    } catch (error, stack) {
-      if (!needsPreferenceRepair(error)) rethrow;
-      report?.call('恢复 Android 偏好设置通道（保留本地数据）');
-      try {
-        await repairPreferences();
-      } catch (_) {
-        Error.throwWithStackTrace(error, stack);
-      }
-      await _initialize(report);
-    }
+    await _initialize(report);
   }
 
   Future<void> _initialize(void Function(String)? report) async {
@@ -45,7 +34,7 @@ class StorageService {
     report?.call('打开插件数据存储');
     _pluginDataBox = await Hive.openBox<String>('plugin_data');
     report?.call('读取系统偏好设置');
-    _prefs = await SharedPreferences.getInstance();
+    _prefs = await loadPreferences(report: report);
     report?.call('确认本地聊天数据所属机器人');
     selectChatAccount(getBotConfig().appId);
     // Legacy records belong ONLY to the bot configured before multi-bot support.

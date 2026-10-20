@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../utils/constants.dart';
+import '../../runtime/android_preferences_store.dart';
 
 typedef ApplicationInitializer =
     Future<Widget> Function(void Function(String) report);
@@ -15,19 +16,50 @@ String startupDiagnostic(String stage, Object error, StackTrace? stack) {
       .take(8)
       .join('\n')
       .replaceAll(RegExp(r'[A-Za-z]:[\\/][^\s)]+'), '<本地路径>');
-  var platform = '';
-  if (error is PlatformException) {
-    final code = RegExp(r'^[A-Za-z0-9_.-]{1,80}$').hasMatch(error.code)
-        ? error.code
-        : '未知（已隐藏原始值）';
+  String platformDiagnostic(Object error) {
+    if (error is MissingPluginException) return '\n平台错误码：missing-plugin';
+    if (error is! PlatformException) return '\n异常类别：${error.runtimeType}';
+    // Arbitrary platform codes may also contain local values. Only known SDK
+    // transport/storage error codes are safe to disclose.
+    const codes = {
+      'PlatformException',
+      'channel-error',
+      'missing-plugin',
+      'null-error',
+      'storage_error',
+      'StorageError',
+      'PREFERENCES_EMPTY_REPLY',
+      'PREFERENCES_INVALID_LIST',
+      'PREFERENCES_READ_FAILED',
+      'PREFERENCES_WRITE_FAILED',
+    };
+    final code = codes.contains(error.code) ? error.code : '其他平台错误（原值已隐藏）';
     final channel = RegExp(
-      r'dev\.flutter\.pigeon\.(?:shared_preferences_android|path_provider_android)\.[A-Za-z0-9_.]+',
+      r'dev\.flutter\.pigeon\.(?:shared_preferences_android\.(?:SharedPreferencesApi|LegacySharedPreferencesApi)\.(?:getAll|clear|remove|setBool|setInt|setDouble|setString|setEncodedStringList)|path_provider_android\.PathProviderApi\.(?:getTemporaryPath|getApplicationSupportPath|getApplicationDocumentsPath|getApplicationCachePath|getExternalStoragePath))\b',
     ).firstMatch(error.message ?? '')?.group(0);
-    platform =
-        '\n平台错误码：$code${channel == null ? '' : '\n平台通道：$channel'}\n原始异常正文与 details 已隐藏，避免泄露本地配置。';
+    final details = error.details;
+    final cause = details is Map ? details['cause'] : null;
+    const causes = {
+      'IOException',
+      'SecurityException',
+      'IllegalArgumentException',
+      'ClassCastException',
+      'NumberFormatException',
+      'RuntimeException',
+      'NativeException',
+    };
+    return '\n平台错误码：$code${channel == null ? '' : '\n平台通道：$channel'}'
+        '${causes.contains(cause) ? '\n原生异常类别：$cause' : ''}';
   }
+
+  final platform = error is PreferenceInitializationException
+      ? '\n偏好设置恢复：原通道与备用通道均未完成（数据未清除）'
+            '\n原通道：${platformDiagnostic(error.primary)}'
+            '\n备用通道：${platformDiagnostic(error.fallback)}'
+      : platformDiagnostic(error);
   return 'QQ机器人管理器 ${AppConstants.appVersion}+${AppConstants.appBuild}\n'
-      '平台：${defaultTargetPlatform.name}\n阶段：$stage\n异常类型：${error.runtimeType}$platform\n$frames';
+      '平台：${defaultTargetPlatform.name}\n阶段：$stage\n异常类型：${error.runtimeType}$platform\n'
+      '原始异常正文与参数已隐藏，避免泄露本地配置。\n${frames.isEmpty ? '堆栈：平台未提供' : frames}';
 }
 
 class StartupGate extends StatefulWidget {

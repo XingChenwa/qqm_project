@@ -34,5 +34,5 @@ class SharedPreferences {
   }
 }
 
-bool needsPreferenceRepair(Object error) => false;
-Future<void> repairPreferences() async {}
+Future<SharedPreferences> loadPreferences({void Function(String)? report}) =>
+    SharedPreferences.getInstance();

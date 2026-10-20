@@ -16,6 +16,7 @@ import androidx.core.app.NotificationManagerCompat
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
+import io.flutter.plugin.common.StandardMethodCodec
 import io.flutter.plugins.sharedpreferences.LegacySharedPreferencesPlugin
 import java.io.File
 import java.security.MessageDigest
@@ -80,27 +81,19 @@ class MainActivity : FlutterActivity() {
                 } catch (_: Exception) { result.error("NOTIFICATION_FAILED", "系统通知操作未完成，请检查通知权限", null) }
             }
         }
-        // The app uses SharedPreferences.getInstance() (the legacy API).
-        // Register that host directly as well, rather than relying solely on
-        // the async/DataStore plugin's delegated registration. Same file/codec;
-        // this does not reset, migrate or copy any user preferences.
-        if (!flutterEngine.plugins.has(LegacySharedPreferencesPlugin::class.java)) {
-            flutterEngine.plugins.add(LegacySharedPreferencesPlugin())
+        // Keep a stable host for both transports. Re-registering Pigeon alone
+        // cannot repair every ROM/channel failure; the standard channel calls
+        // the same host directly, without touching or copying the preference file.
+        val preferencesHost = (flutterEngine.plugins.get(LegacySharedPreferencesPlugin::class.java)
+            as? LegacySharedPreferencesPlugin) ?: LegacySharedPreferencesPlugin().also {
+            flutterEngine.plugins.add(it)
         }
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "cn.uuze.botmanager/runtime")
-            .setMethodCallHandler { call, result ->
-                if (call.method != "repairPreferences") {
-                    result.notImplemented()
-                } else {
-                    try {
-                        flutterEngine.plugins.remove(LegacySharedPreferencesPlugin::class.java)
-                        flutterEngine.plugins.add(LegacySharedPreferencesPlugin())
-                        result.success(true)
-                    } catch (_: Exception) {
-                        result.error("PREFERENCES_REPAIR_FAILED", "偏好设置通道恢复失败；本地数据未清除。", null)
-                    }
-                }
-            }
+        MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            "cn.uuze.botmanager/preferences",
+            StandardMethodCodec.INSTANCE,
+            flutterEngine.dartExecutor.binaryMessenger.makeBackgroundTaskQueue()
+        ).setMethodCallHandler(LegacyPreferencesBridge(preferencesHost))
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "cn.uuze.botmanager/updates")
             .setMethodCallHandler { call, result ->
                 if (call.method != "installApk") {

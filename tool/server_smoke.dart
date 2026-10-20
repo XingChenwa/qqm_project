@@ -325,6 +325,54 @@ Future<void> main() async {
     );
     check(
       (await request(
+            '/api/group/moderatable-member?$params&member=member-a',
+          )).code ==
+          200,
+      '成员管理使用官方角色校验',
+    );
+    check(
+      (await request(
+                '/api/group/remove',
+                body: {...groupScope, 'member': 'member-a'},
+              )).code ==
+              400 &&
+          groupApi.removedMembers.isEmpty,
+      '没有明确确认不能移除成员',
+    );
+    check(
+      (await request(
+                '/api/group/remove',
+                body: {...groupScope, 'member': 'member-b', 'confirmed': true},
+              )).code ==
+              400 &&
+          groupApi.removedMembers.isEmpty,
+      '不能移除群主',
+    );
+    check(
+      (await request(
+                '/api/group/remove',
+                body: {...groupScope, 'member': 'member-a', 'confirmed': true},
+              )).code ==
+              200 &&
+          groupApi.removedMembers.single == 'member-a',
+      '确认后仅移除选定成员',
+    );
+    check(
+      (await request(
+                '/api/group/remove',
+                body: {
+                  ...groupScope,
+                  'epoch': -1,
+                  'member': 'member-a',
+                  'confirmed': true,
+                },
+              )).code ==
+              400 &&
+          groupApi.removedMembers.length == 1,
+      '旧机器人世代不能移除成员',
+    );
+    check(
+      (await request(
             '/api/session/mute',
             body: {...scope, 'session': 'fixture-group', 'muted': true},
           )).code ==
