@@ -419,8 +419,18 @@ try {
   await page.setViewportSize({ width: 1360, height: 900 });
   await page.locator("[data-page=plugins]").click();
   const card = page.locator(".plugin-card").filter({ hasText: "基础助手" });
+  // Showing the editor does not mean the asynchronous file read is complete.
+  // Exercise a delayed response so a fast CI/browser cannot assert an empty
+  // textbox before the real workspace source arrives.
+  await page.route("**/api/workspace/read?*", async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    await route.continue();
+  });
   await card.getByRole("button", { name: "编辑源码" }).click();
   await page.getByRole("textbox", { name: "插件源码" }).waitFor();
+  await page.waitForFunction(() =>
+    (document.querySelector('textarea[aria-label="插件源码"]')?.value.length ?? 0) > 20,
+  );
   assert.ok(
     (await page.getByRole("textbox", { name: "插件源码" }).inputValue())
       .length > 20,
