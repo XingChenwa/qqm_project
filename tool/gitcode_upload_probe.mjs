@@ -19,7 +19,7 @@ const fixtureNames=new Set(),results=[];
 const sha=b=>createHash('sha256').update(b).digest('hex');
 let created=false,identity,tagIdentity,cleanupRelease=false,cleanupTag=false;
 async function api(path,{method='GET',body,missing=false}={}){
-  check(/^\/(?:releases|tags)(?:\/|$)/.test(path),'Probe API path is out of scope');
+  check(/^\/(?:releases|tags)(?:\/|\?|$)/.test(path),'Probe API path is out of scope');
   const url=new URL(base+path);url.searchParams.set('access_token',token);
   let response;try{response=await fetch(url,{method,headers:{'Content-Type':'application/json'},
     ...(body?{body:JSON.stringify(body)}:{}),redirect:'error',signal:AbortSignal.timeout(20000)});}
@@ -30,7 +30,14 @@ async function api(path,{method='GET',body,missing=false}={}){
   check(response.ok,`Probe API ${method} HTTP ${response.status}`);return data;
 }
 const recordIdentity=r=>JSON.stringify([r.tag_name,r.target_commitish,r.created_at]);
-const tagRecordIdentity=r=>JSON.stringify([r.name,r.commit?.id]);
+const tagRecordIdentity=r=>JSON.stringify([r.name,r.commit?.sha]);
+async function findProbeTag(){
+  for(let page=1;page<=10;page++){
+    const list=await api(`/tags?per_page=100&page=${page}`);check(Array.isArray(list),'Unexpected tag list');
+    const match=list.find(record=>record.name===tag);if(match)return match;
+    if(list.length<100)return null;
+  }throw Error('Too many tags to establish diagnostic ownership');
+}
 const quote=value=>{check(typeof value==='string'&&!/[\u0000-\u001f\u007f]/.test(value),'Invalid curl configuration');return '"'+value.replaceAll('\\','\\\\').replaceAll('"','\\"')+'"';};
 function childRun(executable,args,input,{phaseLog=false}={}){
   return new Promise((resolve,reject)=>{
@@ -103,11 +110,11 @@ const productionSummary=r=>JSON.stringify([r.tag_name,r.name,r.body,r.release_st
 try{
   production=productionSummary(await api('/releases/tags/v1.3.9'));
   check(!await api(`/releases/tags/${tag}`,{missing:true}),'Diagnostic release already exists; refusing to reuse');
-  check(!await api(`/tags/${tag}`,{missing:true}),'Diagnostic tag already exists; refusing to reuse');
+  check(!await findProbeTag(),'Diagnostic tag already exists; refusing to reuse');
   const release=await api('/releases',{method:'POST',body:{tag_name:tag,name:'临时上传诊断测试（不是客户端版本）',
     body:marker+'\n\n仅用于维护者验证 GitCode 上传链路，不含更新清单，测试结束后清理。',release_status:'pre'}});
   check(release.tag_name===tag&&release.body?.startsWith(marker),'Unexpected diagnostic release');created=true;identity=recordIdentity(release);
-  const ownTag=await api(`/tags/${tag}`);check(ownTag.name===tag&&ownTag.commit?.id,'Diagnostic tag identity unavailable');tagIdentity=tagRecordIdentity(ownTag);
+  const ownTag=await findProbeTag();check(ownTag?.name===tag&&ownTag.commit?.sha,'Diagnostic tag identity unavailable');tagIdentity=tagRecordIdentity(ownTag);
   console.log('Created isolated diagnostic tag '+tag);
   const python=await probe('python',131072),curl=await probe('curl',131072);
   const maxMB=Number(process.env.PROBE_MB??16);check([16,80].includes(maxMB),'Unsupported probe size');
@@ -122,9 +129,9 @@ finally{
       current.assets.every(a=>a.type!=='attach'||fixtureNames.has(a.name)),'Diagnostic resource was edited; refusing cleanup');
     await api(`/releases/${tag}`,{method:'DELETE'});
     check(!await api(`/releases/tags/${tag}`,{missing:true}),'Diagnostic release still exists');cleanupRelease=true;
-    const tagRecord=await api(`/tags/${tag}`,{missing:true});
+    const tagRecord=await findProbeTag();
     if(tagRecord){check(tagIdentity&&tagRecordIdentity(tagRecord)===tagIdentity,'Diagnostic tag changed; refusing cleanup');await api(`/tags/${tag}`,{method:'DELETE'});}
-    check(!await api(`/tags/${tag}`,{missing:true}),'Diagnostic tag still exists');
+    check(!await findProbeTag(),'Diagnostic tag still exists');
     cleanupTag=true;
   }catch(error){console.log('Diagnostic cleanup incomplete: '+(error instanceof Error?error.message:'unknown'));process.exitCode=1;}
   if(production)try{check(productionSummary(await api('/releases/tags/v1.3.9'))===production,'Production release changed during probe');console.log('PASS production v1.3.9 metadata and file list unchanged');}catch{console.log('Production state could not be confirmed');process.exitCode=1;}
