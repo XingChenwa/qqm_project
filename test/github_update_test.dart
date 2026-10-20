@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -272,8 +273,20 @@ void main() {
     );
     final updates = service(adapter);
     await tester.runAsync(() async {
-      updates.start();
-      await Future<void>.delayed(const Duration(milliseconds: 50));
+      // Ed25519 verification can exceed 50 ms on a busy macOS runner. Wait
+      // for the real update operation, not a machine-speed-dependent delay.
+      final completed = Completer<void>();
+      void observe() {
+        if (!updates.busy && !completed.isCompleted) completed.complete();
+      }
+
+      updates.addListener(observe);
+      try {
+        updates.start();
+        await completed.future.timeout(const Duration(seconds: 10));
+      } finally {
+        updates.removeListener(observe);
+      }
     });
     await tester.pump(const Duration(seconds: 61));
     expect(nativeCalls, 0);

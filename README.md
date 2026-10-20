@@ -7,7 +7,7 @@
 
 **Windows · macOS · Android · iOS · Linux 网页版**
 
-[项目首页](https://xingchenwa.github.io/qqm_project/) · [下载客户端](https://github.com/XingChenwa/qqm_project/releases) · [插件开发文档](https://xingchenwa.github.io/qqm_project/plugins.html) · [问题反馈](https://github.com/XingChenwa/qqm_project/issues)
+[项目首页](https://xingchenwa.github.io/qqm_project/) · [下载客户端](https://github.com/XingChenwa/qqm_project/releases) · [Linux 安装文档](server/README.md) · [插件开发文档](https://xingchenwa.github.io/qqm_project/plugins.html) · [问题反馈](https://github.com/XingChenwa/qqm_project/issues)
 
 如果喜欢这个项目，欢迎点个 **Star** ✦
 
