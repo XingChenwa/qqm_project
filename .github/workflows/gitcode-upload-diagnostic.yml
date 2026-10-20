@@ -1,0 +1,27 @@
+name: GitCode 临时上传诊断
+on:
+  workflow_dispatch:
+    inputs:
+      size_mb:
+        description: 随机测试文件大小（不改动已有安装包或更新清单）
+        default: '16'
+        type: choice
+        options: ['16', '80']
+permissions:
+  contents: read
+concurrency:
+  group: project-gitcode-sync
+  cancel-in-progress: false
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: 临时版本对照上传、SHA-256 读回校验并清理
+        run: node tool/gitcode_upload_probe.mjs
+        env:
+          GITCODE_TOKEN: ${{ secrets.GITCODE_TOKEN }}
+          PROBE_MB: ${{ inputs.size_mb }}
