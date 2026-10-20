@@ -6,6 +6,8 @@ import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {assetDefinitions, repository, sha256, signManifest} from '../github_release_core.mjs';
 import {mirrorRelease, trustedMirrorUrl, gitCodeReleaseStatus} from '../gitcode_release.mjs';
+import {GitCodeUploadError} from '../gitcode_transport.mjs';
+import {packageNames} from '../package_names.mjs';
 
 const keys = generateKeyPairSync('ed25519');
 const secret = keys.privateKey.export({type: 'pkcs8', format: 'der'}).subarray(-32).toString('base64');
@@ -40,8 +42,9 @@ async function fixture(t, {corrupt = false, redirect = false, badUpload = false,
   const uploaded = new Map(), calls = [];
   const signed = signManifest(releaseData, secret, publicKey);
   const state = {files, uploaded, calls, release: null, latest: null, previous: [],
+    maxUploadAttempts:1,retryDelay:async()=>{},
     sourceRelease: {tagName: releaseData.tag, isDraft: false, isPrerelease: releaseData.channel === 'beta'},
-    failUploadAt: 0, uploadAttempts: 0, failFailureNotice: false, failReadName: '', onDownload: null};
+    failUploadAt: 0, failAllUploads:false,uploadAttempts: 0, failFailureNotice: false, failReadName: '', onDownload: null};
   const record = metadata => ({tag_name: releaseData.tag, target_commitish: 'offline-commit',
     created_at: '2026-10-21T00:00:00Z', assets: [], ...metadata});
   state.seedComplete = (metadata = {}) => {
@@ -93,7 +96,7 @@ async function fixture(t, {corrupt = false, redirect = false, badUpload = false,
         headers: {'Content-Type': 'application/octet-stream', 'x-obs-acl': 'private'}});
     }
     if (options.method === 'PUT') {
-      if (++state.uploadAttempts === state.failUploadAt) return new Response('', {status: 503});
+      if (++state.uploadAttempts === state.failUploadAt||state.failAllUploads) return new Response('', {status: 503});
       uploaded.set(url.pathname.slice(1), Buffer.from(options.body));
       state.release.assets.push({type: 'attach', name: url.pathname.slice(1)});
       return new Response('', {status: 200});
@@ -103,6 +106,7 @@ async function fixture(t, {corrupt = false, redirect = false, badUpload = false,
       const name = url.pathname.split('/').at(-2);
       state.onDownload?.(name);
       if (state.failReadName === name) return new Response('', {status: 503});
+      if (!uploaded.has(name)) return new Response('', {status: 404});
       return new Response(corrupt ? 'tampered file' : uploaded.get(name));
     }
     throw new Error('Unexpected fixture request');
@@ -308,4 +312,66 @@ test('自动发布与手动镜像共用不取消运行的 GitCode 并发锁',asy
     const workflow=await readFile(new URL('../../'+path,import.meta.url),'utf8');
     assert.match(workflow,/concurrency:\s*\n\s+group: project-gitcode-sync\s*\n\s+cancel-in-progress: false/);
   }
+});
+
+test('临时上传错误自动获取新地址重试，不用重跑构建或整个同步任务',async t=>{
+  const state=await fixture(t);state.failUploadAt=1;
+  await mirrorRelease({token:'test-publisher-token',envelope,publicKey,...state,maxUploadAttempts:3});
+  assert.equal(state.uploaded.size,5);assert.equal(state.uploadAttempts,6);
+  const first=state.files[0].name;
+  assert.equal(state.calls.filter(call=>call.url.pathname.endsWith('/upload_url')&&call.url.searchParams.get('file_name')===first).length,2);
+  assert.doesNotMatch(state.release.body,/未完成/);
+});
+
+test('请求应答超时但文件已上传时读回恢复，不重复 PUT 或重复注册附件',async t=>{
+  const state=await fixture(t);let puts=0;
+  await mirrorRelease({token:'test-publisher-token',envelope,publicKey,...state,maxUploadAttempts:3,
+    uploader:async(upload,bytes)=>{
+      const name=new URL(upload.url).pathname.slice(1);puts++;state.uploaded.set(name,bytes);state.release.assets.push({name,type:'attach'});
+      if(puts===1)throw new GitCodeUploadError('response timeout',{retryable:true});
+    }});
+  assert.equal(puts,5);assert.equal(state.uploaded.size,5);
+});
+
+test('连续网络错误最多尝试三次，仍不上传签名清单或改动渠道',async t=>{
+  const state=await fixture(t);state.failAllUploads=true;
+  await assert.rejects(mirrorRelease({token:'test-publisher-token',envelope,publicKey,...state,maxUploadAttempts:3}),/HTTP 503/);
+  assert.equal(state.uploadAttempts,3);assert.equal(state.uploaded.size,0);
+  assert.equal(state.release.prerelease,false);assert.match(state.release.body,/同步失败/);
+});
+
+test('PUT 已成功但公共下载暂不可用时只重试读取，不再次上传',async t=>{
+  const state=await fixture(t);state.failReadName=state.files[0].name;
+  await assert.rejects(mirrorRelease({token:'test-publisher-token',envelope,publicKey,...state,maxUploadAttempts:3}),/公共资源读取失败/);
+  assert.equal(state.uploadAttempts,1);
+});
+
+test('权限错误不盲目重传，真实内容不一致也不重传覆盖',async t=>{
+  for(const mismatch of [false,true]){
+    const state=await fixture(t);let puts=0;
+    await assert.rejects(mirrorRelease({token:'test-publisher-token',envelope,publicKey,...state,maxUploadAttempts:3,
+      uploader:async(upload)=>{
+        puts++;if(mismatch)state.uploaded.set(new URL(upload.url).pathname.slice(1),Buffer.from('wrong bytes'));
+        throw new GitCodeUploadError('HTTP 403',{retryable:mismatch});
+      }}));
+    assert.equal(puts,1);
+  }
+});
+
+test('Linux 服务包和校验文件自动镜像，仍沿用原四客户端签名清单且清单最后上传',async t=>{
+  const state=await fixture(t),names=packageNames(data.version,data.build);
+  const checksum=Buffer.from(sha256(content)+'  '+names.linux_file+'\n');
+  const directory=await mkdtemp(join(tmpdir(),'qqm-gitcode-linux-unit-'));t.after(()=>rm(directory,{recursive:true}));
+  const extraFiles=[];state.sourceRelease.assets=[];
+  for(const [name,bytes] of [[names.linux_file,content],[names.linux_checksum,checksum]]){
+    const file=join(directory,name);await writeFile(file,bytes);
+    extraFiles.push({name,file});state.sourceRelease.assets.push({name,size:bytes.length,digest:'sha256:'+sha256(bytes)});
+  }
+  await mirrorRelease({token:'test-publisher-token',envelope,publicKey,...state,extraFiles});
+  assert.equal(state.uploaded.size,7);assert.equal([...state.uploaded.keys()].at(-1),'update-manifest.json');
+  assert.equal(JSON.parse(Buffer.from(JSON.parse(state.uploaded.get('update-manifest.json')).payload,'base64')).releases.length,4);
+  assert.match(state.release.body,/五端/);
+  state.sourceRelease.assets[0].digest='sha256:'+'0'.repeat(64);state.calls.length=0;
+  await assert.rejects(mirrorRelease({token:'test-publisher-token',envelope,publicKey,...state,extraFiles}),/摘要不匹配/);
+  assert.equal(state.calls.length,0);
 });

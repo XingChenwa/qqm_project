@@ -14,7 +14,10 @@ const token=process.env.GITCODE_TOKEN;
 const run=process.env.GITHUB_RUN_ID,attempt=process.env.GITHUB_RUN_ATTEMPT;
 check(process.env.GITHUB_REPOSITORY===repo&&/^\d+$/.test(run??'')&&/^\d+$/.test(attempt??''),'Only the owner Actions workflow may run this probe');
 check(token,'GITCODE_TOKEN is required');
-const tag=`qqm-upload-test-${run}-${attempt}`,marker=`Temporary QQM upload probe ${randomUUID()}`;
+const cleanupOnly=process.env.PROBE_CLEANUP_TAG??'';
+const tag=cleanupOnly||`qqm-upload-test-${run}-${attempt}`;
+check(/^qqm-upload-test-\d+-\d+$/.test(tag),'Cleanup is restricted to diagnostic tags');
+let marker=`Temporary QQM upload probe ${randomUUID()}`;
 const fixtureNames=new Set(),results=[];
 const sha=b=>createHash('sha256').update(b).digest('hex');
 let created=false,identity,tagIdentity,cleanupRelease=false,cleanupTag=false;
@@ -25,7 +28,8 @@ async function api(path,{method='GET',body,missing=false}={}){
     ...(body?{body:JSON.stringify(body)}:{}),redirect:'error',signal:AbortSignal.timeout(20000)});}
   catch{throw Error('Probe API transport failed');}
   const bytes=await response.arrayBuffer();check(bytes.byteLength<=1048576,'Probe API response too large');
-  const text=Buffer.from(bytes).toString();let data;try{data=text?JSON.parse(text):null;}catch{throw Error(`Probe API HTTP ${response.status}, invalid JSON`);}
+  const text=Buffer.from(bytes).toString();if(method==='DELETE'&&response.ok)return null;
+  let data;try{data=text?JSON.parse(text):null;}catch{throw Error(`Probe API HTTP ${response.status}, invalid JSON`);}
   if(missing&&(response.status===404||response.status===400&&/未找到 release|不存在|not found/i.test(data?.error_message??'')))return null;
   check(response.ok,`Probe API ${method} HTTP ${response.status}`);return data;
 }
@@ -109,6 +113,14 @@ const productionSummary=r=>JSON.stringify([r.tag_name,r.name,r.body,r.release_st
   r.assets.filter(a=>a.type==='attach').map(a=>a.name).sort()]);
 try{
   production=productionSummary(await api('/releases/tags/v1.3.9'));
+  if(cleanupOnly){
+    const old=await api(`/releases/tags/${tag}`),ownTag=await findProbeTag();
+    check(old.name==='临时上传诊断测试（不是客户端版本）'&&/^Temporary QQM upload probe [a-f0-9-]{36}\n/.test(old.body??'')&&
+      old.assets.every(a=>a.type!=='attach'||/^probe-(?:python|curl)-\d+\.bin$/.test(a.name))&&ownTag?.commit?.sha,'Not an untouched diagnostic release');
+    marker=old.body.split('\n')[0];identity=recordIdentity(old);tagIdentity=tagRecordIdentity(ownTag);
+    for(const asset of old.assets.filter(a=>a.type==='attach'))fixtureNames.add(asset.name);
+    created=true;
+  }else{
   check(!await api(`/releases/tags/${tag}`,{missing:true}),'Diagnostic release already exists; refusing to reuse');
   check(!await findProbeTag(),'Diagnostic tag already exists; refusing to reuse');
   const release=await api('/releases',{method:'POST',body:{tag_name:tag,name:'临时上传诊断测试（不是客户端版本）',
@@ -121,18 +133,23 @@ try{
   if(python)await probe('python',maxMB*1024*1024);
   if(curl)await probe('curl',maxMB*1024*1024);
   check(results.some(r=>r.size===maxMB*1024*1024&&r.ok),'No large-file transport passed');
+  }
 }catch(error){console.error((error instanceof Error?error.message:'Probe failed').replaceAll(token,'[redacted]').replace(/https?:\/\/\S+/g,'[url]').split('\n')[0]);process.exitCode=1;}
 finally{
   if(created)try{
     const current=await api(`/releases/tags/${tag}`);
     check(current.tag_name===tag&&recordIdentity(current)===identity&&current.body?.startsWith(marker)&&
       current.assets.every(a=>a.type!=='attach'||fixtureNames.has(a.name)),'Diagnostic resource was edited; refusing cleanup');
-    await api(`/releases/${tag}`,{method:'DELETE'});
-    check(!await api(`/releases/tags/${tag}`,{missing:true}),'Diagnostic release still exists');cleanupRelease=true;
     const tagRecord=await findProbeTag();
-    if(tagRecord){check(tagIdentity&&tagRecordIdentity(tagRecord)===tagIdentity,'Diagnostic tag changed; refusing cleanup');await api(`/tags/${tag}`,{method:'DELETE'});}
+    check(tagRecord&&tagIdentity&&tagRecordIdentity(tagRecord)===tagIdentity,'Diagnostic tag changed; refusing cleanup');
+    for(const asset of current.assets.filter(a=>a.type==='attach')){
+      check(Number.isSafeInteger(asset.id)&&asset.id>0,'Invalid diagnostic attachment ID');
+      await api(`/releases/${tag}/attach_files/${asset.id}`,{method:'DELETE'});
+    }
+    await api(`/tags/${tag}`,{method:'DELETE'});
     check(!await findProbeTag(),'Diagnostic tag still exists');
     cleanupTag=true;
+    check(!await api(`/releases/tags/${tag}`,{missing:true}),'Diagnostic release record still exists');cleanupRelease=true;
   }catch(error){console.log('Diagnostic cleanup incomplete: '+(error instanceof Error?error.message:'unknown'));process.exitCode=1;}
   if(production)try{check(productionSummary(await api('/releases/tags/v1.3.9'))===production,'Production release changed during probe');console.log('PASS production v1.3.9 metadata and file list unchanged');}catch{console.log('Production state could not be confirmed');process.exitCode=1;}
   const summary={diagnosticTag:tag,results,cleanupRelease,cleanupTag};console.log(JSON.stringify(summary));

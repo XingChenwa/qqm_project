@@ -25,7 +25,7 @@ jobs:
         with:
           persist-credentials: false
       - name: 检查发布类型和上传失败处理
-        run: node --test tool/tests/gitcode_release.test.mjs
+        run: node --test tool/tests/gitcode_release.test.mjs tool/tests/gitcode_transport.test.mjs
       - name: 读取原签名版本并同步，不重新构建
         run: node tool/mirror_github_release.mjs
         env:

@@ -7,6 +7,10 @@ on:
         default: '16'
         type: choice
         options: ['16', '80']
+      cleanup_tag:
+        description: 仅清理已有 qqm-upload-test-* 临时测试版本（留空则执行上传诊断）
+        type: string
+        default: ''
 permissions:
   contents: read
 concurrency:
@@ -25,3 +29,4 @@ jobs:
         env:
           GITCODE_TOKEN: ${{ secrets.GITCODE_TOKEN }}
           PROBE_MB: ${{ inputs.size_mb }}
+          PROBE_CLEANUP_TAG: ${{ inputs.cleanup_tag }}
