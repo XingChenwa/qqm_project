@@ -18,6 +18,7 @@ void main() {
   Future<String> code(AdminAuth auth) async =>
       (await File(auth.setupTokenPath).readAsString()).trim();
   const password = 'only-for-offline-tests-2026';
+  const entrance = 'offline-admin-entrance';
 
   test('首次安装只生成本地初始化码，重启仍必须设置密码', () async {
     final auth = await AdminAuth.open(directory);
@@ -48,6 +49,7 @@ void main() {
           token: entry.$1,
           password: entry.$2,
           confirmation: entry.$3,
+          entrance: entrance,
         ),
         throwsFormatException,
       );
@@ -64,8 +66,11 @@ void main() {
       token: token,
       password: password,
       confirmation: password,
+      entrance: entrance,
     );
     expect(auth.isConfigured, isTrue);
+    expect(auth.isReady, isTrue);
+    expect(auth.entrance, entrance);
     expect(await File(auth.setupTokenPath).exists(), isFalse);
     expect(auth.acceptsSetupToken(token), isFalse);
     final raw = await File('${directory.path}/admin-auth.json').readAsString();
@@ -84,6 +89,7 @@ void main() {
         token: token,
         password: password,
         confirmation: password,
+        entrance: entrance,
       ),
       throwsStateError,
     );
@@ -97,12 +103,14 @@ void main() {
       token: token,
       password: password,
       confirmation: password,
+      entrance: entrance,
     );
     await expectLater(
       auth.configure(
         token: token,
         password: '$password-second',
         confirmation: '$password-second',
+        entrance: entrance,
       ),
       throwsStateError,
     );
@@ -124,6 +132,7 @@ void main() {
       token: oldCode,
       password: password,
       confirmation: password,
+      entrance: entrance,
     );
     expect(await auth.verifyPassword(password), isTrue);
     expect(await legacy.exists(), isFalse);
@@ -150,6 +159,112 @@ void main() {
   test('密码文件路径不能是目录或符号链接', () async {
     await Directory('${directory.path}/setup-token.txt').create();
     await expectLater(AdminAuth.open(directory), throwsFormatException);
+  });
+
+  test('安全入口必须合法且不可利用路径编码或保留路由绕过', () async {
+    final auth = await AdminAuth.open(directory);
+    final token = await code(auth);
+    for (final value in [
+      '',
+      'xxxx',
+      '../private',
+      'api/state',
+      '/admin-panel',
+      'health?x',
+      'admin%2fsecret',
+      r'admin\secret',
+      'a' * 65,
+      '管理员入口-123',
+    ]) {
+      await expectLater(
+        auth.configure(
+          token: token,
+          password: password,
+          confirmation: password,
+          entrance: value,
+        ),
+        throwsFormatException,
+      );
+    }
+    expect(auth.isConfigured, isFalse);
+    expect(auth.acceptsSetupToken(token), isTrue);
+  });
+
+  test('私有访问链接只从本地显式取得，初始化码放片段且配置后不再返回', () async {
+    final auth = await AdminAuth.open(directory);
+    final origin = Uri.parse('http://192.0.2.10:23336');
+    final link = await auth.accessLink(origin);
+    expect(link.fragment, 'setup=${await code(auth)}');
+    expect(link.query, isEmpty);
+    expect(link.path, '/');
+    for (final bad in [
+      'ftp://192.0.2.10',
+      'http://user@localhost',
+      'http://localhost/path',
+      'http://localhost/?token=1',
+      'http://localhost/#code',
+      'http://localhost:0',
+      'http://localhost:99999',
+    ]) {
+      await expectLater(auth.accessLink(Uri.parse(bad)), throwsFormatException);
+    }
+    await auth.configure(
+      token: await code(auth),
+      password: password,
+      confirmation: password,
+      entrance: entrance,
+    );
+    expect((await auth.accessLink(origin)).toString(), '$origin/$entrance/');
+  });
+
+  test('已有 v1 密码保留哈希，先登录补入口，不重新开放初始化', () async {
+    final auth = await AdminAuth.open(directory);
+    await auth.configure(
+      token: await code(auth),
+      password: password,
+      confirmation: password,
+      entrance: entrance,
+    );
+    final file = File('${directory.path}/admin-auth.json');
+    final record =
+        jsonDecode(await file.readAsString()) as Map<String, dynamic>;
+    record['version'] = 1;
+    record.remove('entrance');
+    await file.writeAsString(jsonEncode(record));
+    final legacy = await AdminAuth.open(directory);
+    expect(legacy.isConfigured, isTrue);
+    expect(legacy.isReady, isFalse);
+    expect(legacy.needsEntrance, isTrue);
+    expect(await legacy.verifyPassword(password), isTrue);
+    expect(await File(legacy.setupTokenPath).exists(), isFalse);
+    await legacy.configureEntrance('upgraded-private-entrance');
+    final restarted = await AdminAuth.open(directory);
+    expect(restarted.isReady, isTrue);
+    expect(restarted.entrance, 'upgraded-private-entrance');
+    expect(await restarted.verifyPassword(password), isTrue);
+    final updated = jsonDecode(await file.readAsString()) as Map;
+    expect(updated['hash'], record['hash']);
+    expect(updated['salt'], record['salt']);
+    await expectLater(
+      restarted.configureEntrance('cannot-replace-entrance'),
+      throwsStateError,
+    );
+  });
+
+  test('v2 配置缺少或损坏安全入口时失败关闭，不降级到根地址', () async {
+    final auth = await AdminAuth.open(directory);
+    await auth.configure(
+      token: await code(auth),
+      password: password,
+      confirmation: password,
+      entrance: entrance,
+    );
+    final file = File('${directory.path}/admin-auth.json');
+    final record = jsonDecode(await file.readAsString()) as Map;
+    record.remove('entrance');
+    await file.writeAsString(jsonEncode(record));
+    await expectLater(AdminAuth.open(directory), throwsFormatException);
+    expect(await File(auth.setupTokenPath).exists(), isFalse);
   });
 
   test('Linux 数据目录和认证文件仅当前用户可读写', () async {

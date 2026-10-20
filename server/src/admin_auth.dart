@@ -23,6 +23,35 @@ class AdminAuth {
   File get _setupFile => File(p.join(data.path, 'setup-token.txt'));
   String get setupTokenPath => _setupFile.path;
   bool get isConfigured => _record != null;
+  String get entrance => _record?['entrance'] as String? ?? '';
+  bool get needsEntrance => isConfigured && entrance.isEmpty;
+  bool get isReady => isConfigured && !needsEntrance;
+
+  static String validateEntrance(String value) {
+    if (!RegExp(r'^[A-Za-z0-9][A-Za-z0-9_-]{7,63}$').hasMatch(value)) {
+      throw const FormatException('安全入口需为 8–64 位字母、数字、短横线或下划线，不要填写网址或斜杠');
+    }
+    return value;
+  }
+
+  /// Only an explicitly requested local CLI command may reveal this link.
+  /// The fragment is consumed by the setup page, never sent in HTTP URLs/logs.
+  Future<Uri> accessLink(Uri origin) async {
+    if (!{'http', 'https'}.contains(origin.scheme) ||
+        origin.host.isEmpty ||
+        origin.port < 1 ||
+        origin.port > 65535 ||
+        origin.userInfo.isNotEmpty ||
+        origin.hasQuery ||
+        origin.hasFragment ||
+        !{'', '/'}.contains(origin.path)) {
+      throw const FormatException('访问地址必须是 http(s)://主机:端口，不包含路径');
+    }
+    return origin.replace(
+      path: isReady ? '/$entrance/' : '/',
+      fragment: isConfigured ? null : 'setup=${await _readCode(_setupFile)}',
+    );
+  }
 
   static Future<AdminAuth> open(Directory data) async {
     await data.create(recursive: true);
@@ -66,11 +95,13 @@ class AdminAuth {
     required String token,
     required String password,
     required String confirmation,
+    required String entrance,
   }) async {
     if (isConfigured || _setting) throw StateError('管理密码已设置或正在设置，请使用密码登录');
     if (!acceptsSetupToken(token)) {
       throw const FormatException('初始化码不正确，请在服务器本地查看 setup-token.txt');
     }
+    validateEntrance(entrance);
     if (password != confirmation) throw const FormatException('两次输入的管理密码不一致');
     if (password.runes.length < 12 ||
         password.length > 256 ||
@@ -84,7 +115,8 @@ class AdminAuth {
       final salt = _randomBytes(32);
       final hash = await _derive(password, salt);
       final record = <String, dynamic>{
-        'version': 1,
+        'version': 2,
+        'entrance': entrance,
         'algorithm': _algorithm,
         'iterations': _iterations,
         'salt': base64Encode(salt),
@@ -122,6 +154,32 @@ class AdminAuth {
     }
   }
 
+  /// Existing v1 password hashes are retained. A logged-in administrator must
+  /// choose an entrance once; this never reopens the unauthenticated setup API.
+  Future<void> configureEntrance(String entrance) async {
+    if (!needsEntrance || _setting) throw StateError('安全入口已设置或尚未设置管理密码');
+    validateEntrance(entrance);
+    _setting = true;
+    final pending = File(
+      p.join(
+        data.path,
+        '.admin-auth-${base64Url.encode(_randomBytes(12))}.tmp',
+      ),
+    );
+    try {
+      final record = {..._record!, 'version': 2, 'entrance': entrance};
+      await _checkRegular(_passwordFile);
+      await pending.create(exclusive: true);
+      await _private(pending.path, '600');
+      await pending.writeAsString(jsonEncode(record), flush: true);
+      await pending.rename(_passwordFile.path);
+      _record = record;
+    } finally {
+      if (await pending.exists()) await pending.delete();
+      _setting = false;
+    }
+  }
+
   Future<bool> verifyPassword(String password) async {
     final record = _record;
     if (record == null || password.length > 256) return false;
@@ -146,13 +204,19 @@ class AdminAuth {
       if (await file.length() > 4096) throw const FormatException();
       final value = jsonDecode(await file.readAsString());
       if (value is! Map<String, dynamic> ||
-          value['version'] != 1 ||
+          !{1, 2}.contains(value['version']) ||
           value['algorithm'] != _algorithm ||
           value['iterations'] != _iterations ||
           value['salt'] is! String ||
           value['hash'] is! String ||
           base64Decode(value['salt'] as String).length != 32 ||
           base64Decode(value['hash'] as String).length != 32) {
+        throw const FormatException();
+      }
+      if (value['version'] == 2) {
+        if (value['entrance'] is! String) throw const FormatException();
+        validateEntrance(value['entrance'] as String);
+      } else if (value.containsKey('entrance')) {
         throw const FormatException();
       }
       return value;

@@ -79,38 +79,49 @@ Future<void> main() async {
       port: 0,
       autoConnect: true,
     );
-    final origin = service.address;
+    var origin = service.address;
     String? cookie;
-    Future<({int code, String text, dynamic data})> request(
+    var entrancePath = '';
+    String? serviceHost;
+    Future<({int code, String text, dynamic data, List<Cookie> cookies})>
+    request(
       String route, {
       Map<String, dynamic>? body,
       bool header = true,
       String? foreignOrigin,
       String? host,
+      bool root = false,
     }) async {
       final req = await http.openUrl(
         body == null ? 'GET' : 'POST',
-        origin.resolve(route),
+        origin.resolve(root ? route : '$entrancePath$route'),
       );
+      req.followRedirects = false;
       if (header) req.headers.set('X-QQM-Request', '1');
       if (cookie != null) req.headers.set('Cookie', cookie!);
       if (foreignOrigin != null) req.headers.set('Origin', foreignOrigin);
-      if (host != null) req.headers.set('Host', host);
+      if (host ?? serviceHost case final String authority) {
+        req.headers.set('Host', authority);
+      }
       if (body != null) {
         req.headers.contentType = ContentType.json;
         req.write(jsonEncode(body));
       }
       final response = await req.close();
       if (response.cookies.isNotEmpty) {
-        cookie =
-            '${response.cookies.first.name}=${response.cookies.first.value}';
+        cookie = '${response.cookies.last.name}=${response.cookies.last.value}';
       }
       final text = await utf8.decoder.bind(response).join();
       dynamic data;
       try {
         data = jsonDecode(text);
       } catch (_) {}
-      return (code: response.statusCode, text: text, data: data);
+      return (
+        code: response.statusCode,
+        text: text,
+        data: data,
+        cookies: response.cookies,
+      );
     }
 
     check((await request('/health')).code == 200, '健康检查');
@@ -171,6 +182,7 @@ Future<void> main() async {
               'token': 'wrong',
               'password': password,
               'confirmation': password,
+              'entrance': 'offline-private-entrance',
             },
           )).code ==
           400,
@@ -183,6 +195,7 @@ Future<void> main() async {
               'token': token,
               'password': 'short',
               'confirmation': 'short',
+              'entrance': 'offline-private-entrance',
             },
           )).code ==
           400,
@@ -195,6 +208,7 @@ Future<void> main() async {
               'token': token,
               'password': password,
               'confirmation': '$password-mismatch',
+              'entrance': 'offline-private-entrance',
             },
           )).code ==
           400,
@@ -210,8 +224,44 @@ Future<void> main() async {
               'confirmation': password,
             },
           )).code ==
+          400,
+      '管理密码和安全入口必须一并设置',
+    );
+    check(
+      (await request(
+            '/api/setup',
+            body: {
+              'token': token,
+              'password': password,
+              'confirmation': password,
+              'entrance': 'offline-private-entrance',
+            },
+          )).code ==
           200,
       '首次设置管理密码',
+    );
+    entrancePath = '/offline-private-entrance';
+    for (final path in [
+      '/',
+      '/api/state',
+      '/api/login',
+      '/app.js',
+      '/wrong-entrance/',
+      '/wrong-entrance/api/state',
+      '$entrancePath%2fapi/state',
+      '$entrancePath/api%2fstate',
+      '$entrancePath//api/state',
+      '$entrancePath/../app.js',
+    ]) {
+      final response = await request(path, root: true);
+      check(response.code == 404, '错误入口和根路径不能访问管理资源：$path');
+      check(!response.text.contains(entrancePath), '404 不得泄露入口');
+    }
+    check((await request('/')).code == 200, '完整安全入口可打开页面');
+    check((await request('/style.css')).code == 200, '入口内样式可读取');
+    check(
+      (await request('/health', root: true)).data.toString() == '{ok: true}',
+      '健康检查不泄露配置',
     );
     check(!service.needsSetup && bot.connectCalls == 1, '密码设置后才允许自动连接');
     check(!await File(service.setupTokenPath).exists(), '一次性初始化码设置后移除');
@@ -229,6 +279,7 @@ Future<void> main() async {
               'token': token,
               'password': '$password-replacement',
               'confirmation': '$password-replacement',
+              'entrance': 'cannot-replace-entrance',
             },
           )).code ==
           409,
@@ -500,8 +551,95 @@ Future<void> main() async {
     );
     check((await request('/api/logout', body: {})).code == 200, '退出登录');
     check((await request('/api/state')).code == 401, '退出后接口失效');
+
+    // Upgrade an existing password-only installation. An unauthenticated
+    // visitor cannot choose its entrance, and HTTPS reverse-proxy cookies stay
+    // both Secure and scoped after the authenticated migration.
+    await service.close();
+    service = null;
+    final authFile = File('${temporary.path}/admin-auth.json');
+    final oldRecord =
+        jsonDecode(await authFile.readAsString()) as Map<String, dynamic>;
+    oldRecord['version'] = 1;
+    oldRecord.remove('entrance');
+    await authFile.writeAsString(jsonEncode(oldRecord));
+    final upgradedPlugins = PluginManager(storage);
+    await upgradedPlugins.init();
+    final upgradedBot = OfflineBot(storage, apiService: ServerFixtureApi());
+    service = await ManagerServer.start(
+      bot: upgradedBot,
+      plugins: upgradedPlugins,
+      storage: storage,
+      data: temporary,
+      assets: Directory.current,
+      host: '0.0.0.0',
+      port: 0,
+      publicUrl: 'https://bot.example.invalid',
+      autoConnect: true,
+    );
+    origin = service.address.replace(host: '127.0.0.1');
+    serviceHost = 'bot.example.invalid';
+    entrancePath = '';
+    cookie = null;
+    check(service.needsEntrance && !service.needsSetup, '旧密码安装只需补设入口，不能重新初始化');
+    check(upgradedBot.connectCalls == 0, '补设入口前不自动连接');
+    check((await request('/api/state')).code == 401, '迁移前仍须登录');
+    check(
+      (await request(
+            '/api/auth/entrance',
+            body: {'entrance': 'attacker-entrance'},
+          )).code ==
+          401,
+      '陌生人不能抢占旧安装入口',
+    );
+    check((await request('/api/setup', body: {})).code == 409, '升级不会重新开放初始化');
+    check(
+      (await request(
+            '/api/login',
+            body: {'password': password},
+            foreignOrigin: 'https://attacker.invalid',
+          )).code ==
+          403,
+      '反代模式拒绝跨站登录',
+    );
+    final login = await request(
+      '/api/login',
+      body: {'password': password},
+      foreignOrigin: 'https://bot.example.invalid',
+    );
+    check(
+      login.code == 200 && login.data['needsEntrance'] == true,
+      '使用原密码登录后补入口',
+    );
+    check((await request('/api/state')).code == 428, '未补入口不能使用管理 API');
+    check(
+      (await request(
+            '/api/auth/entrance',
+            body: {'entrance': '../bad'},
+          )).code ==
+          400,
+      '不能通过迁移写入非法入口',
+    );
+    final upgraded = await request(
+      '/api/auth/entrance',
+      body: {'entrance': 'upgraded-safe-entrance'},
+    );
+    check(upgraded.code == 200, '已认证的旧管理员补设入口');
+    final scopedCookie = upgraded.cookies.last;
+    check(
+      scopedCookie.path == '/upgraded-safe-entrance/' &&
+          scopedCookie.secure &&
+          scopedCookie.httpOnly,
+      '反代会话 Cookie 保留 Secure/HttpOnly 和入口作用域',
+    );
+    check(upgradedBot.connectCalls == 1, '入口设置完成才自动连接');
+    check((await request('/')).code == 404, '迁移后根地址关闭');
+    entrancePath = '/upgraded-safe-entrance';
+    check((await request('/api/state')).code == 200, '迁移后完整入口可继续访问原数据');
+    final updatedRecord = jsonDecode(await authFile.readAsString()) as Map;
+    check(updatedRecord['hash'] == oldRecord['hash'], '升级保留原密码哈希');
     stdout.writeln(
-      'PASS: Linux 首次强制设置密码、自动连接门禁、登录/CSRF/越界防护、多机器人隔离、聊天恢复、七插件和文件编辑。',
+      'PASS: Linux 网页密码＋安全入口、旧密码迁移、反代 Secure Cookie、自动连接门禁、CSRF/越界防护、多机器人隔离、聊天恢复、七插件和文件编辑。',
     );
   } finally {
     await service?.close();

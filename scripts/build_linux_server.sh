@@ -17,9 +17,14 @@ done
 cp server/README.md "$package/README.md"
 cp server/qqbotmanager.service "$package/qqbotmanager.service"
 cp server/start.sh "$package/start.sh"
+cp server/install.sh "$package/install.sh"
 cp LICENSE "$package/LICENSE"
-chmod 755 "$package/qqm-server" "$package/start.sh"
-# Ensure the Ubuntu 22.04 artifact can start before publishing it.
+chmod 755 "$package/qqm-server" "$package/start.sh" "$package/install.sh"
+# The Dart executable contains the SDK's prelinked AOT runtime. Check its real
+# glibc requirements, not the name of the runner's distribution.
+required_glibc=$(LC_ALL=C readelf --version-info "$package/qqm-server" | sed -nE 's/.*Name: GLIBC_([0-9.]+).*/\1/p' | sort -Vu | tail -1)
+[[ -n "$required_glibc" && $(printf '%s\n' "$required_glibc" 2.31 | sort -V | tail -1) == 2.31 ]] || { printf 'Unexpected glibc requirement: %s\n' "$required_glibc" >&2; exit 1; }
+# Ensure the compiled artifact can start before publishing it.
 "$package/qqm-server" --help
 "$package/qqm-server" --host 127.0.0.1 --port 23336 --assets "$package" --data "$stage/smoke-data" --no-auto-connect > "$stage/smoke.log" 2>&1 &
 service_pid=$!
@@ -29,6 +34,8 @@ curl --retry 15 --retry-connrefused --retry-delay 1 --fail --silent http://127.0
 kill -TERM "$service_pid"
 wait "$service_pid"
 trap - EXIT
+bash scripts/test_linux_distros.sh "$package"
+bash scripts/test_linux_installer.sh "$package"
 tar -czf "dist/$filename" -C "$stage" qqbotmanager
 (cd dist && sha256sum "$filename" > "$filename.sha256")
 printf 'Linux 网页服务包已生成：%s\n' "$filename"

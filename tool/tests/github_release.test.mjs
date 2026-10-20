@@ -64,6 +64,10 @@ test('GitHub 发布需要四端完成、签名并部署 Pages；手动构建不�
   assert.ok(!publish.includes("'release','create'") && !publish.includes('PUBLIC_RELEASE_TOKEN'));
   assert.match(publish, /\/pages\/builds/);
   assert.match(publish, /!release.immutable/);
+  assert.match(workflow, /gitcode:\s+name:[^\n]+\s+needs: publish/);
+  assert.match(workflow, /RELEASE_TAG: \$\{\{ github.event.release.tag_name \}\}/);
+  assert.match(publish, /releaseChannel\(release\) === 'stable'/);
+  assert.match(publish, /make_latest=true/);
 });
 test('静态首页有原项目链接、Star、插件和四平台下载，无管理后台或统计 API', {skip:!process.env.WEBSITE_DIRECTORY}, async () => {
   const html = await readFile(join(process.env.WEBSITE_DIRECTORY,'index.html'), 'utf8');

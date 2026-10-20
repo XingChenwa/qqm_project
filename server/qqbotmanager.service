@@ -8,7 +8,11 @@ Type=simple
 User=qqbotmanager
 Group=qqbotmanager
 WorkingDirectory=/opt/qqbotmanager
-ExecStart=/opt/qqbotmanager/qqm-server --host 127.0.0.1 --port 23336 --data /var/lib/qqbotmanager --assets /opt/qqbotmanager
+Environment=QQM_HOST=127.0.0.1
+Environment=QQM_PORT=23336
+Environment=QQM_DATA=/var/lib/qqbotmanager
+EnvironmentFile=-/etc/qqbotmanager.env
+ExecStart=/opt/qqbotmanager/start.sh
 StateDirectory=qqbotmanager
 StateDirectoryMode=0700
 UMask=0077

@@ -4,7 +4,6 @@ import {execFileSync} from 'node:child_process';
 import {join, resolve} from 'node:path';
 import {tmpdir} from 'node:os';
 import {repository, pagesUrl, websiteBranch, manifestName, base64, signingKeys, readVersion, sha256, assetDefinitions, signManifest, verifyManifest, releaseChannel, manifestChannel, versionPattern} from './github_release_core.mjs';
-import {mirrorRelease, uploadGitCodeFile} from './gitcode_release.mjs';
 import {syncWebsiteMetadata} from './github_site_sync.mjs';
 import {packageNames} from './package_names.mjs';
 
@@ -150,16 +149,14 @@ try {
         assert(sha256(await readFile(join(directory,file.name)))===file.hash,'已有附件内容不同，请发布更高版本');
       } else gh('release','upload',info.tag,file.file,'--repo',repository);
     }
-    await syncAndBuildWebsite({data,envelope});
-    if (process.env.GITCODE_TOKEN) {
-      await mirrorRelease({token:process.env.GITCODE_TOKEN,envelope,publicKey,
-        files:files.filter(file=>file.name===manifestName||definitions.some(asset=>asset.name===file.name)),
-        uploader:uploadGitCodeFile,onProgress:message=>console.log(message)});
-      console.log('GitCode 国内节点已同步并完成公共下载校验。');
-    } else {
-      console.warn('::warning::尚未配置 GITCODE_TOKEN，本次仅发布 GitHub 国际线路。');
+    if (releaseChannel(release) === 'stable') {
+      // Do not advertise an empty Release while runners are still compiling.
+      // The operator creates it without latest; promote only after all signed
+      // packages are present. Beta never changes the official latest pointer.
+      gh('api','--method','PATCH','repos/'+repository+'/releases/'+eventRelease.id,'-f','make_latest=true');
     }
-    console.log('四端安装包与签名清单已发布到 '+repository+' '+info.tag+'。');
+    await syncAndBuildWebsite({data,envelope});
+    console.log('GitHub 安装包、签名清单与 Pages 已就绪；GitCode 由后续独立任务同步验证。');
   } else if(command==='pages') {
     for (const channel of ['stable','beta']) {
       const selected=await newestSignedRelease(channel);

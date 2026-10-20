@@ -225,6 +225,8 @@ jobs:
       - run: flutter pub get
       - name: 验证无桌面环境内核与网页登录安全
         run: dart run tool/server_smoke.dart
+      - name: 验证 Linux 安装器的校验与路径保护
+        run: node --test tool/tests/linux_installer.test.mjs
       - name: 安装固定版本浏览器测试工具
         run: |
           npm install --prefix "$RUNNER_TEMP/qqm-browser" --no-audit --no-fund --ignore-scripts playwright@1.62.1
@@ -233,7 +235,7 @@ jobs:
         run: node tool/tests/server_browser.mjs
         env:
           QQM_PLAYWRIGHT: ${{ runner.temp }}/qqm-browser/node_modules/playwright
-      - name: 在 Ubuntu 22.04 编译并验证服务包
+      - name: 编译并验证 Ubuntu / Debian / Rocky Linux 服务包
         run: bash scripts/build_linux_server.sh
       - name: 保存 Linux 网页服务包
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -273,5 +275,25 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           WEBSITE_DIRECTORY: build/website
           UPDATE_SIGNING_PRIVATE_KEY: ${{ secrets.UPDATE_SIGNING_PRIVATE_KEY }}
-          # GitCode personal token is publisher-only; never a dart-define.
+
+  gitcode:
+    name: 同步 GitCode 国内安装包与签名清单
+    needs: publish
+    if: github.event_name == 'release'
+    # Keep the domestic upload independent of compilation/Pages. This network
+    # path avoids the repeated timeouts seen on Ubuntu-hosted uploads.
+    runs-on: macos-15
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: 镜像相同安装包，公共读回校验后再标记最新
+        run: node tool/mirror_github_release.mjs
+        env:
+          GH_TOKEN: ${{ github.token }}
           GITCODE_TOKEN: ${{ secrets.GITCODE_TOKEN }}
+          UPDATE_PUBLIC_KEY: ${{ env.UPDATE_PUBLIC_KEY }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}

@@ -214,6 +214,30 @@ label {
   margin: -4px 0 20px;
   overflow-wrap: anywhere;
 }
+.entrance-row {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
+.entrance-row input {
+  flex: 1;
+  width: 0;
+  margin-bottom: 0;
+}
+.entrance-row button {
+  flex: none;
+  padding: 11px 10px;
+}
+.access-address {
+  overflow-wrap: anywhere;
+  padding: 10px;
+  border-radius: 10px;
+  background: var(--soft);
+  color: var(--text);
+}
+.transport-warning {
+  color: #a96415;
+}
 #auth-retry {
   margin-top: 20px;
 }

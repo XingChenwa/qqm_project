@@ -43,6 +43,7 @@ try {
     await readFile(join(data, "setup-token.txt"), "utf8")
   ).trim();
   const password = "offline-browser-admin-password-2026";
+  const entrance = "offline-browser-entrance";
   const avatarImage = await readFile(resolve("assets/branding/logo.png"));
   browser = await chromium.launch({ headless: true });
   const page = await browser.newPage({
@@ -91,12 +92,13 @@ try {
   await page.setViewportSize({ width: 1360, height: 900 });
   await page.locator("#setup-token").fill("wrong-initialization-code");
   await page.locator("#setup-password").fill(password);
+  await page.locator("#setup-entrance").fill(entrance);
   await page.locator("#setup-confirm").fill(password + "-different");
-  await page.locator("#setup-form button").click();
+  await page.locator('#setup-form button[type="submit"]').click();
   await page.getByText("两次输入的管理密码不一致", { exact: true }).waitFor();
   await page.getByRole("button", { name: "知道了", exact: true }).click();
   await page.locator("#setup-confirm").fill(password);
-  await page.locator("#setup-form button").click();
+  await page.locator('#setup-form button[type="submit"]').click();
   await page
     .getByText("初始化码不正确，请在服务器本地查看 setup-token.txt", {
       exact: true,
@@ -104,9 +106,28 @@ try {
     .waitFor();
   assert.equal(await page.locator("#app").isVisible(), false);
   await page.getByRole("button", { name: "知道了", exact: true }).click();
-  await page.locator("#setup-token").fill(setupToken);
-  await page.locator("#setup-form button").click();
+  await page.goto(origin + "/#setup=" + setupToken, { waitUntil: "networkidle" });
+  await page.locator("#setup-view").waitFor({ state: "visible" });
+  await page.waitForFunction(() => !location.hash);
+  assert.equal(new URL(page.url()).hash, "");
+  assert.equal(await page.locator("#setup-owner-proof").isVisible(), false);
+  await page.locator("#setup-password").fill(password);
+  await page.locator("#setup-confirm").fill(password);
+  await page.locator("#setup-entrance").fill(entrance);
+  await page.locator('#setup-form button[type="submit"]').click();
   await page.locator("#app").waitFor({ state: "visible" });
+  assert.equal(new URL(page.url()).pathname, `/${entrance}/`);
+  await page.getByRole("button", { name: "知道了", exact: true }).click();
+  for (const path of ["/", "/api/state", "/app.js", "/wrong-path/"]) {
+    const response = await page.request.get(origin + path);
+    assert.equal(response.status(), 404, path + " must not reveal the entrance");
+    assert.ok(!(await response.text()).includes(entrance));
+  }
+  const cookies = await page.context().cookies();
+  const sessionCookie = cookies.find((cookie) => cookie.name === "qqm_session");
+  assert.equal(sessionCookie.path, `/${entrance}/`);
+  assert.ok(sessionCookie.httpOnly);
+  assert.equal(sessionCookie.sameSite, "Strict");
   await assert.rejects(readFile(join(data, "setup-token.txt")), {
     code: "ENOENT",
   });
@@ -307,7 +328,7 @@ try {
   });
   // The core revision is independent of this local-only response fixture.
   await page.evaluate(async () => {
-    await fetch("/api/read", {
+    await fetch("api/read", {
       method: "POST",
       headers: { "X-QQM-Request": "1", "Content-Type": "application/json" },
       body: JSON.stringify({ appId: "10000001", session: "group-a" }),
@@ -330,7 +351,7 @@ try {
     time: new Date().toISOString(),
   });
   await page.evaluate(async () => {
-    await fetch("/api/read", {
+    await fetch("api/read", {
       method: "POST",
       headers: { "X-QQM-Request": "1", "Content-Type": "application/json" },
       body: JSON.stringify({ appId: "10000001", session: "group-a" }),

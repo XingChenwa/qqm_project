@@ -98,7 +98,7 @@ class ManagerServer {
     result._server.listen((request) => unawaited(result._handle(request)));
     var ticking = false;
     result._tick = Timer.periodic(const Duration(minutes: 1), (_) async {
-      if (ticking || result._closed || !result._auth.isConfigured) return;
+      if (ticking || result._closed || !result._auth.isReady) return;
       ticking = true;
       try {
         await plugins.tick();
@@ -116,10 +116,12 @@ class ManagerServer {
   Uri get address =>
       Uri(scheme: 'http', host: _server.address.address, port: _server.port);
   bool get needsSetup => !_auth.isConfigured;
+  bool get needsEntrance => _auth.needsEntrance;
   String get setupTokenPath => _auth.setupTokenPath;
+  String get _entrancePath => _auth.isReady ? '/${_auth.entrance}/' : '/';
   void _maybeAutoConnect() {
     if (!_closed &&
-        _auth.isConfigured &&
+        _auth.isReady &&
         _autoConnect &&
         bot.config.appId.isNotEmpty &&
         bot.config.clientSecret.isNotEmpty) {
@@ -197,12 +199,22 @@ class ManagerServer {
     if (_sessions.length >= 32) _sessions.remove(_sessions.keys.first);
     final token = _randomToken();
     _sessions[token] = DateTime.now().add(const Duration(hours: 12));
+    if (_auth.isReady) {
+      // Expire a v1 migration session at the old root before issuing a scoped
+      // cookie. Keeping both would make cookie selection ambiguous.
+      request.response.cookies.add(
+        Cookie('qqm_session', '')
+          ..path = '/'
+          ..httpOnly = true
+          ..maxAge = 0,
+      );
+    }
     request.response.cookies.add(
       Cookie('qqm_session', token)
         ..httpOnly = true
         ..secure = publicUrl.isNotEmpty
         ..sameSite = SameSite.strict
-        ..path = '/'
+        ..path = _entrancePath
         ..maxAge = 43200,
     );
   }
@@ -238,6 +250,7 @@ class ManagerServer {
         token: _str(body, 'token', 256),
         password: password,
         confirmation: _str(body, 'confirmation', 256),
+        entrance: _str(body, 'entrance', 64),
       );
       _maybeAutoConnect();
       _changed();
@@ -247,7 +260,11 @@ class ManagerServer {
     }
     _failures.remove(peer);
     _grantSession(request);
-    _json(request, {'ok': true});
+    _json(request, {
+      'ok': true,
+      'needsEntrance': needsEntrance,
+      if (_auth.isReady) 'entrancePath': _entrancePath,
+    });
   }
 
   bool _sameOrigin(HttpRequest request) {
@@ -290,14 +307,36 @@ class ManagerServer {
         _json(request, {'error': '来源不被允许'}, 403);
         return;
       }
-      final route = request.uri.path;
-      if (route == '/health' && request.method == 'GET') {
-        _json(request, {
-          'ok': true,
-          'version': AppConstants.appVersion,
-          'build': AppConstants.appBuild,
-        });
+      final path = request.uri.path;
+      // The public liveness endpoint discloses no management or setup state.
+      if (path == '/health' && request.method == 'GET') {
+        _json(request, {'ok': true});
         return;
+      }
+      // All UI, assets AND APIs live below the configured entrance. Reject
+      // encoded separators/aliases instead of relying on proxy normalization.
+      // Query strings may still contain the normal encoded OpenIDs/filenames.
+      final rawPath = request.uri.toString().split('?').first;
+      if (rawPath.contains('%') ||
+          rawPath.contains(r'\') ||
+          path.contains('//')) {
+        response.statusCode = 404;
+        return;
+      }
+      var route = path;
+      if (_auth.isReady) {
+        if (path == _entrancePath.substring(0, _entrancePath.length - 1) &&
+            {'GET', 'HEAD'}.contains(request.method)) {
+          response.statusCode = HttpStatus.temporaryRedirect;
+          response.headers.set('Location', _entrancePath);
+          return;
+        }
+        if (!path.startsWith(_entrancePath)) {
+          // Never redirect / or a wrong entrance to the correct secret path.
+          response.statusCode = 404;
+          return;
+        }
+        route = path.substring(_entrancePath.length - 1);
       }
       if (!route.startsWith('/api/')) {
         if (request.method != 'GET' && request.method != 'HEAD') {
@@ -335,7 +374,10 @@ class ManagerServer {
         return;
       }
       if (route == '/api/auth/status' && request.method == 'GET') {
-        _json(request, {'needsSetup': needsSetup});
+        _json(request, {
+          'needsSetup': needsSetup,
+          'needsEntrance': needsEntrance,
+        });
         return;
       }
       if ((route == '/api/login' || route == '/api/setup') &&
@@ -363,8 +405,24 @@ class ManagerServer {
         _json(request, {'error': '请先登录管理器'}, 401);
         return;
       }
+      if (route == '/api/auth/entrance' && request.method == 'POST') {
+        final body = await _body(request);
+        await _serial(() async {
+          await _auth.configureEntrance(_str(body, 'entrance', 64));
+          _sessions.clear();
+          _grantSession(request);
+          _maybeAutoConnect();
+          _changed();
+          _json(request, {'ok': true, 'entrancePath': _entrancePath});
+        });
+        return;
+      }
+      if (needsEntrance && route != '/api/logout') {
+        _json(request, {'error': '请先设置安全入口', 'needsEntrance': true}, 428);
+        return;
+      }
       if (request.method == 'GET') {
-        await _get(request);
+        await _get(request, route);
         return;
       }
       if (request.method != 'POST') {
@@ -376,14 +434,14 @@ class ManagerServer {
         _sessions.remove(session);
         response.cookies.add(
           Cookie('qqm_session', '')
-            ..path = '/'
+            ..path = _entrancePath
             ..maxAge = 0
             ..httpOnly = true,
         );
         _json(request, {'ok': true});
         return;
       }
-      await _serial(() => _post(request, body));
+      await _serial(() => _post(request, body, route));
     } catch (error) {
       if (error is FormatException ||
           error is PluginManifestException ||
@@ -465,9 +523,8 @@ class ManagerServer {
     'imageUrl': message.imageUrl,
     if (message.hasReceivedPayload) 'body': _received(message.receivedBody),
   };
-  Future<void> _get(HttpRequest request) async {
+  Future<void> _get(HttpRequest request, String route) async {
     final query = request.uri.queryParameters;
-    final route = request.uri.path;
     if (route.startsWith('/api/group/')) {
       final target = _groupTarget(query);
       final data = switch (route) {
@@ -498,7 +555,7 @@ class ManagerServer {
       _json(request, data);
       return;
     }
-    switch (request.uri.path) {
+    switch (route) {
       case '/api/state':
         if (query['revision'] == '$_revision') {
           _json(request, {'unchanged': true});
@@ -596,8 +653,12 @@ class ManagerServer {
     }
   }
 
-  Future<void> _post(HttpRequest request, Map<String, dynamic> body) async {
-    switch (request.uri.path) {
+  Future<void> _post(
+    HttpRequest request,
+    Map<String, dynamic> body,
+    String route,
+  ) async {
+    switch (route) {
       case '/api/notices/read':
         _checkEpoch(body);
         if (body['all'] == true) {

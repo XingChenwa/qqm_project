@@ -6,6 +6,7 @@ import 'package:qq_bot_manager/core/bot_client.dart';
 import 'package:qq_bot_manager/core/plugin_manager.dart';
 import 'package:qq_bot_manager/runtime/assets_server.dart';
 import 'package:qq_bot_manager/services/storage_service.dart';
+import '../src/admin_auth.dart';
 import '../src/manager_server.dart';
 
 Future<void> main(List<String> args) async {
@@ -29,13 +30,15 @@ Future<void> _run(List<String> args) async {
       '--host 127.0.0.1 --port 23336 --data ./data --assets .\n'
       '--public-url https://bot.example.com （HTTPS 反向代理时设置）\n'
       '--no-auto-connect （不自动连接已保存的机器人）\n'
-      '首次使用必须在网页设置管理密码；初始化码保存在 data/setup-token.txt。\n'
-      '不会输出初始化码、密码、机器人密钥或 Token。',
+      '--access-link http://服务器IP:23336 （仅在本地终端显示私有访问链接，不启动服务）\n'
+      '首次打开网页设置管理密码和安全入口；一次性设置链接请勿分享。\n'
+      '正常启动日志不会输出初始化码、密码、入口、机器人密钥或 Token。',
     );
     return;
   }
   String option(String name, String fallback) {
-    final index = args.indexOf('--$name');
+    // start.sh supplies defaults first. Explicit trailing CLI options win.
+    final index = args.lastIndexOf('--$name');
     if (index < 0) return fallback;
     if (index + 1 >= args.length || args[index + 1].startsWith('--')) {
       throw FormatException('--$name 缺少参数');
@@ -52,6 +55,12 @@ Future<void> _run(List<String> args) async {
   final data = Directory(p.absolute(option('data', 'data')));
   await data.create(recursive: true);
   if (!Platform.isWindows) await Process.run('chmod', ['700', data.path]);
+  if (args.contains('--access-link')) {
+    final auth = await AdminAuth.open(data);
+    final link = await auth.accessLink(Uri.parse(option('access-link', '')));
+    stdout.writeln('私有访问链接（仅供管理员使用，请勿公开）：\n$link');
+    return;
+  }
   rootBundle.root = Directory(p.absolute(option('assets', '.')));
   if (!await File(
     p.join(rootBundle.root.path, 'server/web/index.html'),
@@ -77,7 +86,11 @@ Future<void> _run(List<String> args) async {
   );
   stdout.writeln(
     'QQ机器人管理器已启动：${server.address}\n'
-    '${server.needsSetup ? '首次使用请先在网页设置管理密码。初始化码文件：${server.setupTokenPath}' : '管理密码已设置，请使用自己的密码登录。'}\n'
+    '${server.needsSetup
+        ? '首次使用请在网页设置管理密码和安全入口。初始化码文件：${server.setupTokenPath}'
+        : server.needsEntrance
+        ? '请使用原密码登录，并补设安全入口；原有数据保留。'
+        : '请使用安全入口和自己的管理密码登录。'}\n'
     '公网访问请使用 HTTPS 反向代理，不要将 data 目录设为网站根目录。',
   );
   final stopped = Completer<void>();

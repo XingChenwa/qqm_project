@@ -8,15 +8,15 @@
     />
     <meta name="color-scheme" content="light dark" />
     <title>QQ机器人管理器 · Linux 网页版</title>
-    <link rel="icon" href="/logo.png" />
-    <link rel="stylesheet" href="/style.css" />
-    <script defer src="/app.js"></script>
-    <script defer src="/group-management.js"></script>
+    <link rel="icon" href="./logo.png" />
+    <link rel="stylesheet" href="./style.css" />
+    <script defer src="./app.js"></script>
+    <script defer src="./group-management.js"></script>
   </head>
   <body>
     <main id="auth-loading" class="login-view" aria-live="polite">
       <section class="login-card">
-        <img src="/logo.png" alt="" class="brand-logo" />
+        <img src="./logo.png" alt="" class="brand-logo" />
         <h1>正在打开工作台</h1>
         <p id="auth-loading-message" class="muted">正在检查管理密码设置…</p>
         <button id="auth-retry" class="primary wide" hidden>重新连接</button>
@@ -24,11 +24,12 @@
     </main>
     <main id="setup-view" class="login-view" hidden>
       <section class="login-card setup-card">
-        <img src="/logo.png" alt="" class="brand-logo" />
+        <img src="./logo.png" alt="" class="brand-logo" />
         <p class="eyebrow">QQ BOT MANAGER / 首次使用</p>
-        <h1>先设置你的管理密码</h1>
-        <p class="muted">设置完成后，才能连接机器人和使用工作台。</p>
+        <h1>设置你的专属工作台</h1>
+        <p class="muted">首次使用，先设置管理密码和安全入口。</p>
         <form id="setup-form">
+          <div id="setup-owner-proof">
           <label for="setup-token">服务器初始化码</label>
           <input
             id="setup-token"
@@ -45,6 +46,8 @@
             <code>setup-token.txt</code
             >，用于验证你拥有这台服务。初始化码不是管理密码。
           </p>
+          </div>
+          <p id="setup-link-hint" class="hint" hidden>已从私有安装链接填写初始化码，提交时验证服务器所有权。</p>
           <label for="setup-password">设置管理密码</label>
           <input
             id="setup-password"
@@ -65,8 +68,18 @@
             autocomplete="new-password"
             placeholder="再次输入以确认"
           />
+          <label for="setup-entrance">安全入口</label>
+          <div class="entrance-row">
+            <input id="setup-entrance" required minlength="8" maxlength="64"
+              pattern="[A-Za-z0-9][A-Za-z0-9_-]{7,63}" autocomplete="off"
+              autocapitalize="none" spellcheck="false" placeholder="8–64 位字母、数字、- 或 _" />
+            <button id="setup-generate" type="button">随机生成</button>
+          </div>
+          <p id="setup-address" class="hint access-address" aria-live="polite"></p>
+          <p class="hint">请收藏完整入口地址。设置后，根地址和错误入口都返回 404。安全入口不能代替管理密码或 HTTPS。</p>
+          <p class="hint transport-warning" hidden>当前连接是 HTTP，密码与消息未经加密。公网使用前请配置 HTTPS。</p>
           <button class="primary wide" type="submit">
-            设置密码并进入工作台 <span aria-hidden="true">→</span>
+            保存并进入安全入口 <span aria-hidden="true">→</span>
           </button>
         </form>
         <p class="hint">
@@ -75,9 +88,29 @@
         </p>
       </section>
     </main>
+    <main id="entrance-view" class="login-view" hidden>
+      <section class="login-card setup-card">
+        <img src="./logo.png" alt="" class="brand-logo" />
+        <p class="eyebrow">QQ BOT MANAGER / 安全升级</p>
+        <h1>为工作台设置安全入口</h1>
+        <p class="muted">原有密码、机器人和聊天记录保留。设置入口后，才能继续使用。</p>
+        <form id="entrance-form">
+          <label for="migration-entrance">安全入口</label>
+          <div class="entrance-row">
+            <input id="migration-entrance" required minlength="8" maxlength="64"
+              pattern="[A-Za-z0-9][A-Za-z0-9_-]{7,63}" autocomplete="off"
+              autocapitalize="none" spellcheck="false" placeholder="8–64 位字母、数字、- 或 _" />
+            <button id="migration-generate" type="button">随机生成</button>
+          </div>
+          <p id="migration-address" class="hint access-address" aria-live="polite"></p>
+          <p class="hint">请收藏完整地址。设置后，直接访问根地址不会显示登录页。</p>
+          <button type="submit" class="primary wide">保存并进入安全入口</button>
+        </form>
+      </section>
+    </main>
     <main id="login-view" class="login-view" hidden>
       <section class="login-card">
-        <img src="/logo.png" alt="" class="brand-logo" />
+        <img src="./logo.png" alt="" class="brand-logo" />
         <p class="eyebrow">QQ BOT MANAGER / LINUX</p>
         <h1>你的机器人工作台</h1>
         <p class="muted">连接、聊天与插件，在浏览器里轻松管理。</p>
@@ -102,8 +135,8 @@
     </main>
     <div id="app" class="app" hidden>
       <aside class="rail">
-        <a class="brand" href="/" aria-label="QQ机器人管理器"
-          ><img src="/logo.png" alt=""
+        <a class="brand" href="./" aria-label="QQ机器人管理器"
+          ><img src="./logo.png" alt=""
         /></a>
         <nav aria-label="工作台导航">
           <button class="nav active" data-page="chat">

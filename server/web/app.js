@@ -1,5 +1,50 @@
 "use strict";
 const $ = (id) => document.getElementById(id);
+// A private setup link uses a fragment, not a query parameter. Remove it from
+// history immediately; never keep it in storage, logs or a network URL.
+const initialFragment = location.hash;
+function consumeSetupLink() {
+  const fragment = location.hash;
+  if (fragment) history.replaceState(null, "", location.pathname + location.search);
+  if (!fragment.startsWith("#setup=")) return;
+  const token = fragment.slice(7);
+  if (/^[A-Za-z0-9_-]{24,256}$/.test(token)) {
+    $("setup-token").value = token;
+    $("setup-owner-proof").hidden = true;
+    $("setup-link-hint").hidden = false;
+  }
+}
+consumeSetupLink();
+window.addEventListener("hashchange", () => {
+  if (location.hash.startsWith("#setup=")) consumeSetupLink();
+});
+document.querySelectorAll(".transport-warning").forEach((node) => {
+  node.hidden = location.protocol === "https:";
+});
+function entranceInput(prefix) {
+  const input = $(prefix + "-entrance");
+  const preview = () => {
+    $(prefix + "-address").textContent =
+      location.origin + "/" + (input.value || "你的安全入口") + "/";
+  };
+  const generate = () => {
+    if (globalThis.crypto?.getRandomValues) {
+      const bytes = crypto.getRandomValues(new Uint8Array(12));
+      input.value = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+    }
+    preview();
+  };
+  $(prefix + "-generate").onclick = generate;
+  input.oninput = preview;
+  generate();
+}
+entranceInput("setup");
+entranceInput("migration");
+function openEntrance(data) {
+  if (!/^\/[A-Za-z0-9][A-Za-z0-9_-]{7,63}\/$/.test(data.entrancePath))
+    throw Error("安全入口地址无效，请检查服务版本。");
+  location.replace(data.entrancePath + "#welcome");
+}
 const S = {
   sending: false,
   state: null,
@@ -56,6 +101,7 @@ function showLogin() {
   $("app").hidden = true;
   $("auth-loading").hidden = true;
   $("setup-view").hidden = true;
+  $("entrance-view").hidden = true;
   $("login-view").hidden = false;
 }
 function showSetup() {
@@ -63,10 +109,19 @@ function showSetup() {
   $("app").hidden = true;
   $("auth-loading").hidden = true;
   $("login-view").hidden = true;
+  $("entrance-view").hidden = true;
   $("setup-view").hidden = false;
 }
+function showEntrance() {
+  S.logged = false;
+  $("app").hidden = true;
+  $("auth-loading").hidden = true;
+  $("login-view").hidden = true;
+  $("setup-view").hidden = true;
+  $("entrance-view").hidden = false;
+}
 async function api(path, { method = "GET", body } = {}) {
-  const response = await fetch("/api/" + path, {
+  const response = await fetch(new URL("api/" + path, location.href), {
     method,
     credentials: "same-origin",
     cache: "no-store",
@@ -84,12 +139,15 @@ async function api(path, { method = "GET", body } = {}) {
   }
   if (!response.ok) {
     if (data.needsSetup === true) showSetup();
+    else if (data.needsEntrance === true) showEntrance();
     else if (
       (response.status === 401 && path !== "login") ||
       (response.status === 409 && path === "setup")
     )
       showLogin();
-    throw Error(data.error || "操作失败，请重试");
+    const error = Error(data.error || "操作失败，请重试");
+    error.needsEntrance = data.needsEntrance === true;
+    throw error;
   }
   return data;
 }
@@ -1158,6 +1216,7 @@ async function enter() {
   S.logged = true;
   $("auth-loading").hidden = true;
   $("setup-view").hidden = true;
+  $("entrance-view").hidden = true;
   $("login-view").hidden = true;
   $("app").hidden = false;
   await refresh(true);
@@ -1171,21 +1230,28 @@ $("setup-form").onsubmit = (event) => {
     if (password !== confirmation) throw Error("两次输入的管理密码不一致");
     if ([...password].length < 12 || password.length > 256 || !password.trim())
       throw Error("管理密码需为 12–256 个字符，不能只含空白");
-    await post("setup", {
+    const data = await post("setup", {
       token: $("setup-token").value.trim(),
       password,
       confirmation,
+      entrance: $("setup-entrance").value,
     });
     $("setup-form").reset();
-    S.revision = -1;
-    await enter();
+    openEntrance(data);
+  }, event.submitter);
+};
+$("entrance-form").onsubmit = (event) => {
+  event.preventDefault();
+  perform(async () => {
+    openEntrance(await post("auth/entrance", { entrance: $("migration-entrance").value }));
   }, event.submitter);
 };
 $("login-form").onsubmit = (event) => {
   event.preventDefault();
   perform(async () => {
-    await post("login", { password: $("password").value });
+    const data = await post("login", { password: $("password").value });
     $("password").value = "";
+    if (data.needsEntrance) return showEntrance();
     S.revision = -1;
     await enter();
   }, event.submitter);
@@ -1209,6 +1275,7 @@ setInterval(() => {
 async function initializeAuth() {
   $("login-view").hidden = true;
   $("setup-view").hidden = true;
+  $("entrance-view").hidden = true;
   $("auth-loading").hidden = false;
   $("auth-loading-message").textContent = "正在检查管理密码设置…";
   $("auth-retry").hidden = true;
@@ -1220,7 +1287,10 @@ async function initializeAuth() {
       const data = await api("state");
       S.state = data;
       await enter();
-    } catch {
+      if (initialFragment === "#welcome")
+        notice("请收藏完整安全入口：" + location.origin + location.pathname + "。根地址和错误入口不再显示登录页。", "安全入口已启用");
+    } catch (error) {
+      if (error.needsEntrance) return showEntrance();
       showLogin();
     }
   } catch {
