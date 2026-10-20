@@ -4,6 +4,7 @@
 import {readFile} from 'node:fs/promises';
 import {spawn} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
+import {randomUUID} from 'node:crypto';
 import {manifestName, verifyManifest, sha256, manifestChannel, versionPattern} from './github_release_core.mjs';
 
 export const gitCodeRepository = 'xiaoshutiaoya/QQm_project';
@@ -49,9 +50,19 @@ export async function uploadGitCodeFile(upload, content) {
   });
 }
 
-export async function mirrorRelease({token, envelope, publicKey, files, request = fetch, uploader, onProgress = () => {}}) {
+export function gitCodeReleaseStatus(sourceRelease, data) {
+  requireThat(sourceRelease?.tagName === data.tag && sourceRelease.isDraft === false &&
+    typeof sourceRelease.isPrerelease === 'boolean', '只能同步当前标签已发布的 GitHub Release');
+  const beta = sourceRelease.isPrerelease;
+  requireThat(manifestChannel(data) === (beta ? 'beta' : 'stable'), 'GitHub Release 与签名清单的渠道不一致');
+  return beta ? 'pre' : 'latest';
+}
+
+export async function mirrorRelease({token, envelope, publicKey, files, sourceRelease, refreshSource,
+  request = fetch, uploader, onProgress = () => {}}) {
   requireThat(typeof token === 'string' && token.trim(), '缺少 GITCODE_TOKEN');
   const data = verifyManifest(envelope, publicKey);
+  const releaseStatus = gitCodeReleaseStatus(sourceRelease, data);
   const expected = new Map(data.releases.map(release => [
     new URL(release.url).pathname.split('/').at(-1), release,
   ]));
@@ -64,7 +75,9 @@ export async function mirrorRelease({token, envelope, publicKey, files, request 
     prepared.push({name: file.name, content});
   }
   requireThat(prepared.length === 4, '镜像必须齐备四端安装包');
-  // Manifest is last; promote to latest only AFTER public read-back succeeds.
+  // GitCode only documents pre/latest, NOT a draft state. Never use PRE as a
+  // staging state for a stable release. Channel and transfer state are separate:
+  // the manifest is uploaded LAST, after all four installers pass read-back.
   prepared.push({name: manifestName, content: Buffer.from(JSON.stringify(envelope))});
 
   async function api(path, {method = 'GET', body, missing = false, repositoryPath = false} = {}) {
@@ -102,16 +115,19 @@ export async function mirrorRelease({token, envelope, publicKey, files, request 
   }
 
   const latest = await api('/latest', {missing: true});
-  // latest can refer to a Beta or unfinished PRE. Check every complete release
-  // in this channel before moving the mirror's published pointer.
+  // latest may be Beta or an incomplete upload. Do not let such an entry hide
+  // the previous signed stable version from the anti-rollback check.
   const sameChannel = release =>
     (release.prerelease === true || release.release_status === 'pre') === (manifestChannel(data) === 'beta');
-  const previousReleases = !latest ? [] : sameChannel(latest) ? [latest] :
+  const hasManifest = release => release.assets?.some(asset => asset.type === 'attach' && asset.name === manifestName);
+  const previousReleases = !latest ? [] : sameChannel(latest) && hasManifest(latest) ? [latest] :
     await api('?per_page=100&direction=desc');
   requireThat(Array.isArray(previousReleases), 'GitCode 版本列表格式无效');
-  for (const entry of previousReleases.filter(release => sameChannel(release) &&
-    release.assets?.some(asset => asset.type === 'attach' && asset.name === manifestName))) {
-    const previous = verifyManifest(JSON.parse((await publicAsset(manifestName, 65536, entry.tag_name)).toString('utf8')), publicKey,0,manifestChannel(data));
+  for (const entry of previousReleases.filter(hasManifest)) {
+    // A legacy failed staging release may have the wrong UI label. The signed
+    // manifest, not that label, determines its channel for rollback protection.
+    const previous = verifyManifest(JSON.parse((await publicAsset(manifestName, 65536, entry.tag_name)).toString('utf8')), publicKey);
+    if (manifestChannel(previous) !== manifestChannel(data)) continue;
     requireThat(previous.tag === entry.tag_name && data.build >= previous.build, '拒绝将 GitCode 最新版本回退');
     requireThat(previous.build !== data.build || previous.tag === data.tag,
       '同一构建号不可发布到不同版本标签');
@@ -132,32 +148,93 @@ export async function mirrorRelease({token, envelope, publicKey, files, request 
   }
   let release = await api('/tags/' + data.tag, {missing: true});
   const body = `与 GitHub ${data.repository} ${data.tag} 相同的四端安装包。\n\nhttps://github.com/${data.repository}/releases/tag/${data.tag}`;
-  if (!release) release = await api('', {method: 'POST', body: {
-    tag_name: data.tag, name: `QQ机器人管理器 ${data.tag}`, body, release_status: 'pre',
-  }});
-  requireThat(release.tag_name === data.tag && Array.isArray(release.assets), 'GitCode 版本标签不匹配');
-  for (const file of prepared) {
-    if (!release.assets.some(asset => asset.type === 'attach' && asset.name === file.name)) {
-      onProgress(`上传 GitCode 附件：${file.name}（${file.content.length} 字节）`);
-      const upload = await api(`/${data.tag}/upload_url?file_name=${encodeURIComponent(file.name)}`);
-      requireThat(trustedMirrorUrl(upload.url, {upload: true}), 'GitCode 上传地址不可信');
-      requireThat(upload.headers && Object.keys(upload.headers).every(header =>
-        /^x-obs-/i.test(header) || header.toLowerCase() === 'content-type'), 'GitCode 上传请求头不可信');
-      if (uploader) await uploader(upload, file.content);
-      else {
-        const uploaded = await request(upload.url, {method: 'PUT', headers: upload.headers,
-          body: file.content, redirect: 'manual', signal: AbortSignal.timeout(600000)});
-        requireThat(uploaded.ok, `GitCode 附件上传失败（HTTP ${uploaded.status}）`);
-        await uploaded.body?.cancel();
-      }
+  const name = `QQ机器人管理器 ${data.tag}`;
+  const markerPrefix = `<!-- qqm-mirror-v2:${data.tag}:${sha256(prepared.at(-1).content)}:`;
+  const marker = `${markerPrefix}${randomUUID()} -->`;
+  const pending = `${marker}\n\n> 国内镜像同步／校验未完成，请暂时使用下方 GitHub 下载地址。全部文件校验通过后移除此提示。\n\n${body}`;
+  const unfinishedName = `${name}（国内镜像未完成）`;
+  let managed = false;
+  let identity;
+  const releaseIdentity = value => JSON.stringify([value.tag_name, value.target_commitish, value.created_at]);
+  const channelMatches = value => value.release_status === releaseStatus &&
+    value.prerelease === (releaseStatus === 'pre');
+  const validateRelease = value => requireThat(value?.tag_name === data.tag && Array.isArray(value.assets), 'GitCode 版本标签不匹配');
+  const metadata = (value, overrides = {}) => ({name: value.name, body: value.body, release_status: releaseStatus, ...overrides});
+  try {
+    if (!release) {
+      release = await api('', {method: 'POST', body: {
+        tag_name: data.tag, name: unfinishedName, body: pending, release_status: releaseStatus,
+      }});
+      managed = true;
     }
-    onProgress(`读回校验 GitCode 附件：${file.name}`);
-    const remote = await publicAsset(file.name, file.content.length);
-    requireThat(remote.length === file.content.length && sha256(remote) === sha256(file.content),
-      'GitCode 已有附件内容不同或上传校验失败；不会覆盖，请使用新版本');
+    validateRelease(release);
+    identity = releaseIdentity(release);
+    if (hasManifest(release)) {
+      // A manually completed release is read-only unless its verified channel
+      // needs correction. Never replace its packages, title or release notes.
+      const existing = await publicAsset(manifestName, 65536);
+      requireThat(sha256(existing) === sha256(prepared.at(-1).content), 'GitCode 已有签名清单不同；不会修改已有发布');
+    }
+    if (!managed && release.body?.startsWith(markerPrefix)) {
+      release = await api('/' + data.tag, {method: 'PATCH', body: metadata(release, {name: unfinishedName, body: pending})});
+      managed = true;
+    } else if (!channelMatches(release)) {
+      // Repair an old mislabeled placeholder before uploading. A later timeout
+      // must not leave a stable release labeled PRE again.
+      release = await api('/' + data.tag, {method: 'PATCH', body: metadata(release)});
+    }
+    validateRelease(release);
+    requireThat(channelMatches(release), 'GitCode 未采用与 GitHub 一致的发布类型');
+    for (const file of prepared) {
+      if (!release.assets.some(asset => asset.type === 'attach' && asset.name === file.name)) {
+        onProgress(`上传 GitCode 附件：${file.name}（${file.content.length} 字节）`);
+        const upload = await api(`/${data.tag}/upload_url?file_name=${encodeURIComponent(file.name)}`);
+        requireThat(trustedMirrorUrl(upload.url, {upload: true}), 'GitCode 上传地址不可信');
+        requireThat(upload.headers && Object.keys(upload.headers).every(header =>
+          /^x-obs-/i.test(header) || header.toLowerCase() === 'content-type'), 'GitCode 上传请求头不可信');
+        if (uploader) await uploader(upload, file.content);
+        else {
+          const uploaded = await request(upload.url, {method: 'PUT', headers: upload.headers,
+            body: file.content, redirect: 'manual', signal: AbortSignal.timeout(600000)});
+          requireThat(uploaded.ok, `GitCode 附件上传失败（HTTP ${uploaded.status}）`);
+          await uploaded.body?.cancel();
+        }
+      }
+      onProgress(`读回校验 GitCode 附件：${file.name}`);
+      const remote = await publicAsset(file.name, file.content.length);
+      requireThat(remote.length === file.content.length && sha256(remote) === sha256(file.content),
+        'GitCode 已有附件内容不同或上传校验失败；不会覆盖，请使用新版本');
+    }
+    if (refreshSource) gitCodeReleaseStatus(await refreshSource(), data);
+    let live = await api('/tags/' + data.tag);
+    validateRelease(live);
+    requireThat(releaseIdentity(live) === identity, 'GitCode 发布已被替换；停止修改，保留用户操作');
+    if (managed) {
+      requireThat(live.body?.startsWith(marker), 'GitCode 发布说明已被修改；保留用户操作');
+      live = await api('/' + data.tag, {method: 'PATCH', body: {name, body, release_status: releaseStatus}});
+    } else if (!channelMatches(live)) {
+      live = await api('/' + data.tag, {method: 'PATCH', body: metadata(live)});
+    }
+    requireThat(channelMatches(live), 'GitCode 发布类型与 GitHub 不一致，尚未同步完成');
+    return data.tag;
+  } catch (error) {
+    let markingFailed = false;
+    if (managed && identity) {
+      try {
+        const live = await api('/tags/' + data.tag);
+        // Only annotate this exact attempt. Do not delete a release/tag or
+        // overwrite a replacement/manual edit made while the upload ran.
+        if (releaseIdentity(live) === identity && live.body?.startsWith(marker)) {
+          await api('/' + data.tag, {method: 'PATCH', body: metadata(live, {
+            name: unfinishedName,
+            body: `${marker}\n\n> 国内镜像同步失败或校验未完成，请先使用 GitHub 下载。可重试同步，已校验文件不会覆盖。\n\n${body}`,
+          })});
+        }
+      } catch { markingFailed = true; }
+    }
+    const message = String(error instanceof Error ? error.message : '镜像同步未完成')
+      .replaceAll(token, '[redacted]').replace(/https?:\/\/\S+/g, '[url]')
+      .replace(/[\r\n\u0000-\u001f]/g, ' ').slice(0, 500);
+    throw new Error(message + (markingFailed ? '；失败提示写入失败，保留原有“未完成”状态，请重试同步' : ''));
   }
-  await api('/' + data.tag, {method: 'PATCH', body: {
-    name: `QQ机器人管理器 ${data.tag}`, body, release_status: manifestChannel(data) === 'beta' ? 'pre' : 'latest',
-  }});
-  return data.tag;
 }

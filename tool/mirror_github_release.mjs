@@ -14,8 +14,9 @@ try {
   if (!process.env.GITCODE_TOKEN) throw new Error('请配置 Actions Secret GITCODE_TOKEN');
   const gh = (...args) => execFileSync('gh', args, {encoding: 'utf8', maxBuffer: 4 * 1024 * 1024,
     stdio: ['ignore', 'pipe', 'pipe'], env: {...process.env, GH_HOST: 'github.com'}});
-  const release = JSON.parse(gh('release', 'view', tag, '--repo', repository,
+  const readSourceRelease = () => JSON.parse(gh('release', 'view', tag, '--repo', repository,
     '--json', 'isDraft,isPrerelease,tagName'));
+  const release = readSourceRelease();
   if (release.isDraft || release.tagName !== tag) throw new Error('只能同步已发布的版本');
   const directory = await mkdtemp(join(tmpdir(), 'qqm-gitcode-mirror-'));
   gh('release', 'download', tag, '--repo', repository, '--pattern', manifestName, '--dir', directory);
@@ -30,7 +31,9 @@ try {
     gh('release', 'download', tag, '--repo', repository, '--pattern', name, '--dir', directory);
     files.push({name, file: join(directory, name)});
   }
-  await mirrorRelease({token: process.env.GITCODE_TOKEN, envelope, publicKey, files, uploader:uploadGitCodeFile, onProgress: message => console.log(message)});
+  await mirrorRelease({token: process.env.GITCODE_TOKEN, envelope, publicKey, files,
+    sourceRelease: release, refreshSource: readSourceRelease,
+    uploader: uploadGitCodeFile, onProgress: message => console.log(message)});
   console.log('GitCode 国内更新节点已同步 ' + data.tag + '，四端文件和签名清单均已读回校验。');
 } catch (error) {
   console.error('GitCode 同步失败：' + (error instanceof Error ? error.message.split('\n')[0] : '未知错误'));
