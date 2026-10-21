@@ -42,7 +42,7 @@ class DashboardPanel extends StatelessWidget {
         ];
         final columns = constraints.maxWidth >= 700 ? 4 : 2;
         final metricWidth =
-            (constraints.maxWidth - 40 - (columns - 1) * 12) / columns;
+            (constraints.maxWidth - 32 - (columns - 1) * 12) / columns;
         final setup = _section(
           context,
           '开始使用',
@@ -141,10 +141,10 @@ class DashboardPanel extends StatelessWidget {
           ),
         );
         return ListView(
-          padding: const EdgeInsets.all(20),
+          padding: const EdgeInsets.all(16),
           children: [
             Container(
-              padding: const EdgeInsets.all(24),
+              padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
                 gradient: LinearGradient(
                   colors: Theme.of(context).brightness == Brightness.dark

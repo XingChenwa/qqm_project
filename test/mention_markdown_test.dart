@@ -10,6 +10,29 @@ import 'api_service_test.dart' show RecordingAdapter;
 import 'support/ui_actions.dart';
 
 void main() {
+  test('全体标签走 Markdown，平台拒绝时保留明确的无权限说明', () async {
+    final adapter = RecordingAdapter()
+      ..status = 403
+      ..response = {'message': 'permission denied'};
+    final api = ApiService(
+      dio: Dio(BaseOptions(validateStatus: (_) => true))
+        ..httpClientAdapter = adapter,
+    );
+    final result = await api.sendQQMessage(
+      baseUrl: 'https://api.bot.qq.com',
+      accessToken: 'fixture',
+      targetId: 'group',
+      isGroup: true,
+      content: '<qqbot-at-everyone />',
+    );
+    expect(adapter.requests.single.data['msg_type'], 2);
+    expect(
+      adapter.requests.single.data['markdown']['content'],
+      '<qqbot-at-everyone />',
+    );
+    expect(result.isSuccess, isFalse);
+    expect(result.error, contains('无权限'));
+  });
   testWidgets('小屏长昵称和长 OpenID 预览可换行，不越出编辑器', (tester) async {
     tester.view.physicalSize = const Size(320, 844);
     tester.view.devicePixelRatio = 1;

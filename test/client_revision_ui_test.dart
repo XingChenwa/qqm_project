@@ -36,7 +36,7 @@ void main() {
   });
 
   for (final width in [320.0, 390.0, 1280.0]) {
-    testWidgets('@ 群成员在 $width 宽插入新官方标签，不误发且没有 @ 全体入口', (tester) async {
+    testWidgets('@ 群成员在 $width 宽插入 Markdown 标签，不误发并保留全体入口', (tester) async {
       tester.view.physicalSize = Size(width, 844);
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.resetPhysicalSize);
@@ -64,6 +64,7 @@ void main() {
       );
       await tester.pumpAndSettle();
       await revealComposerTools(tester);
+      expect(find.byTooltip('@ 全体成员'), findsOneWidget);
       await tester.tap(find.byTooltip('@ 群成员'));
       await tester.pumpAndSettle();
       expect(find.text('离线测试用户'), findsOneWidget);

@@ -56,8 +56,8 @@ class _CaptureStorage extends StorageService {
   @override
   Future<void> markSessionRead(String id) async {}
   @override
-  List<MessageModel> getMessages(String id) =>
-      messages.where((item) => item.sessionId == id).toList();
+  List<MessageModel> getMessages(String? id) =>
+      messages.where((item) => id == null || item.sessionId == id).toList();
   @override
   MessageModel? getMessageById(String id) =>
       messages.where((item) => item.id == id).firstOrNull;

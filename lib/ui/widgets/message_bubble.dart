@@ -11,6 +11,9 @@ import 'linkified_text.dart';
 import '../screens/browser_screen.dart';
 import 'profile_avatar.dart';
 import 'message_image.dart';
+import 'voice_attachment.dart';
+import '../../models/received_message.dart';
+import 'qq_mention_preview.dart';
 
 class MessageBubble extends StatelessWidget {
   final MessageModel message;
@@ -175,6 +178,24 @@ class MessageBubble extends StatelessWidget {
         ),
       );
     }
+    if (message.extra?['mediaFileType'] == 3) {
+      return Container(
+        constraints: BoxConstraints(maxWidth: _maxWidth(context, .64)),
+        padding: const EdgeInsets.all(10),
+        decoration: _bubbleDecoration(context, false),
+        child: VoiceAttachment(
+          allowLocalFile: message.isFromBot,
+          key: ValueKey(message.id),
+          attachment: ReceivedAttachment(
+            url:
+                message.extra?['mediaSource']?.toString() ??
+                message.imageUrl ??
+                '',
+            contentType: 'voice',
+          ),
+        ),
+      );
+    }
     if ((message.extra?['mediaFileType'] as int? ?? 1) > 1) {
       return _textBubble(context, isBot);
     }
@@ -305,6 +326,22 @@ class MessageBubble extends StatelessWidget {
       decoration: _bubbleDecoration(context, isBot),
       child: MarkdownBody(
         data: content,
+        inlineSyntaxes: [
+          QqMentionPreviewSyntax({
+            for (final mention
+                in (message.extra?['mentions'] as List? ??
+                        message.receivedBody.mentions)
+                    .whereType<Map>())
+              (mention['member_openid'] ??
+                      mention['user_openid'] ??
+                      mention['id'] ??
+                      '')
+                  .toString(): (mention['username'] ?? '')
+                  .toString(),
+          }),
+        ],
+        blockSyntaxes: [QqMentionPreviewBlockSyntax()],
+        builders: {'qqmention': QqMentionPreviewBuilder()},
         onTapLink: (_, href, _) {
           if (href != null) openInAppBrowser(context, href);
         },
@@ -450,7 +487,7 @@ class MessageBubble extends StatelessWidget {
     final width = MediaQuery.sizeOf(context).width;
     return usePhoneLayout(context)
         ? (width - 90).clamp(80, 480).toDouble()
-        : width * fraction;
+        : (width * fraction).clamp(180, 720).toDouble();
   }
 
   String _roleLabel(String role) {

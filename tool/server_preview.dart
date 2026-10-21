@@ -77,6 +77,42 @@ Future<void> main(List<String> args) async {
       timestamp: DateTime.now(),
     ),
   );
+  await storage.saveSession(
+    ChatSession(
+      id: 'history-only',
+      name: '历史分页会话',
+      sessionType: 1,
+      lastMessageTime: DateTime(2026, 10, 20),
+    ),
+  );
+  for (var index = 0; index < 75; index++) {
+    await storage.saveMessage(
+      MessageModel(
+        id: 'history-fixture-$index',
+        sessionId: 'history-only',
+        senderId: 'member-a',
+        senderName: '离线分页成员',
+        content: '历史分页测试 $index',
+        extra: index == 1
+            ? {
+                'message_type': 0,
+                'content': '历史分页测试 1',
+                'attachments': [
+                  {
+                    'content_type': 'voice',
+                    'url': 'https://multimedia.nt.qq.com.cn/fixture.silk',
+                    'voice_wav_url':
+                        'https://multimedia.nt.qq.com.cn/official-fixture.wav',
+                    'asr_refer_text': '语音搜索专用词',
+                  },
+                ],
+              }
+            : null,
+        messageType: 0,
+        timestamp: DateTime(2026, 10, 20).add(Duration(minutes: index)),
+      ),
+    );
+  }
   final manager = PluginManager(storage);
   await manager.init();
   final api = ServerFixtureApi();

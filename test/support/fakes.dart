@@ -93,8 +93,9 @@ class MemoryStorage extends StorageService {
   }
 
   @override
-  List<MessageModel> getMessages(String sessionId) =>
-      storedMessages.values.where((m) => m.sessionId == sessionId).toList();
+  List<MessageModel> getMessages(String? sessionId) => storedMessages.values
+      .where((m) => sessionId == null || m.sessionId == sessionId)
+      .toList();
 
   @override
   MessageModel? getMessageById(String messageId) => storedMessages[messageId];

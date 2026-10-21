@@ -7,6 +7,8 @@ import 'package:provider/provider.dart';
 import '../../services/app_update_service.dart';
 import '../../services/desktop_window_controller.dart';
 import '../../utils/constants.dart';
+import '../../utils/release_notes.dart';
+import '../screens/browser_screen.dart';
 import 'app_dialogs.dart';
 
 Future<void> showUpdateDialog(
@@ -46,7 +48,6 @@ class UpdatePanel extends StatelessWidget {
     return ListView(
       padding: const EdgeInsets.all(20),
       children: [
-        if (updates.usesGitHubPages) _UpdateNodeCard(updates: updates),
         Card(
           child: Padding(
             padding: const EdgeInsets.all(20),
@@ -61,7 +62,7 @@ class UpdatePanel extends StatelessWidget {
                 const SizedBox(height: 8),
                 Text(
                   updates.configured
-                      ? '启动时发现新版会弹窗提醒。下载前验证签名，安装前校验 SHA-256。'
+                      ? '发现新版时提醒，下载后由你确认安装。'
                       : '更新服务尚未配置，发布者需在构建时内置更新公钥。',
                 ),
                 const SizedBox(height: 16),
@@ -82,6 +83,10 @@ class UpdatePanel extends StatelessWidget {
             ),
           ),
         ),
+        if (updates.usesGitHubPages) ...[
+          const SizedBox(height: 12),
+          _UpdateNodeCard(updates: updates),
+        ],
       ],
     );
   }
@@ -99,13 +104,28 @@ class _UpdateNodeCard extends StatelessWidget {
       maintainState: false,
       shape: const Border(),
       collapsedShape: const Border(),
-      tilePadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-      leading: const Icon(Icons.alt_route_rounded, size: 22),
-      title: const Text('更新线路', style: TextStyle(fontWeight: FontWeight.w800)),
-      subtitle: Text(
-        updates.preferences.node.label,
-        style: const TextStyle(fontSize: 12),
+      dense: true,
+      minTileHeight: 48,
+      tilePadding: const EdgeInsets.symmetric(horizontal: 12),
+      childrenPadding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+      leading: const Icon(Icons.alt_route_rounded, size: 18),
+      title: Row(
+        children: [
+          const Text('更新线路', style: TextStyle(fontSize: 13)),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              updates.preferences.node.label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.end,
+              style: TextStyle(
+                fontSize: 12,
+                color: Theme.of(context).hintColor,
+              ),
+            ),
+          ),
+        ],
       ),
       children: [
         Align(
@@ -168,11 +188,6 @@ class _UpdateNodeCard extends StatelessWidget {
               ? '自动模式会并行检测两条线路，优先选择版本完整、响应较快的节点。'
               : '当前：${updates.activeNodeLabel}${updates.preferences.node == UpdateNode.auto ? ' · 自动优选' : ' · 手动指定'}',
           style: TextStyle(fontSize: 12, color: Theme.of(context).hintColor),
-        ),
-        const SizedBox(height: 6),
-        const Text(
-          '测速仅请求版本资料；两线路使用同一签名与安装包校验。手动指定的线路失败时不会擅自更改。',
-          style: TextStyle(fontSize: 11, height: 1.5),
         ),
       ],
     ),
@@ -285,10 +300,23 @@ class _UpdateDialog extends StatelessWidget {
                         style: Theme.of(context).textTheme.titleMedium,
                       ),
                       const SizedBox(height: 12),
-                      SelectableText(
-                        release.notes.isEmpty
-                            ? '新版本已发布，可下载后安装。'
-                            : release.notes,
+                      for (final note in conciseReleaseNotes(release.notes))
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 8),
+                          child: Text(
+                            '• $note',
+                            style: const TextStyle(height: 1.5),
+                          ),
+                        ),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: TextButton(
+                          onPressed: () => openInAppBrowser(
+                            context,
+                            '${AppConstants.projectUrl}/releases/tag/v${release.version}',
+                          ),
+                          child: const Text('查看完整更新日志'),
+                        ),
                       ),
                       const SizedBox(height: 12),
                       Text(

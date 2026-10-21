@@ -4,7 +4,7 @@ import '../../models/group_notice.dart';
 import 'app_dialogs.dart';
 import 'profile_avatar.dart';
 
-enum _MemberAction { mute, unmute, remove }
+enum _MemberAction { mention, mute, unmute, remove }
 
 /// Shared by message avatars and group settings. Dialogs retain the original
 /// account/credential generation; a bot switch cannot retarget an operation.
@@ -18,6 +18,7 @@ class GroupMemberActions {
     String memberId, {
     String name = '',
     String avatarUrl = '',
+    VoidCallback? onMention,
   }) async {
     if (!bot.groups.isCurrent(target) || memberId.isEmpty) return;
     final key = '${target.appId}:${target.epoch}:${target.groupId}:$memberId';
@@ -33,13 +34,16 @@ class GroupMemberActions {
           memberId: memberId,
           name: name,
           avatarUrl: avatarUrl,
+          canMention: onMention != null,
         ),
       );
       if (action == null || !context.mounted || !bot.groups.isCurrent(target)) {
         return;
       }
       final member = {'member_openid': memberId, 'username': name};
-      if (action == _MemberAction.remove) {
+      if (action == _MemberAction.mention) {
+        onMention?.call();
+      } else if (action == _MemberAction.remove) {
         await remove(context, bot, target, member);
       } else {
         await setMute(
@@ -211,12 +215,14 @@ class _MemberActionDialog extends StatefulWidget {
   final BotClient bot;
   final GroupTarget target;
   final String memberId, name, avatarUrl;
+  final bool canMention;
   const _MemberActionDialog({
     required this.bot,
     required this.target,
     required this.memberId,
     required this.name,
     required this.avatarUrl,
+    required this.canMention,
   });
   @override
   State<_MemberActionDialog> createState() => _MemberActionDialogState();
@@ -226,6 +232,28 @@ class _MemberActionDialogState extends State<_MemberActionDialog> {
   bool _loading = true, _muted = false;
   String? _error, _muteError;
   String _name = '';
+
+  Future<void> _select(_MemberAction action) async {
+    if (!widget.bot.groups.isCurrent(widget.target)) return;
+    if (action == _MemberAction.mention || (!_loading && _error == null)) {
+      Navigator.pop(context, action);
+      return;
+    }
+    await showDialog<void>(
+      context: context,
+      builder: (dialog) => AlertDialog(
+        title: Text(_loading ? '正在检查权限' : '无法管理此成员'),
+        content: Text(_loading ? '正在向 QQ 查询权限，请稍后重试。' : _error!),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialog),
+            child: const Text('知道了'),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   void initState() {
     super.initState();
@@ -262,7 +290,7 @@ class _MemberActionDialogState extends State<_MemberActionDialog> {
       final current = widget.bot.groups.isCurrent(widget.target);
       final allowed = current && !_loading && _error == null;
       return AlertDialog(
-        title: const Text('群成员管理'),
+        title: const Text('群成员操作'),
         content: SizedBox(
           width: 360,
           child: SingleChildScrollView(
@@ -285,6 +313,8 @@ class _MemberActionDialogState extends State<_MemberActionDialog> {
                             : widget.name.isNotEmpty
                             ? widget.name
                             : '群成员',
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ),
                   ],
@@ -296,8 +326,9 @@ class _MemberActionDialogState extends State<_MemberActionDialog> {
                   const LinearProgressIndicator()
                 else if (_error != null)
                   Text(
-                    _error!,
+                    '暂不能执行群管理，点击下方操作可查看原因。',
                     style: TextStyle(
+                      fontSize: 12,
                       color: Theme.of(context).colorScheme.error,
                     ),
                   )
@@ -306,18 +337,27 @@ class _MemberActionDialogState extends State<_MemberActionDialog> {
                   const SizedBox(height: 8),
                   const Text('禁言和移出需要机器人管理员权限及平台接口权限。'),
                 ],
-                if (allowed) ...[
+                if (widget.canMention && current) ...[
                   const SizedBox(height: 16),
+                  ListTile(
+                    leading: const Icon(Icons.alternate_email_rounded),
+                    title: const Text('@ 此成员'),
+                    subtitle: const Text('插入 Markdown，不会立即发送'),
+                    onTap: () => _select(_MemberAction.mention),
+                  ),
+                ],
+                if (current) ...[
                   ListTile(
                     leading: const Icon(Icons.mic_off_outlined),
                     title: const Text('设置禁言'),
-                    onTap: () => Navigator.pop(context, _MemberAction.mute),
+                    textColor: allowed ? null : Theme.of(context).hintColor,
+                    onTap: () => _select(_MemberAction.mute),
                   ),
                   if (_muted)
                     ListTile(
                       leading: const Icon(Icons.mic_none),
                       title: const Text('解除禁言'),
-                      onTap: () => Navigator.pop(context, _MemberAction.unmute),
+                      onTap: () => _select(_MemberAction.unmute),
                     ),
                   ListTile(
                     leading: Icon(
@@ -325,7 +365,8 @@ class _MemberActionDialogState extends State<_MemberActionDialog> {
                       color: Theme.of(context).colorScheme.error,
                     ),
                     title: const Text('踢出群聊'),
-                    onTap: () => Navigator.pop(context, _MemberAction.remove),
+                    textColor: allowed ? null : Theme.of(context).hintColor,
+                    onTap: () => _select(_MemberAction.remove),
                   ),
                 ],
               ],

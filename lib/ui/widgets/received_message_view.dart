@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../screens/browser_screen.dart';
 import 'linkified_text.dart';
 import 'message_image.dart';
+import 'voice_attachment.dart';
 
 import '../../models/received_message.dart';
 import '../../services/qface_service.dart';
@@ -125,6 +126,12 @@ class _ReceivedMessageViewState extends State<ReceivedMessageView> {
   }
 
   Widget _attachment(BuildContext context, ReceivedAttachment attachment) {
+    if (attachment.isVoice) {
+      return VoiceAttachment(
+        key: ValueKey(attachment.openUrl),
+        attachment: attachment,
+      );
+    }
     final details = [
       attachment.kindLabel,
       if (attachment.size > 0) formatFileSize(attachment.size),

@@ -179,6 +179,75 @@ try {
     return m.scrollHeight - m.scrollTop - m.clientHeight < 3;
   });
   await page.screenshot({ path: join(shots, "chat-desktop.png") });
+  // Standalone history leaves the original conversation and unsent draft intact.
+  await page.locator('#draft').fill('未发送的草稿');
+  await page.locator('#chat-history').click();
+  await page.locator('.history-page .message').first().waitFor();
+  await page.locator('.history-page').getByRole('searchbox', {name: '搜索聊天记录'}).fill('今天的插件也可以在网页里编辑了吗');
+  await page.waitForFunction(() => document.querySelectorAll('.history-page .message').length === 1);
+  for (const width of [1360, 390, 320]) {
+    await page.setViewportSize({width, height: 900});
+    assert.ok(await page.locator('.history-page').evaluate(node => node.scrollWidth <= innerWidth));
+    await page.screenshot({path: join(shots, `history-${width}.png`)});
+  }
+  await page.getByRole('button', {name: '返回原聊天', exact: true}).click();
+  const historyPages = await page.evaluate(async () => {
+    const query = new URLSearchParams({appId: S.state.config.appId, epoch: S.state.epoch, session: 'history-only'});
+    const first = await api('history?' + query);
+    query.set('before', first.next);
+    const second = await api('history?' + query);
+    return {first, second};
+  });
+  assert.equal(historyPages.first.count, 75);
+  assert.equal(historyPages.first.messages.length, 60);
+  assert.equal(historyPages.second.messages.length, 15);
+  assert.equal(new Set([...historyPages.first.messages, ...historyPages.second.messages].map(m => m.id)).size, 75);
+  // The session-list field searches the complete saved history, not names or
+  // only the active timeline. Results retain bot/epoch scoping and pagination.
+  const globalPages = await page.evaluate(async () => {
+    const query = new URLSearchParams({appId: S.state.config.appId, epoch: S.state.epoch, search: '历史分页测试'});
+    const first = await api('history/search?' + query);
+    query.set('before', first.next); query.set('beforeSession', first.nextSession);
+    const second = await api('history/search?' + query);
+    const stale = await fetch('api/history/search?' + new URLSearchParams({appId: S.state.config.appId, epoch: '-1', search: '历史分页测试'}), {headers: {'X-QQM-Request': '1'}});
+    return {first, second, stale: stale.status};
+  });
+  assert.equal(globalPages.first.count, 75);
+  assert.equal(globalPages.first.messages.length, 60);
+  assert.equal(globalPages.second.messages.length, 15);
+  assert.equal(new Set([...globalPages.first.messages, ...globalPages.second.messages].map(m => m.id)).size, 75);
+  assert.notEqual(globalPages.stale, 200);
+  await page.setViewportSize({width: 1360, height: 900});
+  await page.locator('#search').fill('语音搜索专用词');
+  await page.locator('.history-search-result').waitFor();
+  assert.equal(await page.locator('.history-search-result').count(), 1);
+  assert.ok((await page.locator('.history-search-result').innerText()).includes('语音搜索专用词'));
+  await page.locator('[data-filter="private"]').click();
+  await page.getByText('没有找到聊天记录，试试正文、引用或语音转写。', {exact: true}).waitFor();
+  await page.locator('[data-filter="all"]').click();
+  await page.locator('.history-search-result').waitFor();
+  await page.locator('#search').fill('历史分页测试 0');
+  await page.locator('.history-search-result[data-message-id="history-fixture-0"]').waitFor();
+  await page.locator('.history-search-result').click();
+  await page.locator('.history-page .history-located[data-message-id="history-fixture-0"]').waitFor();
+  assert.equal(await page.locator('.history-page .message').count(), 1);
+  await page.getByRole('button', {name: '已定位消息 · 查看更新的记录', exact: true}).click();
+  await page.waitForFunction(() => document.querySelectorAll('.history-page .message').length === 60);
+  await page.getByRole('button', {name: '返回原聊天', exact: true}).click();
+  await page.locator('#search').fill('');
+  await page.locator('.session-item').filter({hasText: '机器人开发交流群'}).click();
+  await page.waitForFunction(() => document.querySelectorAll('#messages .message').length === 30);
+  assert.equal(await page.locator('#draft').inputValue(), '未发送的草稿');
+  await page.locator('#draft').fill('');
+  await page.setViewportSize({width: 1360, height: 900});
+  await page.locator('#messages .avatar[role="button"]').last().click({button: 'right'});
+  await page.getByRole('button', {name: '@ 此成员', exact: true}).click();
+  assert.equal(await page.locator('#draft').inputValue(), '<qqbot-at-user id="member-a" /> ');
+  await page.locator('#mention-everyone').click();
+  assert.ok((await page.locator('#draft').inputValue()).includes('<qqbot-at-everyone />'));
+  assert.ok((await page.locator('#preview').innerText()).includes('@全体成员'));
+  await page.locator('#draft').fill('');
+  await page.getByRole('button', {name: '文字', exact: true}).click();
   // Right-click on desktop, long press on touch screens. The real HTTP service
   // validates fresh bot/member roles for every confirmed moderation action.
   const memberAvatar = page.locator('#messages .avatar[role="button"]').last();

@@ -480,7 +480,7 @@ class ApiService {
     String? msgId,
     int? msgSeq,
   }) async {
-    if (containsQqUserMention(content)) {
+    if (containsQqMention(content)) {
       return sendQQMarkdown(
         baseUrl: baseUrl,
         accessToken: accessToken,
@@ -788,7 +788,7 @@ class ApiService {
         response.headers.value('x-tps-trace-id') ??
         response.headers.value('x-trace-id') ??
         (response.data is Map ? response.data['trace_id']?.toString() : null);
-    final hint = switch (code) {
+    var hint = switch (code) {
       11253 => '应用无接口访问权限，该能力需要 QQ 平台内邀／白名单授权',
       40062003 => '无操作权限，机器人需为群管理员，且不能管理群主或其他管理员',
       40064004 => '已超过 2 分钟，不能撤回这条消息',
@@ -828,6 +828,14 @@ class ApiService {
       _ => null,
     };
     final detail = _extractMsg(response.data);
+    if (hint == null &&
+        (response.statusCode == 403 ||
+            RegExp(
+              r'permission|forbidden|无.{0,8}权限|没有.{0,8}权限',
+              caseSensitive: false,
+            ).hasMatch(detail))) {
+      hint = '无权限执行此操作，请检查 QQ 平台能力授权及机器人群内权限';
+    }
     return ApiResult.failure(
       '${hint == null ? '' : '$hint。'}HTTP ${response.statusCode}'
       '${code == null ? '' : ' / 错误码 $code'}: $detail'

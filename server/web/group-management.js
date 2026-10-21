@@ -485,26 +485,35 @@ window.bindQQMMemberMenu = (element, message, session) => {
 async function showMemberActions(ref, summary) {
   if (!currentGroupScope(ref)) return;
   const loading = el("p", {}, "正在核实机器人权限和成员身份…");
-  modal("群成员管理", loading, [el("button", { onclick: closeModal }, "关闭")]);
-  let member;
+  const mention = () => formButton("@ 此成员", () => {
+    closeModal(); window.mentionQQMMember?.(summary.member_openid, ref);
+  }, false);
+  modal("群成员操作", loading, [mention(), el("button", { onclick: closeModal }, "关闭")]);
+  let member = summary, permissionError = "";
   try {
     member = await groupRead("moderatable-member", ref, { member: summary.member_openid });
   } catch (error) {
-    if (loading.isConnected && currentGroupScope(ref)) notice(error.message, "群成员管理");
-    return;
+    permissionError = error.message;
   }
   let mute;
-  try { mute = await groupRead("mute", ref); } catch (_) { /* Can still request removal. */ }
-  if (!loading.isConnected || !currentGroupScope(ref)) return;
+  if (!permissionError) {
+    try { mute = await groupRead("mute", ref); } catch (_) { /* Recheck on submission. */ }
+  }
+  if (!loading.isConnected || !$("modal").open || !currentGroupScope(ref)) return;
   const muted = Array.isArray(mute?.members) && mute.members.some(m => m.member_openid === member.member_openid);
   const back = () => showMemberActions(ref, member);
-  modal("群成员管理", [
+  const allowed = (action) => () => {
+    if (permissionError) notice(permissionError, "无法管理此成员");
+    else action();
+  };
+  modal("群成员操作", [
     el("h3", {}, member.username || summary.username || "群成员"),
-    el("p", {}, muted ? "当前已被禁言" : "禁言及移出均需机器人管理员与平台接口权限。"),
+    el("p", {}, permissionError ? "暂不能执行群管理，点击操作可查看原因。" : muted ? "当前已被禁言" : "禁言及移出均需机器人管理员与平台接口权限。"),
   ], [
-    formButton("设置禁言", () => setGroupMute(ref, member, false, back)),
+    mention(),
+    formButton("设置禁言", allowed(() => setGroupMute(ref, member, false, back))),
     ...(muted ? [formButton("解除禁言", () => setGroupMute(ref, member, true, back), false)] : []),
-    formButton("踢出群聊", () => removeGroupMember(ref, member, back), false),
+    formButton("踢出群聊", allowed(() => removeGroupMember(ref, member, back)), false),
     el("button", { onclick: closeModal }, "关闭"),
   ]);
 }

@@ -83,6 +83,7 @@ String formatQqMessageContent(
     (match) =>
         '@${mentionNames[match.group(1)] ?? _shortOpenId(match.group(1) ?? '')}',
   );
+  text = text.replaceAll(RegExp(r'<qqbot-at-everyone\s*/>'), '@全体成员');
 
   text = text.replaceAllMapped(
     RegExp(r'<@!?([^>]+)>'),

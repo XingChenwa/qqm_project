@@ -15,7 +15,17 @@ import 'markdown_workbench.dart';
 import 'app_dialogs.dart';
 import 'composer_keyboard.dart';
 
+/// Sends draft actions to the currently mounted conversation, never a message.
+class ChatInputController extends ChangeNotifier {
+  String _memberId = '';
+  void mention(String memberId) {
+    _memberId = memberId;
+    notifyListeners();
+  }
+}
+
 class ChatInput extends StatefulWidget {
+  final ChatInputController? controller;
   final Future<bool> Function(String text) onSendText;
   final Future<bool> Function(
     String markdown, {
@@ -42,6 +52,7 @@ class ChatInput extends StatefulWidget {
 
   const ChatInput({
     super.key,
+    this.controller,
     required this.onSendText,
     required this.onSendMarkdown,
     required this.onSendImage,
@@ -76,6 +87,7 @@ class _ChatInputState extends State<ChatInput> {
   bool _isTemplateMode = false;
   bool _showTemplateEditor = false;
   bool _isSending = false;
+  bool _isConfirming = false;
   bool _moreTools = false;
   MessageComposerSettings _sendSettings = const MessageComposerSettings();
 
@@ -89,7 +101,7 @@ class _ChatInputState extends State<ChatInput> {
           widget.replyTo?.isFromBot == true);
 
   OutgoingMessage _request(String text) {
-    final type = containsQqUserMention(text)
+    final type = containsQqMention(text)
         ? 2
         : _sendSettings.explicitType
         ? _sendSettings.type
@@ -153,7 +165,7 @@ class _ChatInputState extends State<ChatInput> {
     );
     if (result == null || !mounted) return;
     if (_isMarkdownMode &&
-        containsQqUserMention(_markdownController.text) &&
+        containsQqMention(_markdownController.text) &&
         result.type != 2) {
       _showSendError('@ 群成员只能用 Markdown 发送，请先移除 @ 标签再更改消息类型。');
       return;
@@ -180,7 +192,18 @@ class _ChatInputState extends State<ChatInput> {
       builder: (_) => _MentionPicker(members: widget.mentionCandidates),
     );
     if (!mounted || selected == null) return;
-    if (!RegExp(r'^[A-Za-z0-9_-]{1,128}$').hasMatch(selected)) {
+    _insertMention(selected);
+  }
+
+  void _onMentionRequested() => _insertMention(widget.controller!._memberId);
+
+  void _insertMention(String selected, {bool everyone = false}) {
+    if (!widget.isGroup || !mounted) return;
+    if (_isSending) {
+      _showSendError('当前消息正在发送，请稍后再插入 @。');
+      return;
+    }
+    if (!everyone && !RegExp(r'^[A-Za-z0-9_-]{1,128}$').hasMatch(selected)) {
       _showSendError('请输入有效的成员 OpenID，不能包含空格、引号或标签。');
       return;
     }
@@ -199,7 +222,9 @@ class _ChatInputState extends State<ChatInput> {
     final selection = draft.selection;
     final start = selection.isValid ? selection.start : draft.text.length;
     final end = selection.isValid ? selection.end : start;
-    final mention = '<qqbot-at-user id="$selected" /> ';
+    final mention = everyone
+        ? '<qqbot-at-everyone /> '
+        : '<qqbot-at-user id="$selected" /> ';
     draft.value = TextEditingValue(
       text: draft.text.replaceRange(start, end, mention),
       selection: TextSelection.collapsed(offset: start + mention.length),
@@ -214,10 +239,21 @@ class _ChatInputState extends State<ChatInput> {
     super.initState();
     _textController.addListener(() => setState(() {}));
     _markdownController.addListener(() => setState(() {}));
+    widget.controller?.addListener(_onMentionRequested);
+  }
+
+  @override
+  void didUpdateWidget(covariant ChatInput oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller != widget.controller) {
+      oldWidget.controller?.removeListener(_onMentionRequested);
+      widget.controller?.addListener(_onMentionRequested);
+    }
   }
 
   @override
   void dispose() {
+    widget.controller?.removeListener(_onMentionRequested);
     _textController.dispose();
     _markdownController.dispose();
     _templateIdController.dispose();
@@ -228,19 +264,41 @@ class _ChatInputState extends State<ChatInput> {
   Future<void> _sendMessage() async {
     final controller = _activeController;
     final text = controller.text;
-    if (!_isMarkdownMode && containsQqUserMention(text)) {
+    if (!_isMarkdownMode && containsQqMention(text)) {
       _showSendError('@ 群成员只能用 Markdown 发送，请先切换到 Markdown 工作区。');
       return;
     }
     if ((text.trim().isEmpty && !_isTemplateMode && _sendSettings.type != 7) ||
-        _isSending) {
+        _isSending ||
+        _isConfirming) {
       return;
     }
 
-    setState(() => _isSending = true);
+    _isConfirming = containsQqEveryoneMention(text);
     var sent = true;
 
     try {
+      if (containsQqEveryoneMention(text)) {
+        final confirmed = await showDialog<bool>(
+          context: context,
+          builder: (dialog) => AlertDialog(
+            title: const Text('发送 @ 全体成员？'),
+            content: const Text('这条 Markdown 将提醒全体成员，QQ 平台会校验机器人的发送权限。'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialog, false),
+                child: const Text('取消'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(dialog, true),
+                child: const Text('确认发送'),
+              ),
+            ],
+          ),
+        );
+        if (!mounted || confirmed != true) return;
+      }
+      setState(() => _isSending = true);
       final command = parseSlashCommand(text);
       if (_useConfigured) {
         sent = await widget.onSendConfigured!(_request(text));
@@ -280,6 +338,7 @@ class _ChatInputState extends State<ChatInput> {
         _showSendError(e is FormatException ? e.message : '发送失败: $e');
       }
     } finally {
+      _isConfirming = false;
       if (mounted) setState(() => _isSending = false);
     }
   }
@@ -290,7 +349,13 @@ class _ChatInputState extends State<ChatInput> {
     AppDialogs.show(
       context,
       detail == null || detail.isEmpty ? '发送失败，请查看日志中的详细原因' : detail,
-      title: '发送失败',
+      title:
+          RegExp(
+            r'无.{0,8}权限|没有.{0,8}权限|permission|forbidden',
+            caseSensitive: false,
+          ).hasMatch(detail ?? '')
+          ? '无权限发送'
+          : '发送失败',
       error: true,
     );
   }
@@ -444,22 +509,28 @@ class _ChatInputState extends State<ChatInput> {
                               tooltip: '消息设置',
                               onPressed: _openSettings,
                             ),
-                          if (widget.isGroup)
+                          if (widget.isGroup) ...[
                             _toolButton(
                               icon: Icons.alternate_email_rounded,
                               selected: false,
                               tooltip: '@ 群成员',
                               onPressed: _mentionUser,
                             ),
+                            _toolButton(
+                              icon: Icons.groups_outlined,
+                              selected: false,
+                              tooltip: '@ 全体成员',
+                              onPressed: () =>
+                                  _insertMention('', everyone: true),
+                            ),
+                          ],
                           _toolButton(
                             icon: Icons.code_rounded,
                             selected: _isMarkdownMode && !_isTemplateMode,
                             tooltip: '自定义 Markdown',
                             onPressed: () {
                               if (_isMarkdownMode &&
-                                  containsQqUserMention(
-                                    _markdownController.text,
-                                  )) {
+                                  containsQqMention(_markdownController.text)) {
                                 _showSendError(
                                   '@ 群成员只能用 Markdown 发送，请先移除 @ 标签再切换为普通文本。',
                                 );
@@ -512,11 +583,6 @@ class _ChatInputState extends State<ChatInput> {
                               !_isMarkdownMode &&
                               !_useConfigured)
                             _modeChip('命令模式', AppTheme.amber),
-                          if (_isMarkdownMode)
-                            _modeChip(
-                              _isTemplateMode ? '模板消息' : 'Markdown',
-                              AppTheme.qqBlue,
-                            ),
                         ],
                       ),
                     ),
@@ -924,7 +990,7 @@ class _MentionPickerState extends State<_MentionPicker> {
         mainAxisSize: MainAxisSize.min,
         children: [
           const Text(
-            '选择当前机器人收到过消息的成员，或输入该 AppID 下的成员 OpenID。群聊不支持 @ 全体。',
+            '选择成员，或输入当前 AppID 下的成员 OpenID。@ 标签将通过 Markdown 发送。',
             style: TextStyle(fontSize: 12),
           ),
           const SizedBox(height: 12),

@@ -134,58 +134,41 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  for (final picker in ['sheet', 'sidebar']) {
-    testWidgets('$picker 表情发送成功定位最新，失败不定位', (tester) async {
-      final api = DelayedSendApi();
-      await host(tester, api);
-      final controller = timeline(tester, 'A');
-      for (final fail in [false, true]) {
-        controller.jumpTo(-300);
+  testWidgets('表情面板发送成功定位最新，失败不定位（已移除重复侧栏入口）', (tester) async {
+    final api = DelayedSendApi();
+    await host(tester, api);
+    final controller = timeline(tester, 'A');
+    for (final fail in [false, true]) {
+      controller.jumpTo(-300);
+      await tester.pumpAndSettle();
+      api.failSend = fail;
+      await tester.tap(find.byTooltip('选择表情'));
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 200)),
+      );
+      await tester.pump(const Duration(milliseconds: 400));
+      final widget = tester.widget<EmojiPicker>(find.byType(EmojiPicker).last);
+      widget.onEmojiSelected!(
+        EmojiItem(
+          id: 'test',
+          name: '测试表情',
+          url: 'https://example.com/test.png',
+          localPath: '${Directory.systemTemp.path}/qqm-missing-emoji.png',
+        ),
+      );
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 100)),
+      );
+      await tester.pumpAndSettle();
+      expect(controller.offset, fail ? closeTo(-300, .01) : 0);
+      expect(find.byType(AlertDialog), fail ? findsOneWidget : findsNothing);
+      if (fail) {
+        await tester.tap(find.text('知道了'));
         await tester.pumpAndSettle();
-        api.failSend = fail;
-        if (picker == 'sheet') {
-          await tester.tap(find.byTooltip('选择表情'));
-          await tester.pump(const Duration(milliseconds: 400));
-        } else {
-          await tester.tap(find.byTooltip('插件与工具'));
-          await tester.pumpAndSettle();
-          await tester.tap(find.text('表情').first);
-          await tester.pump(const Duration(milliseconds: 400));
-        }
-        await tester.runAsync(
-          () => Future<void>.delayed(const Duration(milliseconds: 200)),
-        );
-        await tester.pump(const Duration(milliseconds: 400));
-        final widget = tester.widget<EmojiPicker>(
-          find.byType(EmojiPicker).last,
-        );
-        widget.onEmojiSelected!(
-          EmojiItem(
-            id: 'test',
-            name: '测试表情',
-            url: 'https://example.com/test.png',
-            localPath: '${Directory.systemTemp.path}/qqm-missing-emoji.png',
-          ),
-        );
-        if (picker == 'sidebar') {
-          await tester.pump(const Duration(milliseconds: 400));
-          tester
-              .state<ScaffoldState>(find.byType(Scaffold).last)
-              .closeEndDrawer();
-        }
-        await tester.runAsync(
-          () => Future<void>.delayed(const Duration(milliseconds: 100)),
-        );
-        await tester.pumpAndSettle();
-        expect(controller.offset, fail ? closeTo(-300, .01) : 0);
-        expect(find.byType(AlertDialog), fail ? findsOneWidget : findsNothing);
-        if (fail) {
-          await tester.tap(find.text('知道了'));
-          await tester.pumpAndSettle();
-        }
-        expect(tester.takeException(), isNull);
       }
-      expect(api.calls, hasLength(2));
-    });
-  }
+      expect(tester.takeException(), isNull);
+    }
+    expect(api.calls, hasLength(2));
+  });
 }

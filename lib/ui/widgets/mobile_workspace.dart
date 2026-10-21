@@ -14,6 +14,7 @@ class MobileWorkspace extends StatelessWidget {
   final VoidCallback onBack, onSwitchBot, onConnection, onSettings, onNewChat;
   final ValueChanged<int> onNavigate;
   final VoidCallback? onNotifications;
+  final VoidCallback? onHistory;
   final int notificationCount;
   final String settingsLabel;
 
@@ -36,6 +37,7 @@ class MobileWorkspace extends StatelessWidget {
     this.isGroup = false,
     this.avatarUrl,
     this.onNotifications,
+    this.onHistory,
     this.notificationCount = 0,
     this.settingsLabel = '设置',
   });
@@ -94,11 +96,28 @@ class MobileWorkspace extends StatelessWidget {
                             ),
                           ),
                           const SizedBox(height: 2),
-                          Text(
-                            '${isGroup ? '群聊' : '单聊'} · $status',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(fontSize: 11, color: statusColor),
+                          Tooltip(
+                            message: '切换机器人',
+                            child: InkWell(
+                              onTap: onSwitchBot,
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Flexible(
+                                    child: Text(
+                                      '$botLabel · $status',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        color: statusColor,
+                                      ),
+                                    ),
+                                  ),
+                                  const Icon(Icons.expand_more, size: 14),
+                                ],
+                              ),
+                            ),
                           ),
                         ],
                       ),
@@ -114,11 +133,11 @@ class MobileWorkspace extends StatelessWidget {
                   ),
                 ),
           actions: [
-            if (chatting)
+            if (chatting && onHistory != null)
               IconButton(
-                tooltip: '切换机器人',
-                onPressed: onSwitchBot,
-                icon: const Icon(Icons.swap_horiz_rounded),
+                tooltip: '聊天记录',
+                onPressed: onHistory,
+                icon: const Icon(Icons.history_rounded, size: 22),
               ),
             if (!chatting && section == 2)
               IconButton(
@@ -143,7 +162,7 @@ class MobileWorkspace extends StatelessWidget {
               onPressed: onSettings,
               icon: const Icon(Icons.settings_outlined, size: 23),
             ),
-            const SizedBox(width: 8),
+            const SizedBox(width: 4),
           ],
           bottom: chatting
               ? null

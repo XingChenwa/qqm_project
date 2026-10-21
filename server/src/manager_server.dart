@@ -17,6 +17,9 @@ import 'package:qq_bot_manager/utils/constants.dart';
 import 'package:qq_bot_manager/core/group_management.dart';
 import 'package:qq_bot_manager/models/group_notice.dart';
 import 'admin_auth.dart';
+import 'voice_export.dart';
+import 'package:qq_bot_manager/utils/message_history.dart';
+import 'package:qq_bot_manager/utils/voice_file.dart';
 
 /// Authenticated same-origin control plane. No generic filesystem, proxy,
 /// subprocess or command-execution route is exposed to the browser.
@@ -33,6 +36,7 @@ class ManagerServer {
   final _failures = <String, ({int count, DateTime since})>{};
   final _logs = <Map<String, dynamic>>[];
   final _ip = PublicIpService();
+  final _voice = VoiceExport();
   late final HttpServer _server;
   int _revision = 0, _logId = 0, _activeRequests = 0;
   bool _closed = false, _authBusy = false;
@@ -297,7 +301,7 @@ class ManagerServer {
         ..set('X-Frame-Options', 'DENY')
         ..set(
           'Content-Security-Policy',
-          "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' https: data:; connect-src 'self'; frame-src https:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
+          "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' https: data:; media-src 'self' https: blob:; connect-src 'self'; frame-src https:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
         );
       if (_closed || _activeRequests > 64) {
         _json(request, {'error': '服务繁忙，请稍后重试'}, 503);
@@ -346,6 +350,10 @@ class ManagerServer {
         const files = {
           '/': ('server/web/index.html', 'text/html; charset=utf-8'),
           '/app.js': ('server/web/app.js', 'text/javascript; charset=utf-8'),
+          '/chat-history.js': (
+            'server/web/chat-history.js',
+            'text/javascript; charset=utf-8',
+          ),
           '/group-management.js': (
             'server/web/group-management.js',
             'text/javascript; charset=utf-8',
@@ -466,6 +474,8 @@ class ManagerServer {
 
   Map<String, dynamic> _config(BotConfig config) => {
     'appId': config.appId,
+    'displayName': config.displayName,
+    'avatarUrl': config.avatarUrl,
     'hasSecret': config.clientSecret.isNotEmpty,
     'autoReconnect': config.autoReconnect,
     'receiveAllGroupMessages': config.receiveAllGroupMessages,
@@ -492,22 +502,40 @@ class ManagerServer {
     return GroupTarget(bot.config.appId, group, bot.accountEpoch);
   }
 
-  Map<String, dynamic> _received(ReceivedMessageBody body) => {
-    'text': body.displayText,
-    'author': body.authorName,
-    'attachments': [
-      for (final a in body.attachments)
-        {'url': a.openUrl, 'filename': a.displayName, 'isImage': a.isImage},
-    ],
-    if (body.card != null)
-      'card': {
-        'title': body.card!.title,
-        'description': body.card!.description,
-        'url': body.card!.jumpUrl,
-        'preview': body.card!.previewUrl,
-      },
-    'elements': body.elements.map(_received).toList(),
-  };
+  Map<String, dynamic> _received(
+    ReceivedMessageBody body, [
+    List<int>? voiceIndex,
+  ]) {
+    final cursor = voiceIndex ?? [0];
+    return {
+      'text': body.displayText,
+      'author': body.authorName,
+      'attachments': [
+        for (final a in body.attachments)
+          {
+            'url': a.openUrl,
+            'filename': a.displayName,
+            'isImage': a.isImage,
+            'isVoice': a.isVoice,
+            if (a.isVoice) 'voiceWavUrl': a.voiceWavUrl,
+            if (a.isVoice) 'voiceIndex': cursor[0]++,
+            'isVideo': a.isVideo,
+            'transcript': a.transcript,
+          },
+      ],
+      if (body.card != null)
+        'card': {
+          'title': body.card!.title,
+          'description': body.card!.description,
+          'url': body.card!.jumpUrl,
+          'preview': body.card!.previewUrl,
+        },
+      'elements': body.elements
+          .map((child) => _received(child, cursor))
+          .toList(),
+    };
+  }
+
   Map<String, dynamic> _message(MessageModel message) => {
     'id': message.id,
     'senderId': message.senderId,
@@ -614,6 +642,119 @@ class ManagerServer {
               .toList(),
           'hasOlder': messages.length > 500,
         });
+      case '/api/history/search':
+        _checkEpoch(query);
+        final term = (query['search'] ?? '').trim();
+        if (term.length > 200) throw const FormatException('搜索词过长');
+        final sessionType = int.tryParse(query['sessionType'] ?? '');
+        final rows = bot.searchChatHistory(term, sessionType: sessionType);
+        final before = query['before'] ?? '';
+        final index = before.isEmpty
+            ? 0
+            : rows.indexWhere(
+                    (m) =>
+                        m.id == before && m.sessionId == query['beforeSession'],
+                  ) +
+                  1;
+        if (before.isNotEmpty && index == 0) {
+          throw const FormatException('记录已变化，请重新搜索');
+        }
+        final page = rows.skip(index).take(60).toList();
+        final sessions = {
+          for (final session in bot.sessions) session.id: session,
+        };
+        final more = rows.length > index + page.length;
+        _json(request, {
+          'messages': [
+            for (final message in page)
+              {
+                ..._message(message),
+                'sessionId': message.sessionId,
+                'sessionName': sessions[message.sessionId]!.name,
+                'sessionType': sessions[message.sessionId]!.sessionType,
+                'sessionAvatarUrl': sessions[message.sessionId]!.avatarUrl,
+                'snippet': historyMatchSnippet(message, term),
+              },
+          ],
+          'count': rows.length,
+          'next': more && page.isNotEmpty ? page.last.id : '',
+          'nextSession': more && page.isNotEmpty ? page.last.sessionId : '',
+        });
+      case '/api/history':
+        _checkEpoch(query);
+        final session = query['session'] ?? '';
+        final term = (query['search'] ?? '').trim().toLowerCase();
+        if (term.length > 200) throw const FormatException('搜索词过长');
+        final filter =
+            HistoryFilter.values
+                .where((value) => value.name == query['filter'])
+                .firstOrNull ??
+            HistoryFilter.all;
+        final rows = bot
+            .getMessagesForSession(session)
+            .reversed
+            .where(
+              (m) =>
+                  historyMessageText(m).toLowerCase().contains(term) &&
+                  matchesHistoryFilter(m, filter),
+            )
+            .toList();
+        final before = query['before'] ?? '';
+        final from = query['from'] ?? '';
+        final startIndex = from.isEmpty
+            ? 0
+            : rows.indexWhere((m) => m.id == from);
+        if (startIndex < 0) throw const FormatException('该记录已不存在，请重新搜索');
+        final index = before.isEmpty
+            ? startIndex
+            : rows.indexWhere((m) => m.id == before) + 1;
+        if (before.isNotEmpty && index == 0) {
+          throw const FormatException('记录已变化，请重新搜索');
+        }
+        final page = rows.skip(index).take(60).toList();
+        _json(request, {
+          'messages': page.map(_message).toList(),
+          'count': rows.length,
+          'hasNewer': index > 0,
+          'next': rows.length > index + page.length && page.isNotEmpty
+              ? page.last.id
+              : '',
+        });
+      case '/api/voice':
+        _checkEpoch(query);
+        final message = bot
+            .getMessagesForSession(query['session'] ?? '')
+            .where((m) => m.id == query['message'])
+            .firstOrNull;
+        if (message == null || message.isRecalled) {
+          throw const FormatException('未找到可下载的语音记录');
+        }
+        final attachments = historyAttachments(
+          message.receivedBody,
+        ).where((a) => a.isVoice).toList();
+        final index = int.tryParse(query['index'] ?? '') ?? -1;
+        if (index < 0 || index >= attachments.length) {
+          throw const FormatException('语音编号无效');
+        }
+        final bytes = await _voice.read(attachments[index].openUrl);
+        _checkEpoch(query);
+        final currentMessage = bot
+            .getMessagesForSession(query['session'] ?? '')
+            .where((m) => m.id == message.id)
+            .firstOrNull;
+        if (currentMessage == null || currentMessage.isRecalled) {
+          throw const FormatException('消息已撤回，已停止下载');
+        }
+        final extension = voiceFileExtension(bytes);
+        request.response.headers.contentType = extension == 'bin'
+            ? ContentType.binary
+            : ContentType('audio', extension == 'm4a' ? 'mp4' : extension);
+        request.response.headers.set(
+          'Content-Disposition',
+          'attachment; filename="QQ-voice.$extension"',
+        );
+        request.response.contentLength = bytes.length;
+        request.response.add(bytes);
       case '/api/notices':
         _checkEpoch(query);
         _json(request, {

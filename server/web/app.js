@@ -302,7 +302,7 @@ function download(name, source, type = "text/plain") {
 function inlineMarkdown(text, parent) {
   // All rendered content is DOM text. Never interpret chat/plugin HTML.
   const token =
-    /(<qqbot-at-user\s+id="([^"\n]+)"\s*\/>)|(`([^`]+)`)|(\*\*([^*]+)\*\*)|(!?\[([^\]]*)\]\((https?:\/\/[^\s)]+)\))/g;
+    /(<qqbot-at-user\s+id="([^"\n]+)"\s*\/>)|(`([^`]+)`)|(\*\*([^*]+)\*\*)|(!?\[([^\]]*)\]\((https?:\/\/[^\s)]+)\))|(<qqbot-at-everyone\s*\/>)/g;
   let end = 0;
   for (const match of text.matchAll(token)) {
     parent.append(text.slice(end, match.index));
@@ -310,7 +310,8 @@ function inlineMarkdown(text, parent) {
       const id = match[2];
       const name = S.messages.find((m) => m.senderId === id)?.senderName || id;
       parent.append(el("strong", {}, `@${name}（${id}）`));
-    } else if (match[3]) parent.append(el("code", {}, match[4]));
+    } else if (match[10]) parent.append(el("strong", {}, "@全体成员"));
+    else if (match[3]) parent.append(el("code", {}, match[4]));
     else if (match[5]) parent.append(el("strong", {}, match[6]));
     else {
       const url = safeUrl(match[9]);
@@ -362,6 +363,7 @@ function updatePreview() {
   const md = S.format === "markdown";
   $("preview").hidden = !md;
   $("mention").hidden = !md;
+  $("mention-everyone").hidden = !md;
   $("compose-area").classList.toggle("markdown", md);
   $("preview").replaceChildren();
   if (md) markdown($("draft").value || "Markdown 实时预览", $("preview"));
@@ -445,13 +447,50 @@ function renderChatHeader() {
   );
   $("send").disabled = !session || S.sending;
 }
+let historySearchRevision = 0;
+let historySearchTimer;
+let historySearchCache = null;
+async function renderHistorySearch(append = false) {
+  const query = $("search").value.trim();
+  if (!query || !S.state) return;
+  const scope = { appId: S.state.config.appId, epoch: S.state.epoch };
+  const key = JSON.stringify([scope.appId, scope.epoch, query, S.filter]);
+  const request = ++historySearchRevision;
+  try {
+    let data;
+    if (!append && historySearchCache?.key === key && historySearchCache.revision === S.revision) {
+      data = historySearchCache.data;
+    } else {
+      const previous = append && historySearchCache?.key === key ? historySearchCache.data : null;
+      const params = { ...scope, search: query,
+        sessionType: S.filter === "all" ? "" : S.filter === "group" ? "1" : "0",
+        before: previous?.next || "", beforeSession: previous?.nextSession || "" };
+      const result = await api("history/search?" + new URLSearchParams(params));
+      data = previous ? { ...result, messages: [...previous.messages, ...result.messages] } : result;
+    }
+    if (request !== historySearchRevision || !currentHistory(scope) || query !== $("search").value.trim()) return;
+    historySearchCache = { key, revision: S.revision, data };
+    $("sessions").replaceChildren(el("p", { class: "search-count muted" }, `${data.count} 条本地聊天记录`),
+      ...data.messages.map(message => el("button", {
+        class: "session-item history-search-result", "data-message-id": message.id,
+        onclick: () => window.openQQMHistory?.(message.sessionId, message.id, scope),
+      }, avatar(message.sessionName, message.sessionAvatarUrl, message.sessionType === 1),
+      el("div", { class: "grow" }, el("div", { class: "session-name" }, message.sessionName),
+        el("div", { class: "session-time" }, `${message.senderName || "消息"} · ${nowTime(message.time)}`),
+        el("div", { class: "search-snippet" }, message.snippet)))));
+    if (!data.count) $("sessions").append(el("p", { class: "empty" }, "没有找到聊天记录，试试正文、引用或语音转写。"));
+    if (data.next) $("sessions").append(el("button", { class: "search-more", onclick: () => renderHistorySearch(true) }, "加载更多搜索结果"));
+  } catch (error) {
+    if (request === historySearchRevision && currentHistory(scope)) $("sessions").replaceChildren(el("p", { class: "empty" }, error.message));
+  }
+}
 function renderSessions() {
   const query = $("search").value.trim().toLowerCase();
+  if (query) { void renderHistorySearch(); return; }
+  historySearchRevision++;
+  historySearchCache = null;
   const list = S.state.sessions.filter(
-    (s) =>
-      (S.filter === "all" ||
-        (S.filter === "group") === (s.sessionType === 1)) &&
-      (!query || `${s.name} ${s.id}`.toLowerCase().includes(query)),
+    (s) => S.filter === "all" || (S.filter === "group") === (s.sessionType === 1),
   );
   $("sessions").replaceChildren(
     ...list.map((session) => {
@@ -499,7 +538,15 @@ function renderSessions() {
       ),
     );
 }
-$("search").oninput = () => S.state && renderSessions();
+$("search").oninput = () => {
+  clearTimeout(historySearchTimer);
+  historySearchRevision++;
+  historySearchCache = null;
+  if (!S.state) return;
+  if (!$("search").value.trim()) { renderSessions(); return; }
+  $("sessions").replaceChildren(el("p", { class: "empty" }, "正在搜索本地聊天记录…"));
+  historySearchTimer = setTimeout(renderSessions, 220);
+};
 document.querySelectorAll("[data-filter]").forEach(
   (button) =>
     (button.onclick = () => {
@@ -510,13 +557,17 @@ document.querySelectorAll("[data-filter]").forEach(
       renderSessions();
     }),
 );
-function renderReceived(body, parent) {
+function renderReceived(body, parent, message) {
   if (body.author) parent.append(el("small", { class: "muted" }, body.author));
   if (body.text) parent.append(el("p", {}, body.text));
   for (const a of body.attachments || []) {
     const url = safeUrl(a.url);
     if (!url) continue;
-    if (a.isImage) {
+    if (a.isVoice && window.renderQQMVoice) {
+      window.renderQQMVoice(a, parent, message);
+    } else if (a.isVideo) {
+      parent.append(el("video", { src: url, controls: "", preload: "none", class: "message-video" }));
+    } else if (a.isImage) {
       const img = el("img", {
         src: url,
         alt: a.filename || "图片",
@@ -534,6 +585,8 @@ function renderReceived(body, parent) {
   }
   if (body.card) {
     const url = safeUrl(body.card.url);
+    const preview = safeUrl(body.card.preview);
+    if (preview) parent.append(el("img", {src: preview, alt: body.card.title || "卡片预览", loading: "lazy", referrerpolicy: "no-referrer"}));
     parent.append(
       url
         ? el("a", { href: url }, body.card.title)
@@ -543,7 +596,7 @@ function renderReceived(body, parent) {
   }
   for (const child of body.elements || []) {
     const details = el("details", {}, el("summary", {}, "展开引用 / 聊天记录"));
-    renderReceived(child, details);
+    renderReceived(child, details, message);
     parent.append(details);
   }
 }
@@ -551,19 +604,24 @@ function renderMessages() {
   const area = $("messages"),
     top = area.scrollTop;
   const expanded = new Set();
+  const existing = new Map([...area.querySelectorAll("[data-render-id]")].map(node => [node.dataset.renderId, node]));
+  const desired = [];
   for (const article of area.querySelectorAll("[data-render-id]")) {
     [...article.querySelectorAll("details")].forEach((detail, index) => {
       if (detail.open) expanded.add(article.dataset.renderId + ":" + index);
     });
   }
-  area.replaceChildren();
   for (const message of S.messages) {
+    const key = `${S.state.config.appId}/${S.state.epoch}/${S.session}/${message.id}`;
+    const payload = JSON.stringify(message);
+    const previous = existing.get(key);
+    if (previous && previous.qqmPayload === payload) { desired.push(previous); continue; }
     const bubble = el("div", { class: "bubble" });
     if (message.isRecalled)
       bubble.append(el("span", { class: "muted" }, "这条消息已撤回"));
     else {
       if (message.markdownContent) markdown(message.markdownContent, bubble);
-      else if (message.body) renderReceived(message.body, bubble);
+      else if (message.body) renderReceived(message.body, bubble, message);
       else bubble.append(message.content || "");
       const image = safeUrl(message.imageUrl);
       if (image)
@@ -615,22 +673,25 @@ function renderMessages() {
     const senderAvatar = avatar(message.senderName, message.senderAvatarUrl);
     window.bindQQMMemberMenu?.(senderAvatar, message,
       S.state.sessions.find((session) => session.id === S.session));
-    area.append(
-      el(
+    const article = el(
         "article",
         {
           class: "message" + (message.isFromBot ? " mine" : ""),
-          "data-render-id": `${S.state.config.appId}/${S.session}/${message.id}`,
+          "data-render-id": key,
         },
         senderAvatar,
         main,
-      ),
     );
+    article.qqmPayload = payload;
+    desired.push(article);
   }
   if (!S.messages.length)
-    area.append(
+    desired.push(
       el("div", { class: "empty" }, el("p", {}, "这里还没有聊天记录")),
     );
+  const keep = new Set(desired);
+  for (const node of [...area.children]) if (!keep.has(node)) node.remove();
+  desired.forEach((node, index) => { if (area.children[index] !== node) area.insertBefore(node, area.children[index] || null); });
   for (const article of area.querySelectorAll("[data-render-id]")) {
     [...article.querySelectorAll("details")].forEach((detail, index) => {
       if (expanded.has(article.dataset.renderId + ":" + index))
@@ -740,6 +801,7 @@ $("mention").onclick = () => {
     ],
   );
 };
+$("mention-everyone").onclick = () => window.mentionQQMMember?.(null);
 function renderPlugins() {
   $("plugins").replaceChildren(
     ...S.state.plugins.map((plugin) => {
@@ -1159,6 +1221,7 @@ async function refresh(force = false) {
     }
     const old = S.state?.config.appId;
     if (old !== undefined && old !== data.config.appId) {
+      $("search").value = "";
       saveDraft();
       S.session = "";
       S.messages = [];
@@ -1173,6 +1236,7 @@ async function refresh(force = false) {
       );
     }
     S.state = data;
+    window.dispatchEvent(new Event("qqm-state"));
     window.onQQMRefresh?.(data);
     S.revision = data.revision;
     $("version").textContent = `${data.version}+${data.build} · Linux 网页版`;
@@ -1192,7 +1256,7 @@ async function refresh(force = false) {
           { value: bot.appId },
           bot.appId === data.config.appId && data.botName
             ? data.botName
-            : bot.appId,
+            : bot.displayName || bot.appId,
         ),
       ),
     );

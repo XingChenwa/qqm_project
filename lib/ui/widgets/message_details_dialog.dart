@@ -13,6 +13,11 @@ Future<void> showMessageDetails(BuildContext context, MessageModel message) {
     redactMessageDetails({
       '事件': message.extra?['eventType'] ?? '',
       '消息 ID': message.id,
+      '时间': message.timestamp.toIso8601String(),
+      '发送者': message.senderName,
+      '内容': message.isRecalled
+          ? '（已撤回）'
+          : message.markdownContent ?? message.content,
       '群/用户 OpenID': message.sessionId,
       '原始消息类型': message.sourceMessageType,
       '引用索引': message.referenceIndex,

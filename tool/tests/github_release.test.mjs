@@ -3,6 +3,14 @@ import assert from 'node:assert/strict';
 import {generateKeyPairSync} from 'node:crypto';
 import {readFile} from 'node:fs/promises';
 import {join} from 'node:path';
+import {releaseNotesSummary} from '../release_notes.mjs';
+
+test('client notes are short without changing the full Release body', () => {
+  const body = '# 1.4.0\n- 修复一些 bug～\n- 添加新功能\n- 优化界面间距\n- 第四项\n下载：https://example.com/app.apk';
+  assert.equal(releaseNotesSummary(body), '• 修复一些 bug～\n• 添加新功能\n• 优化界面间距');
+  assert(body.includes('第四项'));
+  assert.equal(releaseNotesSummary(''), '• 修复一些问题，优化使用体验。');
+});
 import {repository, readVersion, signingKeys, assetDefinitions, sha256, signManifest, verifyManifest, validateManifest, trustedAsset, releaseChannel, manifestChannel} from '../github_release_core.mjs';
 
 const keys = generateKeyPairSync('ed25519');

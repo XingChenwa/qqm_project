@@ -13,6 +13,7 @@ import '../services/ip_whitelist_service.dart';
 import '../utils/profile_helpers.dart';
 import '../utils/helpers.dart';
 import '../utils/qq_mentions.dart';
+import '../utils/message_history.dart';
 import '../models/group_notice.dart';
 import 'group_management.dart';
 
@@ -207,8 +208,9 @@ class BotClient extends ChangeNotifier {
       List.unmodifiable(_messages.map(_withUserAvatar));
   List<ChatSession> get sessions => _sessions;
   String get botId => _botId;
-  String get botName => _botName;
-  String get botAvatarUrl => _botAvatarUrl;
+  String get botName => _botName.isNotEmpty ? _botName : _config.displayName;
+  String get botAvatarUrl =>
+      _botAvatarUrl.isNotEmpty ? _botAvatarUrl : _config.avatarUrl;
   String get gatewaySessionId => _gatewaySessionId;
   String get lastEventType => _lastEventType;
   DateTime? get lastEventAt => _lastEventAt;
@@ -220,7 +222,26 @@ class BotClient extends ChangeNotifier {
   bool _ownsMessage(MessageModel message) =>
       message.extra?['botAppId'] == null ||
       message.extra?['botAppId'] == _config.appId;
-  String get botDisplayName => _botName.isNotEmpty ? _botName : '未获取机器人资料';
+  String get botDisplayName =>
+      botName.isNotEmpty ? botName : '机器人 ${_config.appId}';
+
+  void _cacheBotIdentity() {
+    final epoch = _accountEpoch;
+    final appId = _config.appId;
+    final name = _botName;
+    final avatar = _botAvatarUrl;
+    if (appId.isEmpty || (name.isEmpty && avatar.isEmpty)) return;
+    final pending = _configWrites.then((_) async {
+      if (_disposed || epoch != _accountEpoch || appId != _config.appId) return;
+      if (name.isNotEmpty) _config.displayName = name;
+      if (avatar.isNotEmpty) _config.avatarUrl = avatar;
+      await _storage.saveBotConfig(_config);
+      if (!_disposed && epoch == _accountEpoch) notifyListeners();
+    });
+    _configWrites = pending.catchError((Object _) {
+      if (!_disposed) _addLog('机器人名称暂未缓存，不影响连接和消息发送');
+    });
+  }
 
   /// Get a valid access token, refreshing if expired.
   Future<String?> _getAccessToken() {
@@ -419,6 +440,7 @@ class BotClient extends ChangeNotifier {
     _botId = user['id']?.toString() ?? '';
     _botName = user['username']?.toString() ?? '';
     _botAvatarUrl = firstProfileAvatar([user['avatar'], user['avatar_url']]);
+    _cacheBotIdentity();
     _gatewaySessionId = data['session_id']?.toString() ?? '';
     _connectionStatus = '在线';
     _scheduleTokenRefresh();
@@ -1000,6 +1022,7 @@ class BotClient extends ChangeNotifier {
           final data = result.data ?? const <String, dynamic>{};
           _botName = firstProfileName([data['username'], _botName]);
           _botAvatarUrl = firstProfileAvatar([data['avatar'], _botAvatarUrl]);
+          _cacheBotIdentity();
           for (var i = 0; i < _messages.length; i++) {
             if (_messages[i].isFromBot) {
               final updated = _messages[i].copyWith(
@@ -1416,6 +1439,7 @@ class BotClient extends ChangeNotifier {
         if (message.options.keyboard != null)
           'keyboard': message.options.keyboard!.toJson(),
         if (message.type == 7) 'mediaFileType': message.mediaFileType,
+        if (message.type == 7) 'mediaSource': message.mediaSource,
         if (result.metadata != null) 'response': result.metadata,
       },
     );
@@ -1520,7 +1544,7 @@ class BotClient extends ChangeNotifier {
     bool isGroup = false,
     MessageModel? replyTo,
   }) async {
-    if (containsQqUserMention(content)) {
+    if (containsQqMention(content)) {
       return sendMarkdownMessage(
         targetId,
         content,
@@ -1723,6 +1747,22 @@ class BotClient extends ChangeNotifier {
       extra: {
         ...(extra ?? {'localOnly': true}),
         'botAppId': _config.appId,
+        if (markdown != null && containsQqUserMention(markdown))
+          'mentions': [
+            for (final match in RegExp(
+              qqUserMentionPattern,
+            ).allMatches(markdown))
+              {
+                'id': match.group(1),
+                'username':
+                    _knownMember(
+                      'group:$targetId:${match.group(1)}',
+                      targetId,
+                      match.group(1)!,
+                    )['name'] ??
+                    '',
+              },
+          ],
       },
     );
     _messages.add(msg);
@@ -1910,6 +1950,17 @@ class BotClient extends ChangeNotifier {
 
   Future<void> _applyConfig(BotConfig newConfig) async {
     _configRevision++;
+    final previousProfile = botProfiles
+        .where((profile) => profile.appId == newConfig.appId)
+        .firstOrNull;
+    if (previousProfile != null) {
+      if (newConfig.displayName.isEmpty) {
+        newConfig.displayName = previousProfile.displayName;
+      }
+      if (newConfig.avatarUrl.isEmpty) {
+        newConfig.avatarUrl = previousProfile.avatarUrl;
+      }
+    }
     final nicknameSettingChanged =
         _config.enableOiapiNickname != newConfig.enableOiapiNickname;
     final credentialsChanged =
@@ -1987,6 +2038,40 @@ class BotClient extends ChangeNotifier {
     return avatar == message.senderAvatarUrl
         ? message
         : message.copyWith(senderAvatarUrl: avatar);
+  }
+
+  /// Search saved history, not only the most recent in-memory timeline.
+  /// Storage and sessions are both scoped to the active AppID.
+  List<MessageModel> searchChatHistory(String query, {int? sessionType}) {
+    final term = query.trim().toLowerCase();
+    if (term.isEmpty) return [];
+    final sessions = {
+      for (final session in _sessions)
+        if (sessionType == null || session.sessionType == sessionType)
+          session.id,
+    };
+    final byId = <(String, String), MessageModel>{};
+    for (final message in [..._storage.getMessages(null), ..._messages]) {
+      if (sessions.contains(message.sessionId)) {
+        byId[(message.sessionId, message.id)] = message;
+      }
+    }
+    final rows =
+        byId.values
+            .where(
+              (message) =>
+                  !message.isRecalled &&
+                  historyMessageText(message).toLowerCase().contains(term),
+            )
+            .map(_withUserAvatar)
+            .toList()
+          ..sort((a, b) {
+            final order = b.timestamp.compareTo(a.timestamp);
+            return order != 0
+                ? order
+                : '${a.sessionId}/${a.id}'.compareTo('${b.sessionId}/${b.id}');
+          });
+    return rows;
   }
 
   List<MessageModel> getMessagesForSession(String sessionId) {

@@ -131,7 +131,7 @@ class _MarkdownWorkbenchState extends State<MarkdownWorkbench> {
       final available =
           MediaQuery.sizeOf(context).height -
           MediaQuery.viewInsetsOf(context).bottom;
-      final height = math.min(250.0, math.max(100.0, available * .30));
+      final height = math.min(200.0, math.max(90.0, available * .26));
       return Container(
         key: const ValueKey('markdown-workbench'),
         clipBehavior: Clip.antiAlias,
@@ -154,9 +154,12 @@ class _MarkdownWorkbenchState extends State<MarkdownWorkbench> {
                 child: Row(
                   children: [
                     const Expanded(
-                      child: Text(
-                        'Markdown 工作区',
-                        style: TextStyle(fontWeight: FontWeight.w700),
+                      child: Tooltip(
+                        message: '本地预览仅供参考，实际显示以 QQ 客户端为准。',
+                        child: Text(
+                          'Markdown 工作区',
+                          style: TextStyle(fontWeight: FontWeight.w700),
+                        ),
                       ),
                     ),
                     if (!wide)
@@ -245,13 +248,6 @@ class _MarkdownWorkbenchState extends State<MarkdownWorkbench> {
                     ),
                   ),
                 ],
-              ),
-            ),
-            const Padding(
-              padding: EdgeInsets.fromLTRB(10, 0, 10, 8),
-              child: Text(
-                '本地预览仅供参考，实际显示和可用语法以 QQ 客户端为准。',
-                style: TextStyle(fontSize: 11),
               ),
             ),
           ],

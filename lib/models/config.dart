@@ -10,6 +10,8 @@ class BotConfig {
       oiapiNicknameDefaultVersion;
 
   String appId;
+  String displayName;
+  String avatarUrl;
   String clientSecret;
   String accessToken;
   int tokenExpiresAt; // Unix timestamp in seconds
@@ -36,6 +38,8 @@ class BotConfig {
 
   BotConfig({
     this.appId = '',
+    this.displayName = '',
+    this.avatarUrl = '',
     this.clientSecret = '',
     this.accessToken = '',
     this.tokenExpiresAt = 0,
@@ -73,6 +77,8 @@ class BotConfig {
 
   Map<String, dynamic> toMap() => {
     'appId': appId,
+    'displayName': displayName,
+    'avatarUrl': avatarUrl,
     'clientSecret': clientSecret,
     'accessToken': accessToken,
     'tokenExpiresAt': tokenExpiresAt,
@@ -99,6 +105,8 @@ class BotConfig {
 
   factory BotConfig.fromMap(Map<String, dynamic> map) => BotConfig(
     appId: map['appId'] as String? ?? '',
+    displayName: map['displayName'] as String? ?? '',
+    avatarUrl: map['avatarUrl'] as String? ?? '',
     clientSecret: map['clientSecret'] as String? ?? '',
     accessToken: map['accessToken'] as String? ?? '',
     tokenExpiresAt: map['tokenExpiresAt'] as int? ?? 0,

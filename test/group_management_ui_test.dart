@@ -77,7 +77,7 @@ void main() {
     await tester.pumpWidget(chat());
     await tester.longPress(find.byTooltip('长按管理此群成员'));
     await tester.pumpAndSettle();
-    expect(find.text('群成员管理'), findsOneWidget);
+    expect(find.text('群成员操作'), findsOneWidget);
     expect(api.mutes, isEmpty);
     await tester.tap(find.widgetWithText(ListTile, '设置禁言'));
     await tester.pumpAndSettle();
@@ -112,13 +112,20 @@ void main() {
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox());
   });
-  testWidgets('无权限不给出可执行菜单，切换机器人后旧成员菜单不可用', (tester) async {
+  testWidgets('无权限点击管理按钮会提示且不执行，切换机器人后旧菜单不可用', (tester) async {
     api.botRole = 'member';
     await tester.pumpWidget(chat());
     await tester.longPress(find.byTooltip('长按管理此群成员'));
     await tester.pumpAndSettle();
+    expect(find.textContaining('暂不能执行群管理'), findsOneWidget);
+    expect(find.widgetWithText(ListTile, '踢出群聊'), findsOneWidget);
+    await tester.tap(find.widgetWithText(ListTile, '踢出群聊'));
+    await tester.pumpAndSettle();
+    expect(find.text('无法管理此成员'), findsOneWidget);
     expect(find.textContaining('机器人需要是此群的群主或管理员'), findsOneWidget);
-    expect(find.widgetWithText(ListTile, '踢出群聊'), findsNothing);
+    expect(api.removals, isEmpty);
+    await tester.tap(find.text('知道了'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('关闭'));
     await tester.pumpAndSettle();
     api.botRole = 'admin';

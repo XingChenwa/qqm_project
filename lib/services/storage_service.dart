@@ -200,10 +200,11 @@ class StorageService {
     await _messagesBox.put(_key(message.id), jsonEncode(message.toMap()));
   }
 
-  List<MessageModel> getMessages(String sessionId) {
+  // Null reads all locally saved messages for the selected AppID only.
+  List<MessageModel> getMessages(String? sessionId) {
     return _chatValues(_messagesBox)
         .map((json) => MessageModel.fromMap(jsonDecode(json)))
-        .where((m) => m.sessionId == sessionId)
+        .where((m) => sessionId == null || m.sessionId == sessionId)
         .toList()
       ..sort((a, b) => a.timestamp.compareTo(b.timestamp));
   }

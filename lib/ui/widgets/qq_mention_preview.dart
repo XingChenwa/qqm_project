@@ -7,7 +7,7 @@ import '../../utils/qq_mentions.dart';
 /// A standalone QQ tag would otherwise be swallowed as an HTML block.
 class QqMentionPreviewBlockSyntax extends md.BlockSyntax {
   @override
-  RegExp get pattern => RegExp('^ {0,3}$qqUserMentionPattern');
+  RegExp get pattern => RegExp('^ {0,3}$qqMentionPattern');
   @override
   bool canEndBlock(md.BlockParser parser) => false;
   @override
@@ -21,11 +21,15 @@ class QqMentionPreviewBlockSyntax extends md.BlockSyntax {
 /// Inline parsing leaves fenced/inline code and the original draft untouched.
 class QqMentionPreviewSyntax extends md.InlineSyntax {
   final Map<String, String> names;
-  QqMentionPreviewSyntax(this.names) : super(qqUserMentionPattern);
+  QqMentionPreviewSyntax(this.names) : super(qqMentionPattern);
 
   @override
   bool onMatch(md.InlineParser parser, Match match) {
-    final id = match.group(1)!;
+    final id = match.group(1);
+    if (id == null) {
+      parser.addNode(md.Element.text('qqmention', '@全体成员'));
+      return true;
+    }
     final name = names[id]?.trim();
     final node = md.Element.text(
       'qqmention',
@@ -45,7 +49,9 @@ class QqMentionPreviewBuilder extends MarkdownElementBuilder {
     TextStyle? preferredStyle,
     TextStyle? parentStyle,
   ) => Tooltip(
-    message: '成员 OpenID：${element.attributes['openid']}',
+    message: element.attributes['openid'] == null
+        ? '@ 全体成员，发送权限由 QQ 平台校验'
+        : '成员 OpenID：${element.attributes['openid']}',
     child: Text(
       element.textContent,
       style: (parentStyle ?? preferredStyle ?? const TextStyle()).copyWith(

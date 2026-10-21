@@ -253,7 +253,7 @@ class OutgoingMessage {
   });
 
   OutgoingMessage withMarkdownMentions() =>
-      type == 0 && containsQqUserMention(content)
+      type == 0 && containsQqMention(content)
       ? OutgoingMessage(
           type: 2,
           content: content,
@@ -264,8 +264,8 @@ class OutgoingMessage {
       : this;
 
   String? validate({required bool isGroup}) {
-    if (type != 2 && containsQqUserMention(content)) {
-      return '@ 群成员只能使用 Markdown 消息';
+    if (type != 2 && containsQqMention(content)) {
+      return '@ 成员只能使用 Markdown 消息';
     }
     final optionsError = options.validate(isGroup: isGroup);
     if (optionsError != null) return optionsError;

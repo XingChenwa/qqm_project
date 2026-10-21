@@ -6,6 +6,7 @@ import {tmpdir} from 'node:os';
 import {repository, pagesUrl, websiteBranch, manifestName, base64, signingKeys, readVersion, sha256, assetDefinitions, signManifest, verifyManifest, releaseChannel, manifestChannel, versionPattern} from './github_release_core.mjs';
 import {syncWebsiteMetadata} from './github_site_sync.mjs';
 import {packageNames} from './package_names.mjs';
+import {releaseNotesSummary} from './release_notes.mjs';
 
 const command = process.argv[2];
 const publicKey = process.env.UPDATE_PUBLIC_KEY ?? '';
@@ -103,7 +104,7 @@ try {
     const packages=resolve('build/release-packages');await mkdir(packages,{recursive:true});
     const definitions=assetDefinitions(info.version,info.build);
     gh('run','download',process.env.GITHUB_RUN_ID,'--repo',repository,'--dir',packages,...definitions.flatMap(a=>['--name',a.directory]));
-    const notes=(eventRelease.body??'').slice(0,2000);
+    const notes=releaseNotesSummary(eventRelease.body);
     const data={schema:2,repository,tag:info.tag,version:info.version,build:info.build,channel:releaseChannel(release),
       published_at:Math.floor(Date.parse(eventRelease.published_at)/1000),releases:[]};
     const files=[];

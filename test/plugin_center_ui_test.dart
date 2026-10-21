@@ -275,6 +275,8 @@ void main() {
       await tester.tap(
         width < 700
             ? find.widgetWithText(NavigationDestination, '总览')
+            : width < 1180
+            ? find.byTooltip('总览')
             : find.text('总览'),
       );
       await tester.pumpAndSettle();
@@ -284,6 +286,8 @@ void main() {
       await tester.tap(
         width < 700
             ? find.widgetWithText(NavigationDestination, '插件')
+            : width < 1180
+            ? find.byTooltip('插件')
             : find.text('插件'),
       );
       await tester.pumpAndSettle();

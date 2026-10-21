@@ -12,6 +12,7 @@
     <link rel="stylesheet" href="./style.css" />
     <script defer src="./app.js"></script>
     <script defer src="./group-management.js"></script>
+    <script defer src="./chat-history.js"></script>
   </head>
   <body>
     <main id="auth-loading" class="login-view" aria-live="polite">
@@ -212,8 +213,9 @@
             <input
               id="search"
               type="search"
-              placeholder="搜索会话"
-              aria-label="搜索会话"
+              placeholder="搜索聊天记录"
+              aria-label="搜索聊天记录"
+              maxlength="200"
             />
             <div class="filter-row" role="group" aria-label="会话类型">
               <button class="chip active" data-filter="all">全部</button
@@ -239,6 +241,14 @@
                   在左侧打开聊天，或先连接机器人
                 </p>
               </div>
+              <button
+                id="chat-history"
+                class="icon"
+                aria-label="聊天记录"
+                title="聊天记录"
+              >
+                ◷
+              </button>
               <button
                 id="chat-settings"
                 class="icon"
@@ -271,6 +281,7 @@
                 ><button data-format="image">图片链接</button>
                 <div class="grow"></div>
                 <button id="mention" hidden>@ 成员</button>
+                <button id="mention-everyone" hidden>@ 全体</button>
               </div>
               <div id="compose-area" class="compose-area">
                 <textarea
