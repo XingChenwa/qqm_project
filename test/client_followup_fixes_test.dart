@@ -113,6 +113,9 @@ void main() {
     );
     final png = img.encodePng(photo);
     fixtureServer!.listen((request) async {
+      // Deliberately slower than the old 600ms polling budget, so this test
+      // proves that it awaits real decoding rather than depending on host speed.
+      await Future<void>.delayed(const Duration(milliseconds: 800));
       request.response.headers.contentType = ContentType('image', 'png');
       request.response.persistentConnection = false;
       request.response.add(png);
@@ -328,19 +331,44 @@ void main() {
         findsOneWidget,
       );
       expect(find.textContaining('URL:'), findsNothing);
-      await tester.tap(find.byKey(const ValueKey('forwarded-record-card')));
-      await tester.pump(const Duration(milliseconds: 300));
-      for (var i = 0; i < 40; i++) {
-        await tester.runAsync(
-          () => Future<void>.delayed(const Duration(milliseconds: 15)),
+      // Real HTTP/file/codec work must finish on the real event loop before
+      // the record starts loading under the widget test's fake clock. Otherwise
+      // an image request started in fake async can deadlock a real-async wait.
+      final imageErrors = <Object>[];
+      final recordContext = tester.element(find.byType(Scaffold));
+      final imageSources = <String>{};
+      final pendingBodies = [body];
+      while (pendingBodies.isNotEmpty) {
+        final entry = pendingBodies.removeLast();
+        imageSources.addAll(
+          entry.attachments.where((a) => a.isImage).map((a) => a.url),
         );
-        await tester.pump(const Duration(milliseconds: 20));
-        final images = tester.widgetList<RawImage>(find.byType(RawImage));
-        if (images.isNotEmpty && images.every((image) => image.image != null)) {
-          break;
-        }
+        pendingBodies.addAll(entry.elements);
       }
+      await tester.runAsync(
+        () => Future.wait([
+          for (final source in imageSources)
+            precacheImage(
+              ResizeImage.resizeIfNeeded(
+                960,
+                null,
+                CachedNetworkImageProvider(source),
+              ),
+              recordContext,
+              onError: (error, stack) => imageErrors.add(error.runtimeType),
+            ),
+        ]).timeout(const Duration(seconds: 20)),
+      );
+      expect(imageSources, hasLength(2));
+      expect(imageErrors, isEmpty);
+      await tester.tap(find.byKey(const ValueKey('forwarded-record-card')));
       await tester.pumpAndSettle();
+      expect(
+        tester
+            .widgetList<RawImage>(find.byType(RawImage))
+            .every((image) => image.image != null),
+        isTrue,
+      );
       expect(find.byType(ForwardedRecordScreen), findsOneWidget);
       expect(find.text('周末的旅行照片\n第二行说明'), findsOneWidget);
       expect(find.byType(MessageImage), findsWidgets);
