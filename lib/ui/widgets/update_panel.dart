@@ -134,7 +134,7 @@ class _UpdateNodeCard extends StatelessWidget {
             label: const Text('重新检测线路'),
             onPressed: updates.busy || !updates.configured
                 ? null
-                : updates.check,
+                : () => updates.check(forceProbe: true),
             icon: const Icon(Icons.speed_rounded),
           ),
         ),
@@ -176,7 +176,8 @@ class _UpdateNodeCard extends StatelessWidget {
                 ),
                 if (updates.nodeStatuses[node]?.milliseconds != null)
                   Text(
-                    '${updates.nodeStatuses[node]!.milliseconds} ms',
+                    updates.nodeStatuses[node]!.speedLabel ??
+                        '${updates.nodeStatuses[node]!.milliseconds} ms',
                     style: const TextStyle(fontSize: 12),
                   ),
               ],
@@ -185,7 +186,7 @@ class _UpdateNodeCard extends StatelessWidget {
         const Divider(),
         Text(
           updates.activeNode == null
-              ? '自动模式会并行检测两条线路，优先选择版本完整、响应较快的节点。'
+              ? '发现新版后取少量安装包实测下载速度，优先选择完整且下载更快的线路。每条线路最多约 1 MB，不保存测速文件。'
               : '当前：${updates.activeNodeLabel}${updates.preferences.node == UpdateNode.auto ? ' · 自动优选' : ' · 手动指定'}',
           style: TextStyle(fontSize: 12, color: Theme.of(context).hintColor),
         ),
@@ -333,11 +334,20 @@ class _UpdateDialog extends StatelessWidget {
                       const SizedBox(height: 10),
                       Text(switch (phase) {
                         UpdatePhase.downloading =>
-                          '正在下载 ${(updates.progress * 100).toStringAsFixed(0)}%',
+                          '正在下载 ${(updates.progress * 100).toStringAsFixed(0)}%'
+                              ' · ${(updates.downloadBytesPerSecond / 1048576).toStringAsFixed(2)} MB/s',
                         UpdatePhase.installing => '正在打开安装程序…',
                         _ => '正在检查更新…',
                       }),
                     ],
+                    if (updates.transferNotice.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 8),
+                        child: Text(
+                          updates.transferNotice,
+                          style: const TextStyle(fontSize: 12),
+                        ),
+                      ),
                     if (phase == UpdatePhase.ready) ...[
                       const SizedBox(height: 16),
                       const Text('安装包已下载，SHA-256 校验通过。'),

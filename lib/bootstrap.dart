@@ -7,6 +7,8 @@ import 'services/update_preferences.dart';
 import 'utils/constants.dart';
 import 'services/onboarding_preferences.dart';
 import 'services/desktop_window_controller.dart';
+import 'services/auxiliary_windows.dart';
+import 'services/mobile_connection.dart';
 import 'app.dart';
 import 'models/message.dart';
 import 'models/plugin.dart';
@@ -77,8 +79,14 @@ Future<Widget> initializeApplication(
     providers: [
       Provider<StorageService>.value(value: storageService),
       Provider<OnboardingPreferences>.value(value: onboarding),
+      Provider<AuxiliaryWindows>(create: (_) => AuxiliaryWindows()),
       ChangeNotifierProvider<PluginManager>.value(value: pluginManager),
       ChangeNotifierProvider<BotClient>.value(value: botClient),
+      ChangeNotifierProvider<MobileConnection>(
+        create: (_) =>
+            MobileConnection(bot: botClient, storage: storageService)..start(),
+        lazy: false,
+      ),
       ChangeNotifierProvider<AppUpdateService>.value(value: updates),
       if (desktopWindow != null)
         ChangeNotifierProvider<DesktopWindowController>.value(

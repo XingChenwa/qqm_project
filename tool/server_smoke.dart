@@ -34,6 +34,10 @@ Future<void> main() async {
     rootBundle.root = Directory.current;
     final storage = StorageService();
     await storage.init();
+    check(!storage.getBackgroundConnectionEnabled(), '后台连接默认关闭');
+    await storage.setBackgroundConnectionEnabled(true);
+    check(storage.getBackgroundConnectionEnabled(), '服务器偏好设置支持后台连接开关');
+    await storage.setBackgroundConnectionEnabled(false);
     await storage.saveBotConfig(
       BotConfig(
         appId: '10000001',

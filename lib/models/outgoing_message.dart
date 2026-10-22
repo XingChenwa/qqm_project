@@ -1,4 +1,5 @@
 import '../utils/qq_mentions.dart';
+import 'media_image.dart';
 
 enum ReplyMode { automatic, active, message, event }
 
@@ -321,7 +322,12 @@ class OutgoingMessage {
               ],
           } else
             'content': content,
-          if (options.forceVerifyImage) 'force_verify_image_resource': true,
+          if (options.forceVerifyImage ||
+              containsMaterialReference(content) ||
+              (templateParams ?? []).any(
+                (p) => containsMaterialReference(p['value'] ?? ''),
+              ))
+            'force_verify_image_resource': true,
         };
       case 7:
         data['content'] = ' ';

@@ -28,6 +28,32 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "cn.uuze.botmanager/background")
+            .setMethodCallHandler { call, result ->
+                try {
+                    when (call.method) {
+                        "start" -> {
+                            require(NotificationManagerCompat.from(this).areNotificationsEnabled())
+                            val service = Intent(this, ConnectionService::class.java)
+                            if (Build.VERSION.SDK_INT >= 26) startForegroundService(service) else startService(service)
+                            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                                if (ConnectionService.running) result.success(null)
+                                else result.error("BACKGROUND_FAILED", "后台服务未能启动，请检查通知权限及电池限制", null)
+                            }, 300)
+                        }
+                        "stop" -> { stopService(Intent(this, ConnectionService::class.java)); result.success(null) }
+                        "batterySettings" -> {
+                            startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+                            result.success(null)
+                        }
+                        "openSettings" -> {
+                            startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")))
+                            result.success(null)
+                        }
+                        else -> result.notImplemented()
+                    }
+                } catch (_: Exception) { result.error("BACKGROUND_FAILED", "请检查通知权限及电池限制后重试", null) }
+            }
         notificationLaunch = intent?.getStringExtra("qqm_notification")
         notificationChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "cn.uuze.botmanager/notifications").also { channel ->
             channel.setMethodCallHandler { call, result ->
@@ -45,7 +71,15 @@ class MainActivity : FlutterActivity() {
                             startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, packageName))
                             result.success(null)
                         }
-                        "cancelAll" -> { NotificationManagerCompat.from(this).cancelAll(); result.success(null) }
+                        "cancelAll" -> {
+                            // Do not cancel the optional foreground-service notice.
+                            val manager = getSystemService(NotificationManager::class.java)
+                            manager.activeNotifications.filter {
+                                if (Build.VERSION.SDK_INT >= 26) it.notification.channelId == "qqm_messages" else it.id != 23337
+                            }
+                                .forEach { manager.cancel(it.id) }
+                            result.success(null)
+                        }
                         "show" -> {
                             val notifications = NotificationManagerCompat.from(this)
                             if (!notifications.areNotificationsEnabled()) { result.success(null); return@setMethodCallHandler }
@@ -157,6 +191,11 @@ class MainActivity : FlutterActivity() {
             permissionReply?.success(grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED && NotificationManagerCompat.from(this).areNotificationsEnabled())
             permissionReply = null
         }
+    }
+
+    override fun onDestroy() {
+        if (!isChangingConfigurations) stopService(Intent(this, ConnectionService::class.java))
+        super.onDestroy()
     }
 
     @Suppress("DEPRECATION")

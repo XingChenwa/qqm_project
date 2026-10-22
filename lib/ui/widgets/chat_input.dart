@@ -7,6 +7,7 @@ import 'package:image_picker/image_picker.dart';
 
 import '../../models/message.dart';
 import '../../models/outgoing_message.dart';
+import '../../models/media_image.dart';
 import '../../utils/helpers.dart';
 import '../../utils/qq_mentions.dart';
 import '../themes/app_theme.dart';
@@ -35,6 +36,7 @@ class ChatInput extends StatefulWidget {
   })
   onSendMarkdown;
   final Future<bool> Function(String imageUrl) onSendImage;
+  final Future<BotMediaImage?> Function()? onPickMaterial;
   final Future<bool> Function(String command, List<String> args)?
   onSlashCommand;
   final String Function()? sendError;
@@ -56,6 +58,7 @@ class ChatInput extends StatefulWidget {
     required this.onSendText,
     required this.onSendMarkdown,
     required this.onSendImage,
+    this.onPickMaterial,
     this.onSlashCommand,
     this.sendError,
     this.replyTo,
@@ -89,6 +92,7 @@ class _ChatInputState extends State<ChatInput> {
   bool _isSending = false;
   bool _isConfirming = false;
   bool _moreTools = false;
+  bool _choosingMaterial = false;
   MessageComposerSettings _sendSettings = const MessageComposerSettings();
 
   TextEditingController get _activeController =>
@@ -101,7 +105,8 @@ class _ChatInputState extends State<ChatInput> {
           widget.replyTo?.isFromBot == true);
 
   OutgoingMessage _request(String text) {
-    final type = containsQqMention(text)
+    final type =
+        containsQqMention(text) || text.contains('qqbot-media://image/v1/')
         ? 2
         : _sendSettings.explicitType
         ? _sendSettings.type
@@ -165,9 +170,10 @@ class _ChatInputState extends State<ChatInput> {
     );
     if (result == null || !mounted) return;
     if (_isMarkdownMode &&
-        containsQqMention(_markdownController.text) &&
+        (containsQqMention(_markdownController.text) ||
+            _markdownController.text.contains('qqbot-media://image/v1/')) &&
         result.type != 2) {
-      _showSendError('@ 群成员只能用 Markdown 发送，请先移除 @ 标签再更改消息类型。');
+      _showSendError('@ 标签和平台素材需要用 Markdown 发送，请先移除再更改消息类型。');
       return;
     }
     setState(() {
@@ -193,6 +199,41 @@ class _ChatInputState extends State<ChatInput> {
     );
     if (!mounted || selected == null) return;
     _insertMention(selected);
+  }
+
+  Future<void> _pickMaterial() async {
+    if (_isSending || _choosingMaterial || widget.onPickMaterial == null) {
+      return;
+    }
+    setState(() => _choosingMaterial = true);
+    try {
+      final image = await widget.onPickMaterial!();
+      if (!mounted || image == null) return;
+      if (!_isMarkdownMode && _markdownController.text.isEmpty) {
+        _markdownController.value = _textController.value;
+      }
+      final draft = _markdownController;
+      final selection = draft.selection;
+      final start = selection.isValid ? selection.start : draft.text.length;
+      final end = selection.isValid ? selection.end : start;
+      final before = start > 0 && draft.text[start - 1] != '\n' ? '\n' : '';
+      final snippet = '$before${image.markdown}\n';
+      draft.value = TextEditingValue(
+        text: draft.text.replaceRange(start, end, snippet),
+        selection: TextSelection.collapsed(offset: start + snippet.length),
+      );
+      setState(() {
+        _isMarkdownMode = true;
+        _isTemplateMode = false;
+        _showTemplateEditor = false;
+        _sendSettings = _sendSettings.withType(2);
+      });
+      _focusNode.requestFocus();
+    } catch (_) {
+      if (mounted) _showSendError('素材库暂时无法打开，请重试');
+    } finally {
+      if (mounted) setState(() => _choosingMaterial = false);
+    }
   }
 
   void _onMentionRequested() => _insertMention(widget.controller!._memberId);
@@ -530,9 +571,14 @@ class _ChatInputState extends State<ChatInput> {
                             tooltip: '自定义 Markdown',
                             onPressed: () {
                               if (_isMarkdownMode &&
-                                  containsQqMention(_markdownController.text)) {
+                                  (containsQqMention(
+                                        _markdownController.text,
+                                      ) ||
+                                      _markdownController.text.contains(
+                                        'qqbot-media://image/v1/',
+                                      ))) {
                                 _showSendError(
-                                  '@ 群成员只能用 Markdown 发送，请先移除 @ 标签再切换为普通文本。',
+                                  '@ 标签和平台素材需要 Markdown，请先移除再切换为普通文本。',
                                 );
                                 return;
                               }
@@ -572,6 +618,13 @@ class _ChatInputState extends State<ChatInput> {
                             tooltip: '发送图片',
                             onPressed: _pickImage,
                           ),
+                          if (widget.onPickMaterial != null)
+                            _toolButton(
+                              icon: Icons.photo_library_outlined,
+                              selected: false,
+                              tooltip: '图片素材',
+                              onPressed: _pickMaterial,
+                            ),
                           _toolButton(
                             icon: Icons.emoji_emotions_outlined,
                             selected: false,
@@ -605,6 +658,9 @@ class _ChatInputState extends State<ChatInput> {
                 sending: _isSending,
                 onSend: _sendMessage,
                 templateMode: _isTemplateMode,
+                onPickMaterial: widget.onPickMaterial == null
+                    ? null
+                    : _pickMaterial,
               )
             else
               Row(

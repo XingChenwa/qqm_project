@@ -14,6 +14,7 @@ import 'message_image.dart';
 import 'voice_attachment.dart';
 import '../../models/received_message.dart';
 import 'qq_mention_preview.dart';
+import 'qq_media_image.dart';
 
 class MessageBubble extends StatelessWidget {
   final MessageModel message;
@@ -305,6 +306,7 @@ class MessageBubble extends StatelessWidget {
       child: LinkifiedText(
         content,
         qqFaces: !message.isRecalled,
+        mentionColor: isBot ? Colors.white : AppTheme.qqBlue,
         mentions:
             message.extra?['mentions'] as List? ??
             message.receivedBody.mentions,
@@ -324,46 +326,53 @@ class MessageBubble extends StatelessWidget {
       constraints: BoxConstraints(maxWidth: _maxWidth(context, 0.52)),
       padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 10),
       decoration: _bubbleDecoration(context, isBot),
-      child: MarkdownBody(
-        data: content,
-        inlineSyntaxes: [
-          QqMentionPreviewSyntax({
-            for (final mention
-                in (message.extra?['mentions'] as List? ??
-                        message.receivedBody.mentions)
-                    .whereType<Map>())
-              (mention['member_openid'] ??
-                      mention['user_openid'] ??
-                      mention['id'] ??
-                      '')
-                  .toString(): (mention['username'] ?? '')
-                  .toString(),
-          }),
-        ],
-        blockSyntaxes: [QqMentionPreviewBlockSyntax()],
-        builders: {'qqmention': QqMentionPreviewBuilder()},
-        onTapLink: (_, href, _) {
-          if (href != null) openInAppBrowser(context, href);
-        },
-        selectable: true,
-        styleSheet: MarkdownStyleSheet(
-          p: TextStyle(
-            fontSize: 14,
-            height: 1.45,
-            color: isBot ? Colors.white : null,
-          ),
-          h1: TextStyle(fontSize: 18, color: isBot ? Colors.white : null),
-          h2: TextStyle(fontSize: 16, color: isBot ? Colors.white : null),
-          code: TextStyle(
-            fontSize: 12,
-            color: isBot ? Colors.white : AppTheme.qqRed,
-            backgroundColor: Colors.black.withValues(
-              alpha: isBot ? 0.18 : 0.06,
+      child: SelectionArea(
+        child: MarkdownBody(
+          data: content,
+          sizedImageBuilder: qqMarkdownImage,
+          inlineSyntaxes: [
+            QqMentionPreviewSyntax({
+              for (final mention
+                  in (message.extra?['mentions'] as List? ??
+                          message.receivedBody.mentions)
+                      .whereType<Map>())
+                (mention['member_openid'] ??
+                        mention['user_openid'] ??
+                        mention['id'] ??
+                        '')
+                    .toString(): (mention['username'] ?? '')
+                    .toString(),
+            }, showOpenId: false),
+          ],
+          blockSyntaxes: [QqMentionPreviewBlockSyntax()],
+          builders: {
+            'qqmention': QqMentionPreviewBuilder(
+              foregroundColor: isBot ? Colors.white : AppTheme.qqBlue,
             ),
-          ),
-          codeblockDecoration: BoxDecoration(
-            color: Colors.black.withValues(alpha: isBot ? 0.18 : 0.06),
-            borderRadius: BorderRadius.circular(6),
+          },
+          onTapLink: (_, href, _) {
+            if (href != null) openInAppBrowser(context, href);
+          },
+          selectable: false,
+          styleSheet: MarkdownStyleSheet(
+            p: TextStyle(
+              fontSize: 14,
+              height: 1.45,
+              color: isBot ? Colors.white : null,
+            ),
+            h1: TextStyle(fontSize: 18, color: isBot ? Colors.white : null),
+            h2: TextStyle(fontSize: 16, color: isBot ? Colors.white : null),
+            code: TextStyle(
+              fontSize: 12,
+              color: isBot ? Colors.white : AppTheme.qqRed,
+              backgroundColor: Colors.black.withValues(
+                alpha: isBot ? 0.18 : 0.06,
+              ),
+            ),
+            codeblockDecoration: BoxDecoration(
+              color: Colors.black.withValues(alpha: isBot ? 0.18 : 0.06),
+              borderRadius: BorderRadius.circular(6),
+            ),
           ),
         ),
       ),

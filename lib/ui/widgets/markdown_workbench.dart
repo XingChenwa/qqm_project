@@ -6,6 +6,7 @@ import 'package:flutter_markdown/flutter_markdown.dart';
 import '../screens/browser_screen.dart';
 import 'composer_keyboard.dart';
 import 'qq_mention_preview.dart';
+import 'qq_media_image.dart';
 
 /// An independent Markdown draft, with a live preview that never sends messages.
 class MarkdownWorkbench extends StatefulWidget {
@@ -15,6 +16,7 @@ class MarkdownWorkbench extends StatefulWidget {
   final bool sending;
   final bool templateMode;
   final Map<String, String> mentionNames;
+  final VoidCallback? onPickMaterial;
   const MarkdownWorkbench({
     super.key,
     required this.controller,
@@ -23,6 +25,7 @@ class MarkdownWorkbench extends StatefulWidget {
     required this.sending,
     this.templateMode = false,
     this.mentionNames = const {},
+    this.onPickMaterial,
   });
 
   @override
@@ -103,6 +106,7 @@ class _MarkdownWorkbenchState extends State<MarkdownWorkbench> {
               blockSyntaxes: [QqMentionPreviewBlockSyntax()],
               builders: {'qqmention': QqMentionPreviewBuilder()},
               selectable: true,
+              sizedImageBuilder: qqMarkdownImage,
               styleSheet: MarkdownStyleSheet.fromTheme(Theme.of(context))
                   .copyWith(
                     code: const TextStyle(
@@ -229,6 +233,17 @@ class _MarkdownWorkbenchState extends State<MarkdownWorkbench> {
                                 _insert('[', '](https://example.com)'),
                             icon: const Icon(Icons.link, size: 18),
                           ),
+                          if (widget.onPickMaterial != null)
+                            IconButton(
+                              tooltip: '插入平台素材',
+                              onPressed: widget.sending
+                                  ? null
+                                  : widget.onPickMaterial,
+                              icon: const Icon(
+                                Icons.photo_library_outlined,
+                                size: 18,
+                              ),
+                            ),
                         ],
                       ),
                     ),

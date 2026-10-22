@@ -1,4 +1,5 @@
 import '../utils/helpers.dart';
+import '../utils/forwarded_text.dart';
 
 String _text(dynamic value) =>
     value is String ? value : (value?.toString() ?? '');
@@ -87,6 +88,8 @@ class ReceivedCard {
 class ReceivedMessageBody {
   final int type;
   final String text, authorName, authorId, authorRole, elementIndex;
+  final String recordTitle, authorAvatar;
+  final DateTime? timestamp;
   final List<dynamic> mentions;
   final List<ReceivedAttachment> attachments;
   final ReceivedCard? card;
@@ -101,6 +104,9 @@ class ReceivedMessageBody {
     this.authorId = '',
     this.authorRole = '',
     this.elementIndex = '',
+    this.recordTitle = '',
+    this.authorAvatar = '',
+    this.timestamp,
     this.mentions = const [],
     this.attachments = const [],
     this.card,
@@ -119,6 +125,10 @@ class ReceivedMessageBody {
     List<int> remaining, [
     List<dynamic> inheritedMentions = const [],
   ]) {
+    final exported = parseForwardedRecordText(_text(data['content']));
+    if (exported != null && depth < 8 && remaining[0] > 0) {
+      data = {...data, ...exported, 'content': ''};
+    }
     final author = _map(data['author']);
     final mentions = data['mentions'] is List
         ? List<dynamic>.from(data['mentions'])
@@ -163,6 +173,11 @@ class ReceivedMessageBody {
         author['member_openid'] ?? author['user_openid'] ?? author['id'],
       ),
       authorRole: _text(author['member_role']),
+      authorAvatar: normalizeAttachmentUrl(
+        author['avatar'] ?? author['avatar_url'],
+      ),
+      timestamp: DateTime.tryParse(_text(data['timestamp'])),
+      recordTitle: _text(data['record_title']),
       isBotAuthor: author['bot'] == true,
       elementIndex: _text(data['msg_idx']),
       mentions: mentions,
@@ -177,6 +192,46 @@ class ReceivedMessageBody {
   }
 
   String get displayText => formatQqMessageContent(text, mentions: mentions);
+  bool get isRecord =>
+      type == 102 ||
+      recordTitle.isNotEmpty ||
+      (type == 103 && elements.length == 1 && elements.single.isRecord);
+
+  Map<String, dynamic> toDisplayMap() => {
+    'message_type': type,
+    'content': text,
+    'record_title': recordTitle,
+    'author': {
+      'id': authorId,
+      'username': authorName,
+      'member_role': authorRole,
+      'avatar': authorAvatar,
+      'bot': isBotAuthor,
+    },
+    if (timestamp != null) 'timestamp': timestamp!.toIso8601String(),
+    'mentions': mentions,
+    'attachments': [
+      for (final a in attachments)
+        {
+          'url': a.url,
+          'filename': a.filename,
+          'content_type': a.contentType,
+          'voice_wav_url': a.voiceWavUrl,
+          'asr_refer_text': a.transcript,
+          'width': a.width,
+          'height': a.height,
+          'size': a.size,
+        },
+    ],
+    if (card != null)
+      'ark_data': {
+        'ark_type': card!.type,
+        'ark_name': card!.name,
+        'prompt': card!.prompt,
+        'fields': card!.fields,
+      },
+    'msg_elements': [for (final child in elements) child.toDisplayMap()],
+  };
   String get kindLabel => switch (type) {
     3 => '卡片消息',
     101 => '并行消息',

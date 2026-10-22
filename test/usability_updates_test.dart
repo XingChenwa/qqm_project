@@ -106,12 +106,19 @@ void main() {
         ),
       ),
     );
-    final selectable = tester.widget<SelectableText>(
-      find.byType(SelectableText),
-    );
-    final span = selectable.textSpan!.children!
-        .whereType<TextSpan>()
-        .firstWhere((s) => s.recognizer != null);
+    TextSpan? link;
+    for (final rich in tester.widgetList<RichText>(
+      find.descendant(
+        of: find.byType(LinkifiedText),
+        matching: find.byType(RichText),
+      ),
+    )) {
+      rich.text.visitChildren((span) {
+        if (span is TextSpan && span.recognizer != null) link = span;
+        return true;
+      });
+    }
+    final span = link!;
     expect(span.text, 'https://example.com/page');
     (span.recognizer as dynamic).onTap();
     await tester.pumpAndSettle();

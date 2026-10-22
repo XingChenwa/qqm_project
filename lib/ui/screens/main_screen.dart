@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import '../widgets/material_library_sheet.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/bot_client.dart';
@@ -17,6 +18,8 @@ import '../../utils/message_history.dart';
 import '../../services/ip_whitelist_service.dart';
 import '../../services/storage_service.dart';
 import '../../services/mobile_notifications.dart';
+import '../../services/auxiliary_windows.dart';
+import '../../models/received_message.dart' show redactMessageDetails;
 import '../themes/app_theme.dart';
 import '../widgets/chat_input.dart';
 import '../widgets/mobile_workspace.dart';
@@ -165,6 +168,25 @@ class _MainScreenState extends State<MainScreen> {
 
   Future<void> _openHistory(ChatSession session, {String? messageId}) async {
     final bot = context.read<BotClient>();
+    final windows = context.read<AuxiliaryWindows?>();
+    if (windows?.supported == true) {
+      try {
+        await windows!.open('history', {
+          'title': session.name,
+          'initialMessageId': messageId,
+          'dark': Theme.of(context).brightness == Brightness.dark,
+          'messages': [
+            for (final m in bot.getMessagesForSession(session.id))
+              redactMessageDetails(m.toMap()),
+          ],
+        });
+      } catch (_) {
+        if (mounted) {
+          await AppDialogs.show(context, '独立聊天记录窗口未能打开，请重试。', error: true);
+        }
+      }
+      return;
+    }
     final target = bot.groups.target(session.id);
     final selection = await Navigator.push<ChatHistorySelection>(
       context,
@@ -1941,6 +1963,8 @@ class _MainScreenState extends State<MainScreen> {
         isGroup: session.sessionType == 1,
         replyTo: _replyToMessage,
       ),
+      onPickMaterial: () =>
+          showMaterialLibrary(context, context.read<BotClient>()),
       onSlashCommand: (command, args) async {
         final replyAtStart = _replyToMessage;
         final botAtStart = context.read<BotClient>();

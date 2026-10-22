@@ -60,6 +60,10 @@ class AppUpdateService extends ChangeNotifier {
   final Map<UpdateNode, UpdateNodeStatus> nodeStatuses = {};
   final Map<UpdateNode, AppRelease> _nodeReleases = {};
   final Set<CancelToken> _probes = {};
+  final _speedSamples =
+      <UpdateNode, ({String hash, DateTime at, UpdateNodeStatus status})>{};
+  double downloadBytesPerSecond = 0;
+  String transferNotice = '';
   String get activeNodeLabel => activeNode?.label ?? preferences.node.label;
 
   Future<void> setNode(UpdateNode node) async {
@@ -71,7 +75,7 @@ class AppUpdateService extends ChangeNotifier {
     phase = UpdatePhase.idle;
     error = '';
     _changed();
-    await check();
+    await check(forceProbe: true);
   }
 
   static Uri gitCodeAsset(String tag, String name) {
@@ -369,7 +373,84 @@ class AppUpdateService extends ChangeNotifier {
     _changed();
   }
 
-  Future<AppRelease> _selectStaticRelease() async {
+  Future<void> _measureTransfer(
+    UpdateNode node,
+    AppRelease found, {
+    bool force = false,
+  }) async {
+    final previous = nodeStatuses[node]!;
+    final cached = _speedSamples[node];
+    if (!force &&
+        cached != null &&
+        cached.hash == found.sha256 &&
+        DateTime.now().difference(cached.at) < const Duration(minutes: 30)) {
+      nodeStatuses[node] = cached.status;
+      return;
+    }
+    final cancel = CancelToken();
+    _probes.add(cancel);
+    final deadline = Timer(
+      const Duration(seconds: 4),
+      () => cancel.cancel('speed sample complete'),
+    );
+    final watch = Stopwatch();
+    var count = 0;
+    try {
+      final response = await _packageResponse(
+        found,
+        cancel,
+        node: node,
+        rangeEnd: (found.size - 1).clamp(0, 1024 * 1024 - 1),
+      );
+      final stream = response.data?.stream;
+      if (stream == null) throw const FormatException('安装包响应为空');
+      if (response.statusCode == 206) {
+        final range = RegExp(
+          r'^bytes 0-(\d+)/(\d+)$',
+        ).firstMatch(response.headers.value('content-range') ?? '');
+        if (range == null || int.tryParse(range.group(2)!) != found.size) {
+          await stream.listen((_) {}).cancel();
+          throw const FormatException('安装包测速范围无效');
+        }
+      }
+      watch.start();
+      await for (final chunk in stream) {
+        count += chunk.length;
+        if (count >= 1024 * 1024) break;
+      }
+    } catch (_) {
+      // A bounded sample can end by timeout after receiving useful bytes.
+      // No installer is saved or trusted based on this partial sample.
+    } finally {
+      watch.stop();
+      deadline.cancel();
+      if (!cancel.isCancelled) cancel.cancel('speed sample complete');
+      _probes.remove(cancel);
+    }
+    if (_disposed) return;
+    final useful = count >= 16 * 1024;
+    final speed = useful
+        ? count / (watch.elapsedMicroseconds.clamp(1000, 4000000) / 1000000)
+        : null;
+    final status = UpdateNodeStatus(
+      node,
+      milliseconds: previous.milliseconds,
+      build: found.build,
+      bytesPerSecond: speed,
+      sampleBytes: count,
+      transferAvailable: useful,
+      detail: useful ? '安装包实际下载测速 · v${found.version}' : '清单有效，安装包测速未完成',
+    );
+    nodeStatuses[node] = status;
+    _speedSamples[node] = (
+      hash: found.sha256,
+      at: DateTime.now(),
+      status: status,
+    );
+    _changed();
+  }
+
+  Future<AppRelease> _selectStaticRelease({bool forceProbe = false}) async {
     _nodeReleases.clear();
     await Future.wait([
       _probeNode(UpdateNode.github),
@@ -378,6 +459,23 @@ class AppUpdateService extends ChangeNotifier {
     final candidates = _nodeReleases.entries.toList();
     if (candidates.isEmpty) throw const FormatException('两条更新线路均不可用，请稍后重试');
     final requested = preferences.node;
+    final highest = candidates
+        .map((e) => e.value.build)
+        .reduce((a, b) => a > b ? a : b);
+    final newest = candidates.where((e) => e.value.build == highest).toList();
+    for (final candidate in newest) {
+      if (candidate.value.sha256 != newest.first.value.sha256 ||
+          candidate.value.version != newest.first.value.version) {
+        throw const FormatException('两节点同一构建号内容不一致，已阻止更新');
+      }
+    }
+    if (highest > currentBuild) {
+      await Future.wait([
+        for (final entry in newest)
+          if (entry.value.size >= 65536)
+            _measureTransfer(entry.key, entry.value, force: forceProbe),
+      ]);
+    }
     MapEntry<UpdateNode, AppRelease> choice;
     if (requested != UpdateNode.auto) {
       choice = candidates.firstWhere(
@@ -389,6 +487,19 @@ class AppUpdateService extends ChangeNotifier {
       candidates.sort((a, b) {
         final byBuild = b.value.build.compareTo(a.value.build);
         if (byBuild != 0) return byBuild;
+        final aStatus = nodeStatuses[a.key]!, bStatus = nodeStatuses[b.key]!;
+        if (aStatus.transferAvailable == false &&
+            bStatus.transferAvailable != false) {
+          return 1;
+        }
+        if (bStatus.transferAvailable == false &&
+            aStatus.transferAvailable != false) {
+          return -1;
+        }
+        final aSpeed = aStatus.bytesPerSecond, bSpeed = bStatus.bytesPerSecond;
+        if (aSpeed != null || bSpeed != null) {
+          return (bSpeed ?? 0).compareTo(aSpeed ?? 0);
+        }
         return nodeStatuses[a.key]!.milliseconds!.compareTo(
           nodeStatuses[b.key]!.milliseconds!,
         );
@@ -406,7 +517,7 @@ class AppUpdateService extends ChangeNotifier {
     return choice.value;
   }
 
-  Future<void> check() async {
+  Future<void> check({bool forceProbe = false}) async {
     if (!configured || busy || _disposed) return;
     final previous = phase;
     phase = UpdatePhase.checking;
@@ -416,7 +527,7 @@ class AppUpdateService extends ChangeNotifier {
       final nonce = const Uuid().v4();
       final AppRelease? found;
       if (usesGitHubPages) {
-        found = await _selectStaticRelease();
+        found = await _selectStaticRelease(forceProbe: forceProbe);
       } else {
         final envelope = await _json(
           '/api/v1/update',
@@ -511,6 +622,8 @@ class AppUpdateService extends ChangeNotifier {
     }
     phase = UpdatePhase.downloading;
     progress = 0;
+    downloadBytesPerSecond = 0;
+    transferNotice = '';
     error = '';
     _changed();
     final cancel = CancelToken();
@@ -598,8 +711,43 @@ class AppUpdateService extends ChangeNotifier {
       );
     }
     for (var index = 0; index < candidates.length; index++) {
+      final attempt = CancelToken();
+      unawaited(
+        cancel.whenCancel.then((_) {
+          if (!attempt.isCancelled) attempt.cancel('download cancelled');
+        }),
+      );
+      final watch = Stopwatch()..start();
+      var previousBytes = 0.0, previousMilliseconds = 0;
+      final backupSpeed = index + 1 < candidates.length
+          ? nodeStatuses[candidates[index + 1]]?.bytesPerSecond
+          : null;
+      Timer? speedGuard;
+      if (preferences.node == UpdateNode.auto && backupSpeed != null) {
+        speedGuard = Timer.periodic(const Duration(seconds: 4), (_) {
+          final elapsed = watch.elapsedMilliseconds;
+          final received = progress * selected.size;
+          final rate =
+              (received - previousBytes) /
+              ((elapsed - previousMilliseconds).clamp(1, 1 << 31) / 1000);
+          previousBytes = received;
+          previousMilliseconds = elapsed;
+          if (elapsed >= 8000 &&
+              progress < .8 &&
+              backupSpeed > rate * 3 &&
+              (selected.size - received) / rate.clamp(1, double.infinity) >
+                  20) {
+            transferNotice =
+                '${candidates[index].label}持续下载较慢，正在切换至${candidates[index + 1].label}';
+            if (!attempt.isCancelled) {
+              attempt.cancel('slow download, use verified alternate');
+            }
+            _changed();
+          }
+        });
+      }
       try {
-        await _downloadGitHub(selected, part, cancel, node: candidates[index]);
+        await _downloadGitHub(selected, part, attempt, node: candidates[index]);
         if (!await validFile(part, selected)) {
           throw const FormatException('安装包大小或 SHA-256 校验失败，已阻止安装');
         }
@@ -612,6 +760,9 @@ class AppUpdateService extends ChangeNotifier {
         progress = 0;
         activeNode = candidates[index + 1];
         _changed();
+      } finally {
+        speedGuard?.cancel();
+        if (!attempt.isCancelled) attempt.cancel('transfer complete');
       }
     }
   }
@@ -621,6 +772,49 @@ class AppUpdateService extends ChangeNotifier {
     File part,
     CancelToken cancel, {
     UpdateNode node = UpdateNode.github,
+  }) async {
+    final response = await _packageResponse(selected, cancel, node: node);
+    final body = response.data;
+    if (body == null) throw const FormatException('安装包响应为空');
+    if (response.statusCode != 200) {
+      await body.stream.listen((_) {}).cancel();
+      throw const FormatException('安装包下载响应范围无效');
+    }
+    final sink = part.openWrite();
+    final watch = Stopwatch()..start();
+    var received = 0, lastNotice = 0;
+    try {
+      await sink.addStream(
+        body.stream.timeout(const Duration(seconds: 30)).map((chunk) {
+          if (cancel.isCancelled) throw const FormatException('安装包下载已取消');
+          received += chunk.length;
+          if (received > selected.size) {
+            throw const FormatException('安装包超过清单大小');
+          }
+          progress = received / selected.size;
+          final elapsed = watch.elapsedMilliseconds;
+          downloadBytesPerSecond =
+              received / (elapsed.clamp(1, 1 << 31) / 1000);
+          // Flushing and rebuilding the UI for every packet throttles fast CDNs.
+          // addStream supplies disk backpressure; refresh the UI at most 5 Hz.
+          if (elapsed - lastNotice >= 200 || received == selected.size) {
+            lastNotice = elapsed;
+            _changed();
+          }
+          return chunk;
+        }),
+      );
+      await sink.flush();
+    } finally {
+      await sink.close();
+    }
+  }
+
+  Future<Response<ResponseBody>> _packageResponse(
+    AppRelease selected,
+    CancelToken cancel, {
+    required UpdateNode node,
+    int? rangeEnd,
   }) async {
     var url = selected.url;
     if (!AppRelease.isGitHubAsset(url, tag: 'v${selected.version}')) {
@@ -639,14 +833,17 @@ class AppUpdateService extends ChangeNotifier {
         options: Options(
           responseType: ResponseType.stream,
           followRedirects: false,
+          headers: rangeEnd == null ? null : {'Range': 'bytes=0-$rangeEnd'},
           receiveTimeout: const Duration(seconds: 30),
           validateStatus: (status) =>
-              status == 200 || {301, 302, 303, 307, 308}.contains(status),
+              status == 200 ||
+              (rangeEnd != null && status == 206) ||
+              {301, 302, 303, 307, 308}.contains(status),
         ),
       );
       final body = response.data;
       if (body == null) throw const FormatException('安装包响应为空');
-      if (response.statusCode != 200) {
+      if (response.statusCode != 200 && response.statusCode != 206) {
         await body.stream.listen((_) {}).cancel();
         final location = response.headers.value('location');
         if (location == null) throw const FormatException('安装包跳转无效');
@@ -666,26 +863,7 @@ class AppUpdateService extends ChangeNotifier {
         url = next;
         continue;
       }
-      final sink = part.openWrite();
-      var received = 0;
-      try {
-        await for (final chunk in body.stream.timeout(
-          const Duration(seconds: 30),
-        )) {
-          if (cancel.isCancelled) throw const FormatException('安装包下载已取消');
-          received += chunk.length;
-          if (received > selected.size) {
-            throw const FormatException('安装包超过清单大小');
-          }
-          sink.add(chunk);
-          await sink.flush();
-          progress = received / selected.size;
-          _changed();
-        }
-      } finally {
-        await sink.close();
-      }
-      return;
+      return response;
     }
     throw const FormatException('安装包跳转次数过多');
   }

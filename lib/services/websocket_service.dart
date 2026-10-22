@@ -17,6 +17,9 @@ class WebSocketService {
 
   Timer? _heartbeatTimer;
   Timer? _reconnectTimer;
+  Timer? _resumeCheck;
+  DateTime? _lastPacketAt;
+  final DateTime Function() _clock;
   StreamSubscription<dynamic>? _subscription;
   Completer<bool>? _authentication;
   int _heartbeatInterval = 45000;
@@ -38,6 +41,9 @@ class WebSocketService {
   Function(int heartbeatIntervalMs)? onHello;
   Function()? onHeartbeatAck;
   Future<String?> Function()? refreshAccessToken;
+
+  WebSocketService({DateTime Function()? clock})
+    : _clock = clock ?? DateTime.now;
 
   Stream<Map<String, dynamic>> get messageStream => _messageController.stream;
   int get transportGeneration => _generation;
@@ -65,6 +71,42 @@ class WebSocketService {
   }
 
   bool get isConnected => _state == ConnectionState.connected;
+  bool get connectionRequested =>
+      _allowReconnect &&
+      !_disposed &&
+      (_autoReconnect ||
+          _state == ConnectionState.connected ||
+          _state == ConnectionState.connecting);
+
+  /// OS suspension can leave a socket reporting 'connected' after its remote
+  /// session has died. Resume the authenticated session, not a duplicate bot.
+  Future<void> recoverAfterResume() async {
+    if (_disposed ||
+        !_allowReconnect ||
+        !_autoReconnect ||
+        _wsUrl == null ||
+        _accessToken == null ||
+        _state == ConnectionState.connecting ||
+        (_authentication != null && !_authentication!.isCompleted)) {
+      return;
+    }
+    _reconnectTimer?.cancel();
+    if (!isConnected ||
+        _lastPacketAt == null ||
+        _clock().difference(_lastPacketAt!).inMilliseconds >
+            _heartbeatInterval * 2) {
+      await _openSocket(reconnecting: true);
+      return;
+    }
+    final generation = _generation;
+    _sendHeartbeat(checkAck: false);
+    _resumeCheck?.cancel();
+    _resumeCheck = Timer(const Duration(seconds: 8), () {
+      if (!_disposed && generation == _generation && !_heartbeatAcknowledged) {
+        _handleDisconnect(scheduleReconnect: true, error: '回到前台后网关无响应，正在恢复连接');
+      }
+    });
+  }
 
   /// Connect to QQ Bot WebSocket using the access_token.
   Future<bool> connect({
@@ -145,6 +187,7 @@ class WebSocketService {
   }
 
   void _handleMessage(Map<String, dynamic> message) {
+    _lastPacketAt = _clock();
     final opCode = message['op'] as int?;
     final seq = message['s'] as int?;
     if (seq != null) _lastSequence = seq;
@@ -235,6 +278,7 @@ class WebSocketService {
         break;
 
       case 11: // Heartbeat ACK
+        _resumeCheck?.cancel();
         _heartbeatAcknowledged = true;
         onHeartbeatAck?.call();
         break;
@@ -451,6 +495,7 @@ class WebSocketService {
   void _closeTransport() {
     _generation++;
     _heartbeatTimer?.cancel();
+    _resumeCheck?.cancel();
     if (_authentication?.isCompleted == false) _authentication!.complete(false);
     _authentication = null;
     final subscription = _subscription;

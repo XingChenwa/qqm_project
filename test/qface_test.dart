@@ -176,7 +176,13 @@ void main() {
     );
     expect(parts.where((p) => p.isFace).single.faceId, '277');
     expect(parts.first.text, '1我鸭 ');
-    expect(parts.last.text, ' 你好 @小明 https://example.com/page');
+    // Mentions now have their own styled span. Combined visible text and
+    // whitespace must remain byte-for-byte identical to the earlier display.
+    expect(
+      parts.skipWhile((p) => !p.isFace).skip(1).map((p) => p.text).join(),
+      ' 你好 @小明 https://example.com/page',
+    );
+    expect(parts.where((p) => p.isMention).single.text, '@小明');
     final catalog = QFaceCatalog.fromJson(faceIndex());
     for (final source in [
       '[QQ表情: 汪汪]',

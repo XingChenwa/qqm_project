@@ -158,15 +158,24 @@ void main() {
     final quote = bot.messages.last;
     expect(quote.sourceMessageType, 103);
     expect(quote.messageType, 0);
-    expect(quote.receivedBody.elements.single.text, records);
+    expect(quote.receivedBody.isRecord, isTrue);
+    expect(
+      quote.receivedBody.elements.single.elements.first.text,
+      '今天的学习计划已完成',
+    );
+    expect(quote.rawEvent['msg_elements'][0]['content'], records);
     expect(quote.referenceIndex, 'REFIDX_quote==');
     expect(quote.receivedBody.scene['ref_msg_idx'], 'TMP_source==');
-    expect(bot.sessions.single.lastMessage, startsWith('[引用消息] === 消息 1 ==='));
+    expect(bot.sessions.single.lastMessage, startsWith('[引用消息] 今天的学习计划已完成'));
     expect(bot.sessions.single.lastMessage, isNot(contains('图片')));
     final restored = MessageModel.fromMap(
       jsonDecode(jsonEncode(quote.toMap())),
     );
-    expect(restored.receivedBody.elements.single.text, records);
+    expect(restored.rawEvent['msg_elements'][0]['content'], records);
+    expect(
+      restored.receivedBody.elements.single.elements.last.text,
+      '很棒！继续保持，明天继续加油',
+    );
     expect(restored.referenceIndex, 'REFIDX_quote==');
     expect(
       restored.rawEvent['message_scene']['ext'][1],
@@ -416,19 +425,18 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(find.text('引用消息 · 1 个元素'), findsOneWidget);
-    expect(
-      find.byWidgetPredicate(
-        (w) =>
-            w is SelectableText &&
-            (w.data ?? w.textSpan?.toPlainText()) == records,
-      ),
-      findsOneWidget,
-    );
+    expect(find.byKey(const ValueKey('forwarded-record-card')), findsOneWidget);
+    expect(find.text(records), findsNothing);
     expect(find.text('管理员'), findsOneWidget);
     expect(find.text('全量'), findsOneWidget);
     expect(find.text('[图片消息]'), findsNothing);
     expect(tester.takeException(), isNull);
+    await tester.tap(find.byKey(const ValueKey('forwarded-record-card')));
+    await tester.pumpAndSettle();
+    expect(find.text('今天的学习计划已完成'), findsOneWidget);
+    expect(find.text('很棒！继续保持，明天继续加油'), findsOneWidget);
+    await tester.tap(find.byTooltip('返回原聊天'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('详情'));
     await tester.pumpAndSettle();
     expect(find.text('消息详情'), findsOneWidget);

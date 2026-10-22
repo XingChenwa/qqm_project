@@ -23,6 +23,7 @@ import '../widgets/app_logo.dart';
 import '../widgets/update_panel.dart';
 import '../widgets/app_dialogs.dart';
 import '../widgets/qq_qr_login_panel.dart';
+import '../widgets/mobile_connection_card.dart';
 import 'browser_screen.dart';
 import 'onboarding_screen.dart';
 
@@ -1031,6 +1032,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     child: Column(
       children: [
         _connectionCard(),
+        if (isMobilePlatform) const MobileConnectionCard(),
         if (isDesktopPlatform) ...[const SizedBox(height: 12), _windowCard()],
       ],
     ),

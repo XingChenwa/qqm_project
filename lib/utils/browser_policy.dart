@@ -59,6 +59,7 @@ InAppWebViewSettings browserSettings({
   required TargetPlatform platform,
   bool? mobile,
   String desktopUserAgent = '',
+  bool mediaPlayer = false,
 }) {
   mobile ??= defaultMobileBrowserMode(platform);
   return InAppWebViewSettings(
@@ -71,6 +72,9 @@ InAppWebViewSettings browserSettings({
     useWideViewPort: !mobile,
     loadWithOverviewMode: !mobile,
     useShouldOverrideUrlLoading: true,
+    useOnDownloadStart: true,
+    allowsInlineMediaPlayback: mediaPlayer,
+    mediaPlaybackRequiresUserGesture: !mediaPlayer,
     supportMultipleWindows: true,
     javaScriptCanOpenWindowsAutomatically: false,
     allowFileAccess: false,

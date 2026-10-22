@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 import '../screens/browser_screen.dart';
+import '../screens/forwarded_record_screen.dart';
 import 'linkified_text.dart';
 import 'message_image.dart';
 import 'voice_attachment.dart';
+import 'video_attachment.dart';
+import 'file_download_dialog.dart';
 
 import '../../models/received_message.dart';
 import '../../services/qface_service.dart';
@@ -14,12 +17,14 @@ class ReceivedMessageView extends StatefulWidget {
   final int depth;
   final String storageKey;
   final QFaceService? faceService;
+  final bool inRecord;
   const ReceivedMessageView({
     super.key,
     required this.body,
     this.depth = 0,
     this.storageKey = '',
     this.faceService,
+    this.inRecord = false,
   });
 
   @override
@@ -36,6 +41,9 @@ class _ReceivedMessageViewState extends State<ReceivedMessageView> {
     final body = widget.body;
     final depth = widget.depth;
     final storageKey = widget.storageKey;
+    if (body.isRecord && (!widget.inRecord || body.elements.isNotEmpty)) {
+      return _recordCard(context, body);
+    }
     final role = switch (body.authorRole) {
       'owner' => '群主',
       'admin' => '管理员',
@@ -126,10 +134,35 @@ class _ReceivedMessageViewState extends State<ReceivedMessageView> {
   }
 
   Widget _attachment(BuildContext context, ReceivedAttachment attachment) {
+    if (attachment.isVideo) return VideoAttachment(attachment: attachment);
     if (attachment.isVoice) {
       return VoiceAttachment(
         key: ValueKey(attachment.openUrl),
         attachment: attachment,
+      );
+    }
+    if (attachment.isImage && _webUri(attachment.url) != null) {
+      final ratio = attachment.width > 0 && attachment.height > 0
+          ? attachment.width / attachment.height
+          : 1.4;
+      return LayoutBuilder(
+        builder: (context, constraints) {
+          final width = constraints.maxWidth.clamp(
+            80.0,
+            widget.inRecord ? 720.0 : 340.0,
+          );
+          return Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: MessageImage(
+              source: attachment.url,
+              maxWidth: width,
+              maxHeight: (width / ratio).clamp(
+                64.0,
+                widget.inRecord ? 1000.0 : 420.0,
+              ),
+            ),
+          );
+        },
       );
     }
     final details = [
@@ -187,6 +220,17 @@ class _ReceivedMessageViewState extends State<ReceivedMessageView> {
                     : () => _open(context, attachment.openUrl),
                 icon: const Icon(Icons.open_in_new_rounded, size: 18),
               ),
+              IconButton(
+                tooltip: '下载原文件',
+                onPressed: _webUri(attachment.openUrl) == null
+                    ? null
+                    : () => showFileDownload(
+                        context,
+                        attachment.openUrl,
+                        filename: attachment.filename,
+                      ),
+                icon: const Icon(Icons.download_rounded, size: 18),
+              ),
             ],
           ),
           if (attachment.transcript.isNotEmpty)
@@ -195,6 +239,68 @@ class _ReceivedMessageViewState extends State<ReceivedMessageView> {
               style: const TextStyle(fontSize: 12, height: 1.4),
             ),
         ],
+      ),
+    );
+  }
+
+  Widget _recordCard(BuildContext context, ReceivedMessageBody body) {
+    var record = body;
+    while (record.elements.length == 1 && record.elements.single.isRecord) {
+      record = record.elements.single;
+    }
+    return InkWell(
+      key: const ValueKey('forwarded-record-card'),
+      onTap: () => openForwardedRecord(context, body),
+      borderRadius: BorderRadius.circular(10),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 340, minWidth: 160),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 5),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                record.recordTitle.isNotEmpty ? record.recordTitle : '聊天记录',
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 9),
+              for (final item in record.elements.take(3))
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 4),
+                  child: Text(
+                    '${item.authorName.isEmpty ? '' : '${item.authorName}：'}${item.preview}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Theme.of(context).hintColor,
+                    ),
+                  ),
+                ),
+              const Divider(height: 18),
+              Row(
+                children: [
+                  Text(
+                    '聊天记录',
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: Theme.of(context).hintColor,
+                    ),
+                  ),
+                  const Spacer(),
+                  const Text('点击查看', style: TextStyle(fontSize: 11)),
+                  const Icon(Icons.chevron_right_rounded, size: 16),
+                ],
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

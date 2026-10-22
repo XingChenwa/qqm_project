@@ -21,7 +21,9 @@ class QqMentionPreviewBlockSyntax extends md.BlockSyntax {
 /// Inline parsing leaves fenced/inline code and the original draft untouched.
 class QqMentionPreviewSyntax extends md.InlineSyntax {
   final Map<String, String> names;
-  QqMentionPreviewSyntax(this.names) : super(qqMentionPattern);
+  final bool showOpenId;
+  QqMentionPreviewSyntax(this.names, {this.showOpenId = true})
+    : super(qqMentionPattern);
 
   @override
   bool onMatch(md.InlineParser parser, Match match) {
@@ -33,7 +35,7 @@ class QqMentionPreviewSyntax extends md.InlineSyntax {
     final name = names[id]?.trim();
     final node = md.Element.text(
       'qqmention',
-      '@${name == null || name.isEmpty ? '群成员' : name}（$id）',
+      '@${name == null || name.isEmpty ? '群成员' : name}${showOpenId ? '（$id）' : ''}',
     );
     node.attributes['openid'] = id;
     parser.addNode(node);
@@ -42,6 +44,9 @@ class QqMentionPreviewSyntax extends md.InlineSyntax {
 }
 
 class QqMentionPreviewBuilder extends MarkdownElementBuilder {
+  final Color? foregroundColor;
+  QqMentionPreviewBuilder({this.foregroundColor});
+
   @override
   Widget? visitElementAfterWithContext(
     BuildContext context,
@@ -55,7 +60,7 @@ class QqMentionPreviewBuilder extends MarkdownElementBuilder {
     child: Text(
       element.textContent,
       style: (parentStyle ?? preferredStyle ?? const TextStyle()).copyWith(
-        color: Theme.of(context).colorScheme.primary,
+        color: foregroundColor ?? Theme.of(context).colorScheme.primary,
         fontWeight: FontWeight.w600,
       ),
     ),

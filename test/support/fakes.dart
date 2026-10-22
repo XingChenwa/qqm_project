@@ -28,6 +28,14 @@ class MemoryStorage extends StorageService {
   }
 
   bool mobileNotifications = false;
+  bool backgroundConnection = false;
+  @override
+  bool getBackgroundConnectionEnabled() => backgroundConnection;
+  @override
+  Future<void> setBackgroundConnectionEnabled(bool value) async {
+    backgroundConnection = value;
+  }
+
   @override
   bool getSystemNotificationsEnabled() => mobileNotifications;
   @override

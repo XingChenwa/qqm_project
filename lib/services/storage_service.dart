@@ -191,6 +191,14 @@ class StorageService {
     }
   }
 
+  bool getBackgroundConnectionEnabled() =>
+      _prefs.getBool('mobile_background_connection') ?? false;
+  Future<void> setBackgroundConnectionEnabled(bool value) async {
+    if (!await _prefs.setBool('mobile_background_connection', value)) {
+      throw StateError('后台连接偏好未能保存');
+    }
+  }
+
   // --- Messages ---
   Future<void> saveMessage(MessageModel message) async {
     await _messagesBox.put(_key(message.id), jsonEncode(message.toMap()));

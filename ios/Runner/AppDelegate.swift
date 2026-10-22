@@ -19,6 +19,23 @@ import UserNotifications
     if let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "QQMNotifications") {
       QQMNotifications.register(with: registrar)
     }
+    if let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "QQMBackgroundHelp") {
+      QQMBackgroundHelp.register(with: registrar)
+    }
+  }
+}
+
+/// Open the user's app settings only. iOS does not offer a setting that makes
+/// an arbitrary bot WebSocket run forever, so no fake background mode is added.
+final class QQMBackgroundHelp: NSObject, FlutterPlugin {
+  static func register(with registrar: FlutterPluginRegistrar) {
+    let channel = FlutterMethodChannel(name: "cn.uuze.botmanager/background", binaryMessenger: registrar.messenger())
+    registrar.addMethodCallDelegate(QQMBackgroundHelp(), channel: channel)
+  }
+  func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
+    guard call.method == "openSettings" else { result(FlutterMethodNotImplemented); return }
+    guard let url = URL(string: UIApplication.openSettingsURLString) else { result(nil); return }
+    UIApplication.shared.open(url) { _ in result(nil) }
   }
 }
 

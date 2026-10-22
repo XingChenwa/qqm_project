@@ -6,6 +6,8 @@ import '../models/outgoing_message.dart';
 import 'image_upload_service.dart';
 import 'ip_whitelist_service.dart';
 import '../utils/qq_mentions.dart';
+import '../models/media_image.dart';
+import 'material_image_upload.dart';
 
 class ApiResult<T> {
   final T? data;
@@ -33,9 +35,19 @@ class ApiResult<T> {
 class ApiService {
   final Dio _dio;
   final ImageUploadService _images;
+  final Dio _materialUploads;
 
-  ApiService({Dio? dio, ImageUploadService? images})
+  ApiService({Dio? dio, ImageUploadService? images, Dio? materialUploads})
     : _images = images ?? const ImageUploadService(),
+      // No QQ headers/interceptors are shared with COS, even after a redirect.
+      _materialUploads =
+          materialUploads ??
+          Dio(
+            BaseOptions(
+              connectTimeout: const Duration(seconds: 15),
+              receiveTimeout: const Duration(seconds: 25),
+            ),
+          ),
       _dio =
           dio ??
           Dio(
@@ -566,6 +578,14 @@ class ApiService {
         }
         markdownData = {'content': markdownContent};
       }
+      // A material preview succeeding locally says nothing about the QQ
+      // server's transfer. Never silently send a material's alt text only.
+      if (containsMaterialReference(markdownContent ?? '') ||
+          (templateParams ?? []).any(
+            (p) => containsMaterialReference(p['value'] ?? ''),
+          )) {
+        markdownData['force_verify_image_resource'] = true;
+      }
 
       final response = await _dio.post(
         '$baseUrl$endpoint',
@@ -770,6 +790,167 @@ class ApiService {
     }
   }
 
+  Future<ApiResult<BotMediaPage>> listMediaImages({
+    required String baseUrl,
+    required String accessToken,
+    String cursor = '',
+  }) async {
+    try {
+      final response = await _dio.get(
+        '$baseUrl/v2/media-images',
+        queryParameters: {if (cursor.isNotEmpty) 'cursor': cursor},
+        options: Options(
+          headers: {'Authorization': 'QQBot $accessToken'},
+          followRedirects: false,
+        ),
+      );
+      if (!_isSuccessfulResponse(response)) return _failure(response);
+      if (response.data is! Map) {
+        return ApiResult.failure('平台返回的素材列表格式无效');
+      }
+      return ApiResult.success(
+        BotMediaPage.fromMap(Map<String, dynamic>.from(response.data)),
+      );
+    } on FormatException catch (e) {
+      return ApiResult.failure(e.message.toString());
+    } on DioException {
+      return ApiResult.failure('素材列表读取失败，请检查网络后重试');
+    } catch (_) {
+      return ApiResult.failure('素材列表读取失败，请稍后重试');
+    }
+  }
+
+  Future<ApiResult<bool>> deleteMediaImage({
+    required String baseUrl,
+    required String accessToken,
+    required String imageId,
+  }) async {
+    if (imageId.isEmpty || imageId.length > 256) {
+      return ApiResult.failure('素材 ID 无效');
+    }
+    try {
+      final response = await _dio.delete(
+        '$baseUrl/v2/media-images/${Uri.encodeComponent(imageId)}/delete',
+        options: Options(
+          headers: {'Authorization': 'QQBot $accessToken'},
+          followRedirects: false,
+        ),
+      );
+      return _toBoolResult(response);
+    } on DioException {
+      return ApiResult.failure('素材删除失败，请检查网络后重试');
+    } catch (_) {
+      return ApiResult.failure('素材删除失败，请稍后重试');
+    }
+  }
+
+  /// Official three-step upload. PUT contains the original bytes, not base64,
+  /// and the COS ETag must match the local MD5 before completing the task.
+  Future<ApiResult<BotMediaImage>> uploadMediaImage({
+    required String baseUrl,
+    required String accessToken,
+    required MaterialUploadImage image,
+    bool Function()? isCurrent,
+    void Function(String stage, double progress)? onProgress,
+  }) async {
+    bool current() => isCurrent?.call() ?? true;
+    ApiResult<BotMediaImage> stale() => ApiResult.failure('机器人已切换，素材上传已停止');
+    try {
+      if (!current()) return stale();
+      onProgress?.call('申请上传', 0);
+      final prepare = await _dio.post(
+        '$baseUrl/v2/media-images/prepare',
+        options: Options(
+          headers: {'Authorization': 'QQBot $accessToken'},
+          followRedirects: false,
+        ),
+        data: {
+          'file_name': image.filename,
+          'file_size': image.bytes.length,
+          'content_type': image.contentType,
+          'md5': image.md5Hex,
+          'sha1': image.sha1Hex,
+        },
+      );
+      if (!current()) return stale();
+      if (!_isSuccessfulResponse(prepare)) return _failure(prepare);
+      final data = prepare.data;
+      final task = data is Map ? data['upload_id']?.toString() ?? '' : '';
+      final signed = data is Map ? data['presigned_url']?.toString() ?? '' : '';
+      final expires = data is Map
+          ? int.tryParse('${data['expires_in']}')
+          : null;
+      if (task.isEmpty ||
+          task.length > 512 ||
+          (expires ?? 0) <= 0 ||
+          !isMaterialCosUrl(signed)) {
+        return ApiResult.failure('平台返回的上传任务或 COS HTTPS 地址无效，请刷新后重试');
+      }
+      onProgress?.call('上传图片', .05);
+      final put = await _materialUploads.put(
+        signed,
+        data: Stream<List<int>>.value(image.bytes),
+        options: Options(
+          contentType: image.contentType,
+          headers: {Headers.contentLengthHeader: image.bytes.length},
+          responseType: ResponseType.plain,
+          followRedirects: false,
+          validateStatus: (_) => true,
+          sendTimeout: const Duration(seconds: 60),
+          receiveTimeout: const Duration(seconds: 25),
+        ),
+        onSendProgress: (sent, total) {
+          if (current() && total > 0) {
+            onProgress?.call('上传图片', .05 + .85 * (sent / total).clamp(0, 1));
+          }
+        },
+      );
+      if (!current()) return stale();
+      if ((put.statusCode ?? 0) < 200 || (put.statusCode ?? 0) >= 300) {
+        return ApiResult.failure('图片直传失败（HTTP ${put.statusCode}），请重新上传');
+      }
+      final etag = (put.headers.value('etag') ?? '')
+          .trim()
+          .replaceAll('"', '')
+          .toLowerCase();
+      if (!RegExp(r'^[a-f0-9]{32}$').hasMatch(etag) || etag != image.md5Hex) {
+        return ApiResult.failure('图片上传校验失败，未提交完成，请重新上传');
+      }
+      onProgress?.call('确认素材', .95);
+      final complete = await _dio.post(
+        '$baseUrl/v2/media-images/complete',
+        options: Options(
+          headers: {'Authorization': 'QQBot $accessToken'},
+          followRedirects: false,
+        ),
+        data: {'upload_id': task, 'md5': etag},
+      );
+      if (!current()) return stale();
+      if (!_isSuccessfulResponse(complete)) return _failure(complete);
+      if (complete.data is! Map) return ApiResult.failure('平台未返回素材引用');
+      final result = Map<String, dynamic>.from(complete.data);
+      final ttl = int.tryParse('${result['ttl']}') ?? 0;
+      final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+      final material = BotMediaImage.fromMap({
+        ...result,
+        'file_name': image.filename,
+        'created_at': now,
+        if (ttl > 0) 'expires_at': now + ttl,
+        'width': image.width,
+        'height': image.height,
+      });
+      onProgress?.call('上传完成', 1);
+      return ApiResult.success(material);
+    } on FormatException catch (e) {
+      return ApiResult.failure(e.message.toString());
+    } on DioException {
+      // Exception text can contain the signed upload URL. Do not log/return it.
+      return ApiResult.failure('素材上传网络请求失败，请重试；未完成任务会由平台自动过期');
+    } catch (_) {
+      return ApiResult.failure('素材上传失败，请稍后重试');
+    }
+  }
+
   // --- helpers ---
 
   int? _businessCode(dynamic data) => data is Map
@@ -804,6 +985,14 @@ class ApiService {
       40034010 => '模板参数不能含 Markdown 语法，请用自定义 Markdown',
       40034011 || 40034124 => 'Markdown 内容或参数无效，请检查格式',
       40034127 => '无 Markdown 模板权限，请切换到自定义 Markdown',
+      40035001 => '素材格式不支持，文件扩展名需与图片 MIME 类型一致',
+      40035002 => '素材图片超过 10 MB 大小上限',
+      40035003 => '素材上传任务已过期或校验失败，请重新上传',
+      40035006 => '平台素材服务暂不可用，请稍后重试',
+      40035007 => '素材已达到 100 张上限，请删除不用的图片后重试',
+      40035008 => '素材不存在或已删除，请刷新素材库',
+      40035009 => '素材已过期或删除，请重新上传',
+      40035010 => '素材引用无效或属于其他机器人，请使用当前机器人的素材',
       40034024 => '回复消息 ID 无效或不属于当前会话',
       40034025 => '事件 ID 无效，请选择可回复事件',
       40034026 => '事件回复已过期，请等待新的事件',

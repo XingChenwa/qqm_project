@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../../models/qq_face.dart';
 import '../../services/qface_service.dart';
+import '../themes/app_theme.dart';
 import '../screens/browser_screen.dart';
 
 class LinkifiedText extends StatefulWidget {
@@ -11,6 +12,7 @@ class LinkifiedText extends StatefulWidget {
   final bool qqFaces;
   final List<dynamic>? mentions;
   final QFaceService? faceService;
+  final Color? mentionColor;
   const LinkifiedText(
     this.text, {
     super.key,
@@ -18,6 +20,7 @@ class LinkifiedText extends StatefulWidget {
     this.qqFaces = false,
     this.mentions,
     this.faceService,
+    this.mentionColor,
   });
 
   @override
@@ -68,13 +71,23 @@ class _LinkifiedTextState extends State<LinkifiedText> {
   ]) {
     _clear();
     final spans = <InlineSpan>[];
-    var hasImages = false;
     for (final part in parts) {
+      if (part.isMention) {
+        spans.add(
+          TextSpan(
+            text: part.text,
+            style: TextStyle(
+              color: widget.mentionColor ?? AppTheme.qqBlue,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        );
+        continue;
+      }
       final face = catalog?.resolve(part);
       if (face == null) {
         _appendLinks(context, spans, part.text);
       } else {
-        hasImages = true;
         final size = (widget.style?.fontSize ?? 14) * 1.8;
         spans.add(
           WidgetSpan(
@@ -100,11 +113,10 @@ class _LinkifiedTextState extends State<LinkifiedText> {
       }
     }
     final span = TextSpan(children: spans, style: widget.style);
-    // SelectableText.rich only accepts TextSpans. SelectionArea supports
-    // WidgetSpans without treating embedded images as editable text.
-    return hasImages
-        ? SelectionArea(child: Text.rich(span))
-        : SelectableText.rich(span);
+    // Read-only chat text must not create EditableText's inner scrollable.
+    // Its caret reveal on a long press can move the surrounding chat timeline.
+    // SelectionArea also supports emoji WidgetSpans and desktop copy shortcuts.
+    return SelectionArea(child: Text.rich(span));
   }
 
   void _appendLinks(BuildContext context, List<InlineSpan> spans, String text) {

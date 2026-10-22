@@ -14,11 +14,13 @@ class QqTextPart {
   final String? faceId;
   final String label;
   final bool sticker;
+  final bool isMention;
   const QqTextPart(
     this.text, {
     this.faceId,
     this.label = '',
     this.sticker = false,
+    this.isMention = false,
   });
   bool get isFace => faceId != null;
 
@@ -27,7 +29,7 @@ class QqTextPart {
     final text = content.trim();
     var start = 0;
     final pattern = RegExp(
-      r'<faceType\s*=\s*"?\d+"?[^>]{0,8192}>|<emoji:[^>]{1,32}>|\[QQ表情(?:包)?(?:#\d+|:\s*[^\]]+)?\]',
+      r'<qqbot-at-user\s+id="[^"\r\n]{1,128}"\s*/>|<qqbot-at-everyone\s*/>|<@!?[^>\r\n]{1,128}>|<faceType\s*=\s*"?\d+"?[^>]{0,8192}>|<emoji:[^>]{1,32}>|\[QQ表情(?:包)?(?:#\d+|:\s*[^\]]+)?\]',
     );
     for (final match in pattern.allMatches(text).take(200)) {
       if (match.start > start) {
@@ -42,6 +44,16 @@ class QqTextPart {
         );
       }
       final raw = match.group(0)!;
+      if (raw.startsWith('<qqbot-at-') || raw.startsWith('<@')) {
+        result.add(
+          QqTextPart(
+            formatQqMessageContent(raw, mentions: mentions),
+            isMention: true,
+          ),
+        );
+        start = match.end;
+        continue;
+      }
       var id = '', label = '';
       final faceType = RegExp(
         r'faceType\s*=\s*"?(\d+)',

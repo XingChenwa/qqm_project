@@ -16,6 +16,7 @@ import '../utils/qq_mentions.dart';
 import '../utils/message_history.dart';
 import '../models/group_notice.dart';
 import 'group_management.dart';
+import 'media_library.dart';
 
 enum ConnectStep { idle, gettingToken, gettingGateway, connecting, done }
 
@@ -29,6 +30,15 @@ class BotClient extends ChangeNotifier {
   final OiapiService _oiapiService;
   final _incomingNotices = StreamController<MessageModel>.broadcast();
   Stream<MessageModel> get incomingNotices => _incomingNotices.stream;
+  late final MediaLibrary materials = MediaLibrary(
+    api: _apiService,
+    request: _requestMaterialApi,
+    appId: () => _config.appId,
+    epoch: () => _accountEpoch,
+    changed: () {
+      if (!_disposed) notifyListeners();
+    },
+  );
   late final GroupManagement groups = GroupManagement(
     storage: _storage,
     api: _apiService,
@@ -127,6 +137,24 @@ class BotClient extends ChangeNotifier {
     return current() ? result : ApiResult.failure('机器人已切换，请回原机器人刷新确认');
   }
 
+  Future<ApiResult<T>> _requestMaterialApi<T>(
+    MaterialTarget target,
+    Future<ApiResult<T>> Function(String token, String baseUrl) action,
+  ) async {
+    bool current() =>
+        !_disposed &&
+        target.epoch == _accountEpoch &&
+        target.appId == _config.appId &&
+        target.appId.isNotEmpty;
+    if (!current()) return ApiResult.failure('机器人已切换，请重新打开素材库');
+    final baseUrl = _config.resolvedApiBaseUrl;
+    final token = await _getAccessToken();
+    if (!current()) return ApiResult.failure('机器人已切换，已取消素材操作');
+    if (token == null) return ApiResult.failure('请先配置有效的机器人凭证');
+    final result = await _checkedApi(() => action(token, baseUrl));
+    return current() ? result : ApiResult.failure('机器人已切换，请回原机器人刷新素材');
+  }
+
   Future<void> _configWrites = Future<void>.value();
   int get accountEpoch => _accountEpoch;
   List<BotConfig> get botProfiles => _storage.getBotProfiles();
@@ -204,6 +232,13 @@ class BotClient extends ChangeNotifier {
   ConnectStep get connectStep => _connectStep;
   bool get isConnected => _wsService.isConnected;
   bool get isConnecting => _isConnecting;
+  bool get connectionRequested => _wsService.connectionRequested;
+  Future<void> recoverAfterResume() async {
+    if (!_disposed && !_isConnecting && _config.autoReconnect) {
+      await _wsService.recoverAfterResume();
+    }
+  }
+
   List<MessageModel> get messages =>
       List.unmodifiable(_messages.map(_withUserAvatar));
   List<ChatSession> get sessions => _sessions;
@@ -2001,6 +2036,7 @@ class BotClient extends ChangeNotifier {
       _resetNicknameLookups();
     }
     _config = newConfig;
+    if (credentialsChanged) materials.syncScope();
     _storage.selectChatAccount(newConfig.appId);
     if (credentialsChanged) _loadSessions();
     _addLog(accountChanged ? '已切换机器人 AppID：${newConfig.appId}' : '配置已更新');
@@ -2178,6 +2214,7 @@ class BotClient extends ChangeNotifier {
     _tokenRefreshTimer?.cancel();
     _wsService.dispose();
     groups.dispose();
+    materials.dispose();
     unawaited(_incomingNotices.close());
     super.dispose();
   }
