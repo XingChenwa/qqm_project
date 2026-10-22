@@ -10,6 +10,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 import 'package:image/image.dart' as img;
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:qq_bot_manager/models/message.dart';
 import 'package:qq_bot_manager/models/received_message.dart';
 import 'package:qq_bot_manager/services/auxiliary_windows.dart';
@@ -83,6 +84,22 @@ void main() {
     imageCacheDirectory = await Directory(
       'build/test-record-images',
     ).absolute.create(recursive: true);
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(
+          const MethodChannel('plugins.flutter.io/path_provider'),
+          (_) async => imageCacheDirectory!.path,
+        );
+    // macOS/iOS widget tests have no registered sqflite native plugin. Use the
+    // same explicit JSON fixture repository on every host, without changing the
+    // application's platform-native cache or weakening image-rendering checks.
+    CachedNetworkImageProvider.defaultCacheManager = CacheManager(
+      Config(
+        'record-fixtures',
+        repo: JsonCacheInfoRepository.withFile(
+          File('${imageCacheDirectory!.path}/record-fixtures.json'),
+        ),
+      ),
+    );
     fixtureServer = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     final photo = img.Image(width: 640, height: 400);
     img.fill(photo, color: img.ColorRgb8(214, 231, 246));
