@@ -125,9 +125,18 @@ class ReceivedMessageBody {
     List<int> remaining, [
     List<dynamic> inheritedMentions = const [],
   ]) {
-    final exported = parseForwardedRecordText(_text(data['content']));
+    final originalType = _integer(data['message_type']);
+    final exported = parseForwardedRecordText(
+      _text(data['content']),
+      forceRecord: originalType == 102,
+    );
     if (exported != null && depth < 8 && remaining[0] > 0) {
-      data = {...data, ...exported, 'content': ''};
+      data = {
+        ...data,
+        ...exported,
+        if (originalType == 103 && exported['message_type'] != 102)
+          'message_type': 103,
+      };
     }
     final author = _map(data['author']);
     final mentions = data['mentions'] is List
@@ -194,8 +203,13 @@ class ReceivedMessageBody {
   String get displayText => formatQqMessageContent(text, mentions: mentions);
   bool get isRecord =>
       type == 102 ||
-      recordTitle.isNotEmpty ||
-      (type == 103 && elements.length == 1 && elements.single.isRecord);
+      (type != 103 && recordTitle.isNotEmpty) ||
+      (type == 103 &&
+          text.trim().isEmpty &&
+          attachments.isEmpty &&
+          card == null &&
+          elements.length == 1 &&
+          elements.single.isRecord);
 
   Map<String, dynamic> toDisplayMap() => {
     'message_type': type,

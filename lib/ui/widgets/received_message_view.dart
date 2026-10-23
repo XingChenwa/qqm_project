@@ -78,49 +78,7 @@ class _ReceivedMessageViewState extends State<ReceivedMessageView> {
         for (final attachment in body.attachments)
           _attachment(context, attachment),
         if (body.elements.isNotEmpty)
-          ExpansionTile(
-            key: storageKey.isEmpty
-                ? null
-                : PageStorageKey('elements-$storageKey'),
-            initiallyExpanded: depth == 0,
-            maintainState: true,
-            tilePadding: EdgeInsets.zero,
-            childrenPadding: const EdgeInsets.only(left: 8),
-            title: Text(
-              '${body.kindLabel} · ${body.elements.length} 个元素',
-              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
-            ),
-            children: [
-              PageStorage(
-                bucket: _elementsBucket,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    for (var i = 0; i < body.elements.length; i++)
-                      Container(
-                        margin: const EdgeInsets.only(bottom: 8),
-                        padding: const EdgeInsets.only(left: 8, bottom: 4),
-                        decoration: BoxDecoration(
-                          border: Border(
-                            left: BorderSide(
-                              color: Theme.of(context).dividerColor,
-                              width: 2,
-                            ),
-                          ),
-                        ),
-                        child: ReceivedMessageView(
-                          body: body.elements[i],
-                          depth: depth + 1,
-                          storageKey: '$storageKey/$i',
-                          faceService: widget.faceService,
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-            ],
-          ),
+          _elementGroup(context, body, depth, storageKey),
         if (body.hasMoreElements)
           const Text('嵌套内容较多，剩余内容请在消息详情中查看。', style: TextStyle(fontSize: 11)),
         if (body.displayText.isEmpty &&
@@ -130,6 +88,78 @@ class _ReceivedMessageViewState extends State<ReceivedMessageView> {
             !body.hasMoreElements)
           Text('[${body.kindLabel}]', style: const TextStyle(fontSize: 13)),
       ],
+    );
+  }
+
+  Widget _elementGroup(
+    BuildContext context,
+    ReceivedMessageBody body,
+    int depth,
+    String storageKey,
+  ) {
+    final quoted = body.type == 103;
+    final tile = ExpansionTile(
+      key: storageKey.isEmpty ? null : PageStorageKey('elements-$storageKey'),
+      initiallyExpanded: depth == 0,
+      maintainState: true,
+      tilePadding: EdgeInsets.zero,
+      childrenPadding: const EdgeInsets.only(left: 8),
+      leading: quoted ? const Icon(Icons.format_quote_rounded, size: 18) : null,
+      title: Text(
+        '${body.kindLabel} · ${body.elements.length} 个元素',
+        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+      ),
+      children: [
+        PageStorage(
+          bucket: _elementsBucket,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              for (var i = 0; i < body.elements.length; i++)
+                Container(
+                  margin: const EdgeInsets.only(bottom: 8),
+                  padding: const EdgeInsets.only(left: 8, bottom: 4),
+                  decoration: BoxDecoration(
+                    border: Border(
+                      left: BorderSide(
+                        color: Theme.of(context).dividerColor,
+                        width: 2,
+                      ),
+                    ),
+                  ),
+                  child: ReceivedMessageView(
+                    body: body.elements[i],
+                    depth: depth + 1,
+                    storageKey: '$storageKey/$i',
+                    faceService: widget.faceService,
+                    inRecord: widget.inRecord,
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ],
+    );
+    if (!quoted) return tile;
+    return Container(
+      key: const ValueKey('quoted-message'),
+      margin: const EdgeInsets.only(top: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 10),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(8),
+        border: Border(
+          left: BorderSide(
+            color: Theme.of(context).colorScheme.primary.withValues(alpha: .45),
+            width: 3,
+          ),
+        ),
+      ),
+      child: Theme(
+        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+        child: Material(type: MaterialType.transparency, child: tile),
+      ),
     );
   }
 

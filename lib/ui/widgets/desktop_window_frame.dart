@@ -1,18 +1,24 @@
 import 'package:flutter/material.dart';
 import 'package:window_manager/window_manager.dart';
 
-import '../../services/desktop_window_controller.dart';
+import '../../services/desktop_window_chrome.dart';
 import '../../utils/constants.dart';
 import '../themes/app_theme.dart';
 import 'app_logo.dart';
 
 class DesktopWindowFrame extends StatelessWidget {
-  final DesktopWindowController controller;
+  final DesktopWindowChrome controller;
   final Widget child;
+  final String title;
+  final bool showVersion;
+  final String closeTooltip;
   const DesktopWindowFrame({
     super.key,
     required this.controller,
     required this.child,
+    this.title = 'QQ 机器人管理器',
+    this.showVersion = true,
+    this.closeTooltip = '关闭窗口',
   });
 
   Widget _button({
@@ -87,25 +93,30 @@ class DesktopWindowFrame extends StatelessWidget {
                             children: [
                               const AppLogo(size: 26),
                               const SizedBox(width: 9),
-                              const Flexible(
+                              Flexible(
+                                fit: showVersion
+                                    ? FlexFit.loose
+                                    : FlexFit.tight,
                                 child: Text(
-                                  'QQ 机器人管理器',
+                                  title,
                                   overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(
+                                  style: const TextStyle(
                                     fontSize: 12,
                                     fontWeight: FontWeight.w700,
                                   ),
                                 ),
                               ),
-                              const SizedBox(width: 9),
-                              Text(
-                                'v${AppConstants.appVersion}',
-                                style: TextStyle(
-                                  fontSize: 10,
-                                  color: Theme.of(context).hintColor,
+                              if (showVersion) ...[
+                                const SizedBox(width: 9),
+                                Text(
+                                  'v${AppConstants.appVersion}',
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    color: Theme.of(context).hintColor,
+                                  ),
                                 ),
-                              ),
-                              const Spacer(),
+                              ],
+                              if (showVersion) const Spacer(),
                             ],
                           ),
                         ),
@@ -135,7 +146,7 @@ class DesktopWindowFrame extends StatelessWidget {
                         onPressed: controller.toggleMaximize,
                       ),
                       _button(
-                        hint: '关闭窗口',
+                        hint: closeTooltip,
                         icon: Icons.close_rounded,
                         close: true,
                         onPressed: controller.requestClose,

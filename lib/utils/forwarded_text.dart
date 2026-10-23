@@ -1,7 +1,11 @@
 /// Some QQ forwarded records arrive as a textual export, not as attachments.
-/// Interpret only the documented-looking numbered export; keep the raw event
-/// untouched for details and never guess images from ordinary prose or links.
-Map<String, dynamic>? parseForwardedRecordText(String source) {
+/// A numbered section can also be a single quoted message. Keep its type and
+/// fields instead of treating every export as a merged conversation.
+/// The raw event remains untouched for details and reply indices.
+Map<String, dynamic>? parseForwardedRecordText(
+  String source, {
+  bool forceRecord = false,
+}) {
   if (source.length > 1024 * 1024) return null;
   final headers = RegExp(
     r'^\s*={3,}\s*消息\s*\d+\s*={3,}\s*$',
@@ -10,7 +14,7 @@ Map<String, dynamic>? parseForwardedRecordText(String source) {
   if (headers.isEmpty || headers.length > 200) return null;
   final records = <Map<String, dynamic>>[];
   final fields = RegExp(
-    r'^\s*\[(消息内容|发送者|发送时间|时间|附件\s*\d+)\]\s*',
+    r'^\s*\[(消息内容|消息类型|发送者|发送时间|时间|引用内容|引用发送者|附件\s*\d+)\]\s*',
     multiLine: true,
   );
   for (var i = 0; i < headers.length; i++) {
@@ -20,7 +24,8 @@ Map<String, dynamic>? parseForwardedRecordText(String source) {
     );
     final matches = fields.allMatches(section).toList();
     if (matches.isEmpty) return null;
-    var content = '', author = '', timestamp = '';
+    var content = '', author = '', timestamp = '', type = '';
+    var quotedText = '', quotedAuthor = '';
     final attachments = <Map<String, dynamic>>[];
     for (var j = 0; j < matches.length; j++) {
       final key = matches[j].group(1)!;
@@ -32,10 +37,16 @@ Map<String, dynamic>? parseForwardedRecordText(String source) {
           .trim();
       if (key == '消息内容') {
         content = value;
+      } else if (key == '消息类型') {
+        type = value;
       } else if (key == '发送者') {
         author = value;
       } else if (key == '时间' || key == '发送时间') {
         timestamp = value;
+      } else if (key == '引用内容') {
+        quotedText = value;
+      } else if (key == '引用发送者') {
+        quotedAuthor = value;
       } else if (attachments.length < 50) {
         final attachment = _attachment(value);
         // An unrecognised export must remain visible as text, not disappear.
@@ -44,19 +55,39 @@ Map<String, dynamic>? parseForwardedRecordText(String source) {
       }
     }
     records.add({
-      'message_type': 0,
+      'message_type': switch (type) {
+        '引用消息' || '103' => 103,
+        '并行消息' || '101' => 101,
+        '聊天记录' || '102' => 102,
+        '卡片消息' || '3' => 3,
+        _ => quotedText.isNotEmpty ? 103 : 0,
+      },
       'content': content,
       if (author.isNotEmpty) 'author': {'username': author},
       if (timestamp.isNotEmpty) 'timestamp': timestamp,
       if (attachments.isNotEmpty) 'attachments': attachments,
+      if (quotedText.isNotEmpty)
+        'msg_elements': [
+          {
+            'content': quotedText,
+            if (quotedAuthor.isNotEmpty) 'author': {'username': quotedAuthor},
+          },
+        ],
     });
   }
   final prefix = source.substring(0, headers.first.start).trim();
+  final title = prefix.startsWith('[') && prefix.endsWith(']')
+      ? prefix.substring(1, prefix.length - 1)
+      : prefix;
+  // A real forwarded record can contain one quoted row. Only an explicit
+  // record type/title or multiple rows makes it a record container.
+  if (!forceRecord && records.length == 1 && !title.endsWith('聊天记录')) {
+    return records.single;
+  }
   return {
     'message_type': 102,
-    'record_title': prefix.startsWith('[') && prefix.endsWith(']')
-        ? prefix.substring(1, prefix.length - 1)
-        : prefix,
+    'content': '',
+    'record_title': title,
     'msg_elements': records,
   };
 }

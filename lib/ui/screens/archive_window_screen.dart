@@ -11,12 +11,14 @@ class ArchiveWindowScreen extends StatefulWidget {
   final List<MessageModel> messages;
   final String? initialMessageId;
   final VoidCallback onClose;
+  final bool showAppBar;
   const ArchiveWindowScreen({
     super.key,
     required this.title,
     required this.messages,
     required this.onClose,
     this.initialMessageId,
+    this.showAppBar = true,
   });
   @override
   State<ArchiveWindowScreen> createState() => _ArchiveWindowScreenState();
@@ -50,18 +52,20 @@ class _ArchiveWindowScreenState extends State<ArchiveWindowScreen> {
       if (i > 0) messages = messages.skip(i).toList();
     }
     return Scaffold(
-      appBar: AppBar(
-        leading: IconButton(
-          tooltip: '关闭聊天记录窗口',
-          onPressed: widget.onClose,
-          icon: const Icon(Icons.close),
-        ),
-        title: Text(
-          '${widget.title} · 聊天记录',
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
-      ),
+      appBar: !widget.showAppBar
+          ? null
+          : AppBar(
+              leading: IconButton(
+                tooltip: '关闭聊天记录窗口',
+                onPressed: widget.onClose,
+                icon: const Icon(Icons.close),
+              ),
+              title: Text(
+                '${widget.title} · 聊天记录',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
       body: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 1060),

@@ -2,11 +2,11 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter/widgets.dart';
 import 'package:tray_manager/tray_manager.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../utils/platforms.dart';
+import 'desktop_window_chrome.dart';
 import 'storage_service.dart';
 
 class DesktopCloseDecision {
@@ -16,16 +16,19 @@ class DesktopCloseDecision {
   const DesktopCloseDecision({required this.hideToTray, this.remember = false});
 }
 
-class DesktopWindowController extends ChangeNotifier
+class DesktopWindowController extends DesktopWindowChrome
     with WindowListener, TrayListener {
   final StorageService storage;
   final bool supported;
   final Future<void> Function()? beforeExit;
   Future<DesktopCloseDecision?> Function()? confirmClose;
+  @override
   bool ready = false;
+  @override
   bool maximized = false;
   bool trayReady = false;
   bool hiddenToTray = false;
+  @override
   String error = '';
   bool _disposed = false;
   bool _closing = false;
@@ -182,8 +185,11 @@ class DesktopWindowController extends ChangeNotifier
     }
   }
 
+  @override
   Future<void> minimize() => _operate(windowManager.minimize);
+  @override
   Future<void> drag() => _operate(windowManager.startDragging);
+  @override
   Future<void> toggleMaximize() => _operate(() async {
     if (await windowManager.isMaximized()) {
       await windowManager.unmaximize();
@@ -209,6 +215,7 @@ class DesktopWindowController extends ChangeNotifier
     _changed();
   });
 
+  @override
   Future<void> requestClose() async {
     if (!supported || _disposed || _closing || _exiting) return;
     _closing = true;

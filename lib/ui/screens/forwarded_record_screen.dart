@@ -39,7 +39,13 @@ Future<void> openForwardedRecord(
 class ForwardedRecordScreen extends StatelessWidget {
   final ReceivedMessageBody body;
   final VoidCallback? onClose;
-  const ForwardedRecordScreen({super.key, required this.body, this.onClose});
+  final bool showAppBar;
+  const ForwardedRecordScreen({
+    super.key,
+    required this.body,
+    this.onClose,
+    this.showAppBar = true,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -49,21 +55,28 @@ class ForwardedRecordScreen extends StatelessWidget {
     }
     final rows = record.elements.isEmpty ? [record] : record.elements;
     return Scaffold(
-      appBar: AppBar(
-        leading: IconButton(
-          tooltip: onClose == null ? '返回原聊天' : '关闭聊天记录窗口',
-          icon: Icon(
-            onClose == null ? Icons.arrow_back_rounded : Icons.close_rounded,
-          ),
-          onPressed: onClose ?? () => Navigator.pop(context),
-        ),
-        title: Text(
-          record.recordTitle.isNotEmpty ? record.recordTitle : '聊天记录',
-          maxLines: 2,
-          overflow: TextOverflow.ellipsis,
-          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-        ),
-      ),
+      appBar: !showAppBar
+          ? null
+          : AppBar(
+              leading: IconButton(
+                tooltip: onClose == null ? '返回原聊天' : '关闭聊天记录窗口',
+                icon: Icon(
+                  onClose == null
+                      ? Icons.arrow_back_rounded
+                      : Icons.close_rounded,
+                ),
+                onPressed: onClose ?? () => Navigator.pop(context),
+              ),
+              title: Text(
+                record.recordTitle.isNotEmpty ? record.recordTitle : '聊天记录',
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
       backgroundColor: Theme.of(context).colorScheme.surfaceContainerLowest,
       body: SafeArea(
         top: false,

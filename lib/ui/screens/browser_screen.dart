@@ -67,6 +67,7 @@ class BrowserScreen extends StatefulWidget {
   final VoidCallback? onClose;
   final bool initialVideo;
   final String filename;
+  final bool showCloseButton;
   @visibleForTesting
   final ValueChanged<InAppWebViewController>? onControllerCreated;
   const BrowserScreen({
@@ -75,6 +76,7 @@ class BrowserScreen extends StatefulWidget {
     this.onClose,
     this.initialVideo = false,
     this.filename = '',
+    this.showCloseButton = true,
     this.onControllerCreated,
   });
 
@@ -290,11 +292,14 @@ class _BrowserScreenState extends State<BrowserScreen> {
   @override
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(
-      leading: IconButton(
-        tooltip: '关闭内置浏览器',
-        icon: const Icon(Icons.close),
-        onPressed: widget.onClose ?? () => Navigator.pop(context),
-      ),
+      automaticallyImplyLeading: false,
+      leading: !widget.showCloseButton
+          ? null
+          : IconButton(
+              tooltip: '关闭内置浏览器',
+              icon: const Icon(Icons.close),
+              onPressed: widget.onClose ?? () => Navigator.pop(context),
+            ),
       title: Text(_title, maxLines: 1, overflow: TextOverflow.ellipsis),
       actions: [
         if (_download != null)

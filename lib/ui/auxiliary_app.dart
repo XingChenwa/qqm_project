@@ -1,15 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:provider/provider.dart';
-import 'package:window_manager/window_manager.dart';
 
 import '../models/message.dart';
 import '../models/received_message.dart';
 import '../services/auxiliary_windows.dart';
+import '../services/auxiliary_window_controller.dart';
 import 'screens/archive_window_screen.dart';
 import 'screens/browser_screen.dart';
 import 'screens/forwarded_record_screen.dart';
 import 'themes/app_theme.dart';
+import 'widgets/desktop_window_frame.dart';
 
 Future<Widget> initializeAuxiliaryApplication(
   void Function(String) report,
@@ -17,25 +18,17 @@ Future<Widget> initializeAuxiliaryApplication(
   report('打开独立窗口');
   final windows = AuxiliaryWindows();
   final request = await windows.consume(AuxiliaryWindows.pendingRequest!);
-  await windowManager.ensureInitialized();
-  await windowManager.waitUntilReadyToShow(
-    WindowOptions(
-      title: '${request['title'] ?? 'QQ机器人管理器'}',
-      size: request['kind'] == 'browser'
-          ? const Size(1100, 800)
-          : const Size(820, 850),
-      minimumSize: const Size(420, 420),
-      center: true,
-      titleBarStyle: TitleBarStyle.normal,
-      skipTaskbar: false,
-    ),
+  final controller = AuxiliaryWindowController();
+  final title = request['kind'] == 'history'
+      ? '${request['title'] ?? '会话'} · 聊天记录'
+      : '${request['title'] ?? 'QQ机器人管理器'}';
+  await controller.initialize(
+    title: title,
+    size: request['kind'] == 'browser'
+        ? const Size(1100, 800)
+        : const Size(820, 850),
   );
-  await windowManager.setPreventClose(false);
-  await windowManager.show();
-  await windowManager.focus();
-  void close() {
-    windowManager.close();
-  }
+  void close() => controller.requestClose();
 
   final Widget page;
   switch (request['kind']) {
@@ -45,6 +38,7 @@ Future<Widget> initializeAuxiliaryApplication(
       page = BrowserScreen(
         uri: uri,
         onClose: close,
+        showCloseButton: !controller.ready,
         initialVideo: request['video'] == true,
         filename: request['filename']?.toString() ?? '',
       );
@@ -54,6 +48,7 @@ Future<Widget> initializeAuxiliaryApplication(
           Map<String, dynamic>.from(request['body'] as Map),
         ),
         onClose: close,
+        showAppBar: !controller.ready,
       );
     case 'history':
       page = ArchiveWindowScreen(
@@ -64,22 +59,34 @@ Future<Widget> initializeAuxiliaryApplication(
             .toList(),
         initialMessageId: request['initialMessageId'] as String?,
         onClose: close,
+        showAppBar: !controller.ready,
       );
     default:
       throw const FormatException('独立窗口类型无效');
   }
-  return Provider<AuxiliaryWindows>.value(
-    value: windows,
-    child: MaterialApp(
-      title: '${request['title'] ?? 'QQ机器人管理器'}',
-      debugShowCheckedModeBanner: false,
-      locale: const Locale('zh', 'CN'),
-      supportedLocales: const [Locale('zh', 'CN')],
-      localizationsDelegates: GlobalMaterialLocalizations.delegates,
-      theme: AppTheme.lightTheme,
-      darkTheme: AppTheme.darkTheme,
-      themeMode: request['dark'] == true ? ThemeMode.dark : ThemeMode.light,
-      home: page,
+  return ChangeNotifierProvider<AuxiliaryWindowController>(
+    create: (_) => controller,
+    lazy: false,
+    child: Provider<AuxiliaryWindows>.value(
+      value: windows,
+      child: MaterialApp(
+        title: '${request['title'] ?? 'QQ机器人管理器'}',
+        debugShowCheckedModeBanner: false,
+        locale: const Locale('zh', 'CN'),
+        supportedLocales: const [Locale('zh', 'CN')],
+        localizationsDelegates: GlobalMaterialLocalizations.delegates,
+        theme: AppTheme.lightTheme,
+        darkTheme: AppTheme.darkTheme,
+        themeMode: request['dark'] == true ? ThemeMode.dark : ThemeMode.light,
+        builder: (context, child) => DesktopWindowFrame(
+          controller: controller,
+          title: title,
+          showVersion: false,
+          closeTooltip: '关闭此窗口',
+          child: child!,
+        ),
+        home: page,
+      ),
     ),
   );
 }

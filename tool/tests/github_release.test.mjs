@@ -73,6 +73,7 @@ test('GitHub 发布需要四端完成、签名并部署 Pages；手动构建不�
   assert.match(publish, /\/pages\/builds/);
   assert.match(publish, /!release.immutable/);
   assert.match(workflow, /gitcode:\s+name:[^\n]+\s+needs: publish/);
+  assert.match(workflow, /if: github\.event_name == 'release' && !contains\(github\.event\.release\.body, '<!-- qqm-gitcode-local -->'\)/);
   assert.match(workflow, /RELEASE_TAG: \$\{\{ github.event.release.tag_name \}\}/);
   assert.match(publish, /releaseChannel\(release\) === 'stable'/);
   assert.match(publish, /make_latest=true/);

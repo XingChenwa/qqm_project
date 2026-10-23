@@ -279,7 +279,9 @@ jobs:
   gitcode:
     name: 同步 GitCode 国内安装包与签名清单
     needs: publish
-    if: github.event_name == 'release'
+    # A release can explicitly delegate its mirror to the local publisher.
+    # This avoids concurrent cloud/local writes without interrupting builds.
+    if: github.event_name == 'release' && !contains(github.event.release.body, '<!-- qqm-gitcode-local -->')
     concurrency:
       group: project-gitcode-sync
       cancel-in-progress: false
