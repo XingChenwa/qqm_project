@@ -510,4 +510,64 @@ void main() {
     );
     expect(fixture.bodies.length, before);
   });
+  test('QQBot语音URL交给平台files接口获取，不先下载或伪装base64', () async {
+    final received = <Json>[];
+    transport.onEvent = received.add;
+    await transport.start();
+    fixture.message('url-audio-trigger');
+    await until(() => received.isNotEmpty);
+    final url = Uri.https('8.8.8.8', '/tts', {
+      'character': '甜妹',
+      'text': '测试 + &',
+      'speed': '1',
+    }).toString();
+    final result = object(
+      await transport.call('send_group_msg', {
+        'group_id': 'GROUP_OPENID',
+        '_reply_id': 'url-audio-trigger',
+        'message': [
+          {
+            'type': 'record',
+            'data': {'file': url},
+          },
+        ],
+      }),
+    );
+    expect(result['message_id'], isNotEmpty);
+    expect(fixture.bodies.first['file_type'], 3);
+    expect(fixture.bodies.first['url'], url);
+    expect(fixture.bodies.first.containsKey('file_data'), false);
+    expect(fixture.bodies.first['srv_send_msg'], false);
+    expect(fixture.bodies.last['msg_type'], 7);
+    expect(fixture.bodies.last['msg_seq'], 1);
+  });
+  test('QQBot URL语音拒绝回环地址、明文URL、账号和片段，不上传消息', () async {
+    final received = <Json>[];
+    transport.onEvent = received.add;
+    await transport.start();
+    fixture.message('bad-url-trigger');
+    await until(() => received.isNotEmpty);
+    for (final url in [
+      'https://127.0.0.1/test.wav',
+      'http://8.8.8.8/test.wav',
+      'https://user:pass@8.8.8.8/test.wav',
+      'https://8.8.8.8/test.wav#private',
+    ]) {
+      final before = fixture.bodies.length;
+      await expectLater(
+        transport.call('send_group_msg', {
+          'group_id': 'GROUP_OPENID',
+          '_reply_id': 'bad-url-trigger',
+          'message': [
+            {
+              'type': 'record',
+              'data': {'file': url},
+            },
+          ],
+        }),
+        throwsA(isA<AgentException>()),
+      );
+      expect(fixture.bodies.length, before);
+    }
+  });
 }

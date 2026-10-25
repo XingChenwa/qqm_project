@@ -562,6 +562,7 @@ extension _AgentRuntimeServices on AgentController {
         trigger,
         turn,
         onSent: onSent,
+        onMediaSent: () => mediaReceipts++,
         epoch: epoch,
         requestEvent: object(extra['requestEvent']),
         capabilityPath: strings(extra['_capabilityPath']),
@@ -720,6 +721,7 @@ extension _AgentRuntimeServices on AgentController {
     AgentMessage? trigger,
     AgentTurn? turn, {
     void Function()? onSent,
+    void Function()? onMediaSent,
     int? epoch,
     Json requestEvent = const {},
     List<String> capabilityPath = const [],
@@ -730,6 +732,20 @@ extension _AgentRuntimeServices on AgentController {
     }
     turn?.check();
     switch (operation) {
+      case 'sendMediaUrl':
+        if (s == null ||
+            !{s.key, _pluginChatKey(s)}.contains(text(args['chatKey']))) {
+          throw const AgentException('插件只能向当前会话发送 URL 语音。');
+        }
+        final receipt = await sendAudioUrl(
+          s.key,
+          text(args['url']),
+          turn: turn,
+          replyMessageId: trigger?.id,
+        );
+        onMediaSent?.call();
+        onSent?.call();
+        return receipt;
       case 'log':
         _log(
           {'info', 'warning', 'error'}.contains(args['level'])

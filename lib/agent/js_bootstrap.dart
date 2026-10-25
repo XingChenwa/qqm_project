@@ -283,6 +283,7 @@ const agentJsBootstrap = r'''
         sendText:async(chatKey,text)=>{if(chatKey!==input.chatKey)throw new Error('只允许发送到当前会话');const r=await request('sendText',{text:String(text),chatKey});const sent={type:'text',text:String(text),at:Date.now(),...r};this.sent.push(sent);return sent;},
         sendTextBatch:async(chatKey,texts)=>{if(!Array.isArray(texts)||texts.length>5)throw new Error('每次最多发送 5 条文字');const sent=[];for(const text of texts)sent.push(await sender.sendText(chatKey,text));return {ok:true,sent};},
         sendMedia:async(chatKey,segments)=>{if(chatKey!==input.chatKey)throw new Error('只允许发送到当前会话');if(!Array.isArray(segments)||segments.length<1||segments.length>3)throw new Error('每次仅支持 1–3 条语音');const receipts=[];for(const segment of segments){if(segment?.type!=='record')throw new Error('当前媒体接口支持 record 语音');const r=await request('sendMedia',{type:'record',file:String(segment.data?.file||''),chatKey});this.sent.push({type:'record',...r});receipts.push(r);}return {ok:true,sent:receipts};},
+        sendMediaUrl:async(chatKey,url)=>sender.sendMedia(chatKey,[{type:'record',data:{file:String(url)}}]),
       };
       const recent=(key,{limit=40}={})=>key===input.chatKey?(input.recentEntries||[]).slice(-Math.min(100,Math.max(0,Number(limit)||0))):[];
       const findByMid=(key,id)=>recent(key,{limit:100}).find(e=>String(e.id||e.mid)===String(id))||null;

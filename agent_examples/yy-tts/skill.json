@@ -1,16 +1,17 @@
 {
   "id": "yy-tts",
   "name": "在线角色语音 · YY TTS",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "apiVersion": 1,
   "entry": "index.js",
-  "description": "默认直连 yy.jujiang.js.cn/tts 合成角色语音。插件设置可选择角色与语速；保留 Gradio 兼容模式。",
+  "description": "默认将 yy.jujiang.js.cn/tts 语音链接交给机器人适配器 / 平台获取；音色与语速可配置，也可选择本机下载。",
   "enabledByDefault": false,
   "permissions": [
     "web_fetch"
   ],
   "settings": {
     "mode": "direct",
+    "delivery": "url",
     "character": "甜妹",
     "characterOverride": "",
     "emotion": "default",
@@ -20,6 +21,13 @@
     "timeoutSec": 120
   },
   "configSchema": {
+    "delivery": {
+      "type": "enum",
+      "label": "语音发送方式",
+      "values": ["url", "download"],
+      "options": [{"value":"url","label":"适配器 / 平台获取音频（推荐）"},{"value":"download","label":"管理器本机下载后发送"}],
+      "description": "适配器方式与 segment.record(ttsUrl) 相同，需要新版客户端；OneBot 将链接交给协议端，QQBot 交给 QQ 平台拉取。仅直连模式支持 URL 方式。"
+    },
     "mode": {
       "type": "enum",
       "label": "接口模式",

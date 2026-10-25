@@ -668,12 +668,27 @@ class QqBotAgentTransport extends AgentTransport {
     }
     if (records.isNotEmpty) {
       final file = text(object(records.single['data'])['file']);
-      if (!file.startsWith('base64://') || file.length > 7 * 1024 * 1024) {
-        throw const AgentException('QQBot 语音需要 5 MB 以内的本地数据。');
-      }
-      final audio = AgentAudio(base64Decode(file.substring(9)));
-      if (!{'wav', 'mp3', 'silk'}.contains(audio.extension)) {
-        throw const AgentException('QQBot 语音需使用 WAV、MP3 或 SILK，当前格式需要由合成服务转换。');
+      final uploadBody = <String, dynamic>{
+        'file_type': 3,
+        'srv_send_msg': false,
+      };
+      if (file.startsWith('https://')) {
+        final uri = await validateAgentAudioUrl(_http, file);
+        uploadBody['url'] = uri.toString();
+      } else {
+        if (!file.startsWith('base64://') || file.length > 7 * 1024 * 1024) {
+          throw const AgentException('QQBot 语音需要公共 HTTPS 链接或 5 MB 以内的本地数据。');
+        }
+        final audio = AgentAudio(base64Decode(file.substring(9)));
+        if (!{'wav', 'mp3', 'silk'}.contains(audio.extension)) {
+          throw const AgentException(
+            'QQBot 语音需使用 WAV、MP3 或 SILK，当前格式需要由合成服务转换。',
+          );
+        }
+        uploadBody.addAll({
+          'file_name': audio.name,
+          'file_data': base64Encode(audio.bytes),
+        });
       }
       if (!_current(epoch) || !connected) {
         throw const AgentException('QQBot 已停止，已取消语音上传。');
@@ -681,12 +696,7 @@ class QqBotAgentTransport extends AgentTransport {
       final uploaded = await _api(
         '/v2/${group ? 'groups' : 'users'}/${Uri.encodeComponent(peer)}/files',
         method: 'POST',
-        body: {
-          'file_type': 3,
-          'file_name': audio.name,
-          'file_data': base64Encode(audio.bytes),
-          'srv_send_msg': false,
-        },
+        body: uploadBody,
       );
       final info = text(uploaded['file_info']);
       if (info.isEmpty) throw const AgentException('QQBot 语音上传没有返回 file_info。');

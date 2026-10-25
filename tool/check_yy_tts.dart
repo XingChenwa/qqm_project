@@ -85,13 +85,13 @@ Future<void> main(List<String> args) async {
     final extension = AgentExtension.fromPackage(ZipEncoder().encode(archive));
     final found = await runner.run(
       manifest: extension.manifest,
-      settings: extension.config,
+      settings: {...extension.config, 'delivery': 'download'},
       operation: 'inspect',
       active: () => true,
     );
     final output = await runner.run(
       manifest: extension.manifest,
-      settings: extension.config,
+      settings: {...extension.config, 'delivery': 'download'},
       operation: 'tool',
       scope: 'local-tts-synthesis-test',
       input: {'chatKey': 'private:local-test'},

@@ -22,9 +22,11 @@ function settings() {
   const override=String(value.characterOverride || '').trim();
   const mode=String(value.mode || 'direct');
   if(!['direct','gradio'].includes(mode))throw new Error('请选择直连 TTS 或 Gradio 兼容模式。');
+  const delivery=String(value.delivery || 'url');
+  if(!['url','download'].includes(delivery))throw new Error('请选择适配器取音频或本机下载方式。');
   const character=override || String(value.character || '甜妹').trim();
   if(!character || character.length>128 || /[\x00-\x1f]/.test(character))throw new Error('角色音色名称无效，请在插件设置中重新选择。');
-  return {base,origin:url.origin,mode,character,
+  return {base,origin:url.origin,mode,delivery,character,
     deadline:Date.now()+125000,
     emotion:String(value.emotion || 'default').trim(),speed,language,timeout};
 }
@@ -42,11 +44,16 @@ function resultUrl(c, value) {
   return url.href;
 }
 
+function ttsUrl(c,text) {
+  const url=`${c.base}/tts?character=${encodeURIComponent(c.character)}&text=${encodeURIComponent(text)}&speed=${encodeURIComponent(String(c.speed))}`;
+  if(url.length>7500)throw new Error('朗读文字形成的请求地址过长，请缩短文字后再试。');
+  return url;
+}
+
 async function direct(c,text) {
   // This GET generates audio. Submit ONCE, with only the documented parameters.
   // Do not query /config, join a queue, or fall back by generating it again.
-  const url=`${c.base}/tts?character=${encodeURIComponent(c.character)}&text=${encodeURIComponent(text)}&speed=${encodeURIComponent(String(c.speed))}`;
-  if(url.length>7500)throw new Error('朗读文字形成的请求地址过长，请缩短文字后再试。');
+  const url=ttsUrl(c,text);
   let response;
   try {
     response=await fetch(url,{headers:{Accept:'audio/wav, audio/mpeg, audio/*, application/json'},signal:AbortSignal.timeout(budget(c,120000))});
@@ -226,6 +233,12 @@ export function setup(api) {
         if(!text || text.length > 1000) return fail('朗读文字须为 1–1000 字。');
         if(!ctx?.chatKey || typeof ctx.sender?.sendMedia !== 'function') return fail('请从聊天会话调用朗读工具，当前没有可用的语音发送通道。');
         const c = settings();
+        if(c.mode==='direct' && c.delivery==='url') {
+          if(typeof ctx.sender.sendMediaUrl!=='function')throw new Error('当前客户端尚未支持 URL 语音，请安装提供 URL 语音支持的新版管理器，或在高级设置选择本机下载方式。');
+          const receipt=await ctx.sender.sendMediaUrl(ctx.chatKey,ttsUrl(c,text));
+          if(receipt?.ok!==true || !Array.isArray(receipt.sent) || !receipt.sent.length)throw new Error('没有收到语音发送回执，未确认发送成功。');
+          return {content:`语音已发送。角色：${c.character}；语速：${c.speed}。已通过适配器 / 平台按 URL 获取音频，无需重复发送相同正文。`};
+        }
         let bytes;
         if(c.mode==='direct') {
           bytes=await direct(c,text);

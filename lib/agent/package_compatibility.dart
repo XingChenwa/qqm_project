@@ -1,7 +1,7 @@
 import 'dart:convert';
 import 'models.dart';
 
-const agentPackageHostVersion = 3;
+const agentPackageHostVersion = 4;
 
 /// Describe real host boundaries separately from ZIP validity. A package can be
 /// retained and edited without pretending unavailable services were activated.
@@ -69,10 +69,12 @@ Json packageCompatibility(Json manifest, Json inspection) {
     warnings.add('费用统计读取当前账号、本会话的真实用量。请在 AI 模型高级设置填写输入 / 输出价格；未配置时不会编造金额。');
   }
   if (RegExp(
-    r'\bnew\s+(?:FormData|Blob)\b|\.sendMedia\s*\(',
+    r'\bnew\s+(?:FormData|Blob)\b|\.sendMedia(?:Url)?\s*\(',
   ).hasMatch(sources)) {
     requirements.add('media');
-    warnings.add('语音使用真实二进制上传和发送回执；服务需可访问，音频不超过 5 MB，单次网络请求最长 120 秒。');
+    warnings.add(
+      '语音等待真实协议回执；可按公共 HTTPS 链接交由适配器获取，或上传不超过 5 MB 的音频。URL 的格式与大小限制由协议端执行；本机单次下载最长 120 秒。',
+    );
   }
   final unknownHooks = hooks.where((h) => !supportedHooks.contains(h)).toList();
   if (unknownHooks.isNotEmpty) {

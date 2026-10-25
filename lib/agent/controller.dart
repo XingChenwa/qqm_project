@@ -1907,6 +1907,36 @@ class AgentController extends ChangeNotifier {
     };
   }
 
+  Future<Json> sendAudioUrl(
+    String sessionKey,
+    String url, {
+    AgentTurn? turn,
+    String? replyMessageId,
+  }) async {
+    turn?.check();
+    final uri = await validateAgentAudioUrl(http, url);
+    turn?.check();
+    await send(
+      sessionKey,
+      '',
+      source: 'skill',
+      turn: turn,
+      replyMessageId: replyMessageId,
+      segments: [
+        {
+          'type': 'record',
+          'data': {'file': uri.toString()},
+        },
+      ],
+    );
+    return {
+      'ok': true,
+      'message_id': store.messages(sessionKey).last.id,
+      'type': 'record',
+      'source': 'url',
+    };
+  }
+
   Future<dynamic> readForward(String connectionId, String messageId) async {
     if (messageId.isEmpty || messageId.length > 256) {
       throw const AgentException('聊天记录 ID 无效。');

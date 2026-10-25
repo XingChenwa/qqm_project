@@ -24,6 +24,12 @@ Future<Uint8List> yyTtsBundle() async {
 }
 
 class YyTtsHttp extends AgentHttp {
+  @override
+  Future<List<InternetAddress>> validatePublicUri(Uri uri) async {
+    if (uri.host == 'yy.jujiang.js.cn') return [InternetAddress('203.0.113.1')];
+    return super.validatePublicUri(uri);
+  }
+
   final requests = <({Uri uri, Object? body})>[];
   final submitted = <List<dynamic>>[];
   bool fail = false,
@@ -224,13 +230,16 @@ class YyTtsHttp extends AgentHttp {
 
 class YyTransport extends fixture.FakeAgentTransport {
   bool failVoice = false;
+  bool emptyVoiceId = false;
   YyTransport(super.config);
   @override
   Future<dynamic> call(String action, [Json params = const {}]) async {
-    if (failVoice && jsonEncode(params['message']).contains('base64://')) {
+    final voice = jsonEncode(params['message']).contains('"record"');
+    if (failVoice && voice) {
       throw const AgentException('协议端未返回语音回执');
     }
-    return super.call(action, params);
+    final result = await super.call(action, params);
+    return emptyVoiceId && voice ? <String, dynamic>{} : result;
   }
 }
 
@@ -305,7 +314,11 @@ void main() {
         await agent.saveExtension(
           extension.copyWith(
             enabled: true,
-            settings: {'mode': 'gradio', 'character': '11号'},
+            settings: {
+              'mode': 'gradio',
+              'character': '11号',
+              'delivery': 'download',
+            },
           ),
         );
         await agent.saveProvider(
@@ -367,6 +380,68 @@ void main() {
         );
       }
 
+      test('默认URL语音把编码后的TTS链接交给OneBot，不在本机请求TTS或排队', () async {
+        expect(extension.config['delivery'], 'url');
+        await agent.saveExtension(
+          extension.copyWith(
+            enabled: true,
+            settings: {'character': '甜妹', 'speed': 0.9},
+          ),
+        );
+        http.fail = true;
+        http.metadataFail = true;
+        const value = '这是 AI 的回复 & + 😀';
+        await run('read_aloud', {'text': value});
+        expect(http.requests, isEmpty);
+        final sent = transport.sent.singleWhere(
+          (s) => jsonEncode(s).contains('"record"'),
+        );
+        expect(sent['action'], 'send_group_msg');
+        expect(sent['group_id'], 20002);
+        final segment = object((sent['message'] as List).single);
+        expect(segment['type'], 'record');
+        final uri = Uri.parse(text(object(segment['data'])['file']));
+        expect(uri.path, '/tts');
+        expect(uri.queryParameters, {
+          'character': '甜妹',
+          'text': value,
+          'speed': '0.9',
+        });
+        expect(jsonEncode(model.requests.last), contains('已通过适配器'));
+      });
+      test('URL语音拒绝本地地址，并在协议失败或没有消息ID时不报告成功', () async {
+        for (final scenario in ['private', 'failed', 'no-id']) {
+          model.requests.clear();
+          transport.sent.clear();
+          transport.failVoice = scenario == 'failed';
+          transport.emptyVoiceId = scenario == 'no-id';
+          await agent.saveExtension(
+            extension.copyWith(
+              enabled: true,
+              settings: {
+                if (scenario == 'private') 'apiBase': 'https://127.0.0.1',
+              },
+            ),
+          );
+          await run('read_aloud', {'text': '测试'});
+          expect(http.requests, isEmpty);
+          expect(jsonEncode(model.requests.last), isNot(contains('语音已发送。角色')));
+          expect(
+            jsonEncode(model.requests.last),
+            contains(
+              scenario == 'private'
+                  ? '内网'
+                  : scenario == 'failed'
+                  ? '未返回语音回执'
+                  : '未返回消息 ID',
+            ),
+          );
+          expect(
+            transport.sent.where((s) => jsonEncode(s).contains('"record"')),
+            hasLength(scenario == 'no-id' ? 1 : 0),
+          );
+        }
+      });
       test('默认直连仅请求tts一次，中文/空格/特殊符号正确编码且音色语速来自设置', () async {
         expect(extension.config['mode'], 'direct');
         expect(extension.config['character'], '甜妹');
@@ -377,6 +452,7 @@ void main() {
               'character': '甜妹',
               'speed': 1.25,
               'apiBase': 'https://yy.jujiang.js.cn/tts',
+              'delivery': 'download',
             },
           ),
         );
@@ -404,7 +480,12 @@ void main() {
           model.requests.clear();
           http.directJson = json;
           http.directRedirect = !json;
-          await agent.saveExtension(extension.copyWith(enabled: true));
+          await agent.saveExtension(
+            extension.copyWith(
+              enabled: true,
+              settings: {'delivery': 'download'},
+            ),
+          );
           await run('read_aloud', {'text': '测试'});
           expect(http.requests.map((r) => r.uri.path), [
             '/tts',
@@ -420,7 +501,12 @@ void main() {
           http.fail = !loop;
           http.directRedirect = loop;
           http.directLoop = loop;
-          await agent.saveExtension(extension.copyWith(enabled: true));
+          await agent.saveExtension(
+            extension.copyWith(
+              enabled: true,
+              settings: {'delivery': 'download'},
+            ),
+          );
           await run('read_aloud', {'text': '测试'});
           expect(http.requests, hasLength(1));
           expect(
@@ -436,7 +522,12 @@ void main() {
           http.requests.clear();
           http.invalidAudio = badAudio;
           transport.failVoice = !badAudio;
-          await agent.saveExtension(extension.copyWith(enabled: true));
+          await agent.saveExtension(
+            extension.copyWith(
+              enabled: true,
+              settings: {'delivery': 'download'},
+            ),
+          );
           await run('read_aloud', {'text': '测试'});
           expect(
             jsonEncode(model.requests.last),

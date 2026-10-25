@@ -2,6 +2,23 @@ import 'dart:convert';
 import 'dart:typed_data';
 import '../utils/voice_file.dart';
 import 'models.dart';
+import 'http.dart';
+
+/// Validate before delegating a remote record to a protocol adapter. No local
+/// audio download is made; the adapter/platform enforces its format/size limits.
+Future<Uri> validateAgentAudioUrl(AgentHttp http, String value) async {
+  final uri = Uri.tryParse(value);
+  if (value.length > 8192 ||
+      uri == null ||
+      uri.scheme != 'https' ||
+      uri.userInfo.isNotEmpty ||
+      uri.hasFragment ||
+      uri.host.isEmpty) {
+    throw const AgentException('URL 语音需要不含账号和片段的公共 HTTPS 地址。');
+  }
+  await http.validatePublicUri(uri);
+  return uri;
+}
 
 class AgentAudio {
   final Uint8List bytes;

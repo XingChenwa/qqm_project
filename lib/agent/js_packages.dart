@@ -1658,9 +1658,21 @@ class _PackageEngine {
         if (sendText == null) throw const AgentException('当前上下文不能发送消息。');
         return await sendText!(text(a['text']));
       case 'sendMedia':
-        if (sendMedia == null || a['type'] != 'record') {
+        if (a['type'] != 'record') {
           throw const AgentException('当前仅支持发送语音媒体。');
         }
+        final mediaFile = text(a['file']);
+        if (mediaFile.startsWith('https://')) {
+          if (hostCall == null) {
+            throw const AgentException('当前上下文没有 URL 语音发送通道。');
+          }
+          _check();
+          return hostCall!('sendMediaUrl', {
+            'url': mediaFile,
+            'chatKey': text(a['chatKey']),
+          });
+        }
+        if (sendMedia == null) throw const AgentException('当前上下文不能发送语音。');
         final audio = AgentAudio(
           Uint8List.fromList(base64Decode(_read(_file(text(a['file']))))),
         );
