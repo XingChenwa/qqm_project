@@ -18,6 +18,9 @@ import 'package:qq_bot_manager/core/group_management.dart';
 import 'package:qq_bot_manager/models/group_notice.dart';
 import 'admin_auth.dart';
 import 'voice_export.dart';
+import 'agent_api.dart';
+import 'package:qq_bot_manager/agent/controller.dart';
+import 'package:qq_bot_manager/agent/models.dart' show AgentException;
 import 'package:qq_bot_manager/utils/message_history.dart';
 import 'package:qq_bot_manager/utils/voice_file.dart';
 
@@ -37,6 +40,8 @@ class ManagerServer {
   final _logs = <Map<String, dynamic>>[];
   final _ip = PublicIpService();
   final _voice = VoiceExport();
+  final _agent = AgentController();
+  late final _agentApi = AgentApi(_agent);
   late final HttpServer _server;
   int _revision = 0, _logId = 0, _activeRequests = 0;
   bool _closed = false, _authBusy = false;
@@ -94,6 +99,23 @@ class ManagerServer {
     await result.workspace.ensureRoot();
     result._server = await HttpServer.bind(host, port);
     result._server.autoCompress = true;
+    result._agent.beforeConnect = (profile) {
+      if (profile.isOfficial &&
+          bot.config.appId == profile.selfId &&
+          (bot.isConnecting || bot.connectionRequested)) {
+        throw const AgentException('这个 AppID 正在原工作区连接，请先断开后再启动 Agent。');
+      }
+    };
+    bot.connectionGuard = (appId) =>
+        result._agent.ready &&
+            result._agent.connections.any(
+              (c) =>
+                  c.isOfficial &&
+                  c.selfId == appId &&
+                  result._agent.started(c.id),
+            )
+        ? '这个 AppID 正在 QQ Agent 中运行，请先停止 Agent 连接。'
+        : null;
     bot.refresh();
     bot.addListener(result._changed);
     plugins.addListener(result._changed);
@@ -159,11 +181,14 @@ class ManagerServer {
     request.response.write(jsonEncode(value));
   }
 
-  Future<Map<String, dynamic>> _body(HttpRequest request) async {
+  Future<Map<String, dynamic>> _body(
+    HttpRequest request, {
+    int maxBytes = 1048576,
+  }) async {
     final chunks = <int>[];
     await for (final chunk in request.timeout(const Duration(seconds: 15))) {
-      if (chunks.length + chunk.length > 1048576) {
-        throw const FormatException('请求超过 1 MB');
+      if (chunks.length + chunk.length > maxBytes) {
+        throw const FormatException('请求超过大小限制');
       }
       chunks.addAll(chunk);
     }
@@ -359,6 +384,12 @@ class ManagerServer {
             'text/javascript; charset=utf-8',
           ),
           '/style.css': ('server/web/style.css', 'text/css; charset=utf-8'),
+          '/agent.html': ('server/web/agent.html', 'text/html; charset=utf-8'),
+          '/agent.js': (
+            'server/web/agent.js',
+            'text/javascript; charset=utf-8',
+          ),
+          '/agent.css': ('server/web/agent.css', 'text/css; charset=utf-8'),
           '/logo.png': ('assets/branding/logo.png', 'image/png'),
         };
         final asset = files[route];
@@ -427,6 +458,34 @@ class ManagerServer {
       }
       if (needsEntrance && route != '/api/logout') {
         _json(request, {'error': '请先设置安全入口', 'needsEntrance': true}, 428);
+        return;
+      }
+      if (route.startsWith('/api/agent/')) {
+        try {
+          if (request.method == 'GET') {
+            _json(
+              request,
+              await _agentApi.get(route, request.uri.queryParameters),
+            );
+          } else if (request.method == 'POST') {
+            _json(
+              request,
+              await _agentApi.post(
+                route,
+                await _body(
+                  request,
+                  maxBytes: route == '/api/agent/extension/import'
+                      ? 23 * 1024 * 1024
+                      : 1048576,
+                ),
+              ),
+            );
+          } else {
+            response.statusCode = 405;
+          }
+        } catch (error) {
+          _json(request, {'error': _agent.describeError(error)}, 400);
+        }
         return;
       }
       if (request.method == 'GET') {
@@ -1031,6 +1090,7 @@ class ManagerServer {
     _closed = true;
     _tick?.cancel();
     await _server.close(force: true);
+    await _agent.shutdown();
     await _mutations;
     bot.disconnect();
     await bot.groups.flush();

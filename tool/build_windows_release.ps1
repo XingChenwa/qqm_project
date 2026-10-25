@@ -2,6 +2,7 @@ param(
   [Parameter(Mandatory=$true)][string]$UpdatePublicKey,
   [string]$UpdateBaseUrl = 'https://xingchenwa.github.io/qqm_project',
   [string]$Flutter = 'flutter',
+  [string]$OutputDirectory = '',
   [switch]$Installer,
   [string]$Iscc = 'ISCC.exe'
 )
@@ -21,6 +22,11 @@ if ($versionText -notmatch '(?m)^version:\s*(\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?)\
 $version = $Matches[1]; $buildNumber = $Matches[2]
 $nativeVersion = $version.Split('-')[0]
 $dist = Join-Path $workspace 'dist'
+if ($OutputDirectory) {
+  $candidate = [IO.Path]::GetFullPath((Join-Path $workspace $OutputDirectory))
+  if (-not $candidate.StartsWith($dist+'\',[StringComparison]::OrdinalIgnoreCase)) { throw 'OutputDirectory must be a subdirectory of this workspace dist folder.' }
+  $dist = $candidate
+}
 $output = Join-Path $dist ("qqbotmanager-windows-v$version-build$buildNumber.zip")
 $setup = Join-Path $dist ("qqbotmanager-windows-v$version-build$buildNumber-setup.exe")
 $buildInfo = Join-Path $dist ("qqbotmanager-windows-v$version-build$buildNumber-build-info.json")

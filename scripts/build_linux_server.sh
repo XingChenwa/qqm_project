@@ -6,6 +6,14 @@ filename=$(printf '%s' "$names" | node -pe 'JSON.parse(require("fs").readFileSyn
 stage=$(mktemp -d "${RUNNER_TEMP:-/tmp}/qqm-linux.XXXXXXXX")
 package="$stage/qqbotmanager"
 mkdir -p "$package/server" "$package/assets/branding" "$package/plugins" dist
+# The same embedded QuickJS core as Android/iOS, without Flutter/GTK.
+qjs_package=$(dart run tool/agent_engine_path.dart | tail -1)
+cmake -S tool/native_agent -B "$stage/agent-js" -DCMAKE_BUILD_TYPE=Release -DQJS_PACKAGE="$qjs_package"
+cmake --build "$stage/agent-js" --parallel 2
+mkdir -p "$package/lib"
+cp "$stage/agent-js/libqqm_agent_js.so" "$package/lib/"
+export FLUTTER_QJS_NEXT_LIBRARY="$package/lib/libqqm_agent_js.so"
+flutter test --no-pub --concurrency 2 test/agent_js_packages_test.dart test/agent_local_dependencies_test.dart test/agent_yy_tts_test.dart test/agent_gradio_stream_test.dart
 # Native Dart, no X11, GTK, browser engine or Flutter desktop runtime required.
 dart compile exe server/bin/manager.dart -o "$package/qqm-server"
 cp -R server/web "$package/server/web"
@@ -19,6 +27,9 @@ cp server/qqbotmanager.service "$package/qqbotmanager.service"
 cp server/start.sh "$package/start.sh"
 cp server/install.sh "$package/install.sh"
 cp LICENSE "$package/LICENSE"
+cp "$qjs_package/LICENSE" "$package/lib/QuickJS-bindings-LICENSE.txt"
+# Upstream ships QuickJS's MIT notice in the source header rather than a LICENSE file.
+sed -n '1,/\*\//p' "$qjs_package/cxx/quickjs/quickjs.c" > "$package/lib/QuickJS-LICENSE.txt"
 chmod 755 "$package/qqm-server" "$package/start.sh" "$package/install.sh"
 # The Dart executable contains the SDK's prelinked AOT runtime. Check its real
 # glibc requirements, not the name of the runner's distribution.
@@ -26,6 +37,7 @@ required_glibc=$(LC_ALL=C readelf --version-info "$package/qqm-server" | sed -nE
 [[ -n "$required_glibc" && $(printf '%s\n' "$required_glibc" 2.31 | sort -V | tail -1) == 2.31 ]] || { printf 'Unexpected glibc requirement: %s\n' "$required_glibc" >&2; exit 1; }
 # Ensure the compiled artifact can start before publishing it.
 "$package/qqm-server" --help
+"$package/qqm-server" --check-agent-engine
 "$package/qqm-server" --host 127.0.0.1 --port 23336 --assets "$package" --data "$stage/smoke-data" --no-auto-connect > "$stage/smoke.log" 2>&1 &
 service_pid=$!
 trap 'kill -TERM "$service_pid" 2>/dev/null || true' EXIT

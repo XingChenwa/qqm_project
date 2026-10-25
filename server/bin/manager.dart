@@ -8,6 +8,7 @@ import 'package:qq_bot_manager/runtime/assets_server.dart';
 import 'package:qq_bot_manager/services/storage_service.dart';
 import '../src/admin_auth.dart';
 import '../src/manager_server.dart';
+import 'package:qq_bot_manager/agent/engine_check.dart';
 
 Future<void> main(List<String> args) async {
   try {
@@ -24,6 +25,11 @@ Future<void> main(List<String> args) async {
 }
 
 Future<void> _run(List<String> args) async {
+  if (args.contains('--check-agent-engine')) {
+    await verifyAgentEngine();
+    stdout.writeln('PASS: offline embedded QuickJS / ESM / isolated storage');
+    return;
+  }
   if (args.contains('--help')) {
     stdout.writeln(
       'QQ机器人管理器 Linux 网页服务\n'

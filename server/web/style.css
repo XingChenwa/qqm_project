@@ -334,6 +334,10 @@ label {
   width: 100%;
 }
 .nav {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
   flex-direction: column;
   gap: 5px;
   padding: 10px 0;
@@ -1050,7 +1054,7 @@ dialog textarea {
   }
   .rail nav {
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(5, minmax(0, 1fr));
     gap: 6px;
   }
   .nav {

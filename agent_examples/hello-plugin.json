@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "id": "hello_world",
+  "name": "你好命令",
+  "kind": "plugin",
+  "description": "/hello 内容：不调用模型的问候插件",
+  "commands": [{"prefix": "/hello", "handler": {"type": "template", "text": "你好，{{sender.name}}！{{args.text}}"}}]
+}

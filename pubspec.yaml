@@ -1,7 +1,7 @@
 name: qq_bot_manager
 description: QQ 机器人管理器 - 跨平台 QQ 官方机器人桌面管理工具
 publish_to: 'none'
-version: 1.4.0+34
+version: 1.4.1-beta.1+35
 
 environment:
   sdk: ^3.12.2
@@ -38,6 +38,7 @@ dependencies:
   flutter_inappwebview: ^6.1.5
   url_launcher: ^6.3.2
   image: ^4.5.4
+  html: ^0.15.6
   cached_network_image: ^3.4.1
   audioplayers: ^6.8.1
   qr_flutter: ^4.1.0
@@ -52,6 +53,9 @@ dependencies:
   crypto: ^3.0.7
   cryptography: ^2.7.0
   hetu_script: 0.6.4
+  archive: ^4.5.2
+  ffi: ^2.2.0
+  flutter_qjs_next: 1.5.2
 
   # Desktop support
   window_manager: ^0.5.1
@@ -106,3 +110,6 @@ flutter:
     - plugins/examples/buttons/plugin.json
     - plugins/examples/media/plugin.json
     - docs/plugin-development.md
+    - docs/agent-development.md
+    - docs/licenses/QQ-agent-MIT.txt
+    - docs/licenses/QuickJS-MIT.txt

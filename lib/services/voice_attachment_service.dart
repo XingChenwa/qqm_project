@@ -32,6 +32,30 @@ class VoiceAttachmentService {
             ),
           );
 
+  Future<PreparedVoice> prepareBytes(
+    Uint8List bytes,
+    CancelToken cancel,
+  ) async {
+    if (cancel.isCancelled || bytes.isEmpty || bytes.length > maxBytes) {
+      throw const FormatException('语音数据为空、超过 20 MB 或任务已取消');
+    }
+    final extension = voiceFileExtension(bytes);
+    if (extension == 'bin') throw const FormatException('无法识别语音格式');
+    final directory = await (await getTemporaryDirectory()).createTemp(
+      'qqm-voice-',
+    );
+    try {
+      if (cancel.isCancelled) throw const FormatException('语音任务已取消');
+      final source = await File(
+        p.join(directory.path, 'source.$extension'),
+      ).writeAsBytes(bytes, flush: true);
+      return PreparedVoice(directory, source, extension);
+    } catch (_) {
+      await directory.delete(recursive: true);
+      rethrow;
+    }
+  }
+
   Future<PreparedVoice> prepare(
     ReceivedAttachment attachment,
     CancelToken cancel, {

@@ -5,6 +5,7 @@ import { resolve, join } from "node:path";
 import { spawn } from "node:child_process";
 import { createRequire } from "node:module";
 import assert from "node:assert/strict";
+import { verifyAgent } from "./agent_browser.mjs";
 const require = createRequire(import.meta.url);
 const { chromium } = require(process.env.QQM_PLAYWRIGHT || "playwright");
 const data = await mkdtemp(join(tmpdir(), "qqm-server-browser-"));
@@ -537,6 +538,7 @@ try {
   await page.reload({ waitUntil: "networkidle" });
   await page.locator("#app").waitFor({ state: "visible" });
   assert.equal(await page.locator("html").getAttribute("data-theme"), "dark");
+  await verifyAgent(page, shots);
   await page.locator("[data-page=settings]").click();
   await page.locator("#settings-logout").click();
   await page.locator("#login-view").waitFor({ state: "visible" });

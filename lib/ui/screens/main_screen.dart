@@ -38,6 +38,7 @@ import 'settings_screen.dart';
 import 'notifications_screen.dart';
 import 'group_settings_screen.dart';
 import 'chat_history_screen.dart';
+import '../../agent/ui/workspace.dart';
 
 class MainScreen extends StatefulWidget {
   final VoidCallback toggleTheme;
@@ -611,6 +612,13 @@ class _MainScreenState extends State<MainScreen> {
                   _navItem(2, Icons.chat_bubble_outline_rounded, '聊天会话'),
                   _navItem(3, Icons.extension_rounded, '插件'),
                   _navItem(4, Icons.receipt_long_rounded, '日志'),
+                  const Divider(indent: 16, endIndent: 16),
+                  _navItem(
+                    7,
+                    Icons.auto_awesome_outlined,
+                    'QQ Agent',
+                    onTap: _openAgent,
+                  ),
                   _navItem(
                     6,
                     Icons.settings_rounded,
@@ -785,6 +793,11 @@ class _MainScreenState extends State<MainScreen> {
     }
   }
 
+  Future<void> _openAgent() => Navigator.push(
+    context,
+    MaterialPageRoute(builder: (_) => const AgentWorkspace()),
+  );
+
   Future<void> _chooseBot(BotClient bot) async {
     final selected = await showModalBottomSheet<String>(
       context: context,
@@ -913,6 +926,7 @@ class _MainScreenState extends State<MainScreen> {
       onNewChat: _newSession,
       onHistory: chatting ? () => _openHistory(_selectedSession!) : null,
       onNavigate: _navigateTo,
+      onAgent: _openAgent,
       body: Column(
         children: [
           if (bot.isConnecting) _progressBar(bot),

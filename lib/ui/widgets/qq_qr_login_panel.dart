@@ -13,11 +13,14 @@ class QqQrLoginPanel extends StatefulWidget {
   final Future<bool> Function(QrBotCredentials credentials) onConfirm;
   final QqQrLoginService Function()? serviceFactory;
   final bool enabled;
+  final String? confirmationDescription, introduction;
   const QqQrLoginPanel({
     super.key,
     required this.onConfirm,
     this.serviceFactory,
     this.enabled = true,
+    this.confirmationDescription,
+    this.introduction,
   });
 
   @override
@@ -103,8 +106,9 @@ class _QqQrLoginPanelState extends State<QqQrLoginPanel>
         context,
         builder: (dialog) => AlertDialog(
           title: const Text('扫码前请确认'),
-          content: const Text(
-            '在 QQ 授权后会重置该机器人的密钥，其他使用旧密钥的程序需要同步更新。\n\n授权成功后，本应用会自动保存新密钥、切换到对应 AppID 并连接。其他机器人的配置和聊天记录不会被删除。取消本地等待不能撤销已经完成的 QQ 授权。',
+          content: Text(
+            widget.confirmationDescription ??
+                '在 QQ 授权后会重置该机器人的密钥，其他使用旧密钥的程序需要同步更新。\n\n授权成功后，本应用会自动保存新密钥、切换到对应 AppID 并连接。其他机器人的配置和聊天记录不会被删除。取消本地等待不能撤销已经完成的 QQ 授权。',
           ),
           actions: [
             TextButton(
@@ -175,9 +179,10 @@ class _QqQrLoginPanelState extends State<QqQrLoginPanel>
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text(
-          '用手机 QQ 授权后自动保存并连接机器人。授权会重置机器人密钥，不是个人 QQ 账号登录。',
-          style: TextStyle(fontSize: 13),
+        Text(
+          widget.introduction ??
+              '用手机 QQ 授权后自动保存并连接机器人。授权会重置机器人密钥，不是个人 QQ 账号登录。',
+          style: const TextStyle(fontSize: 13),
         ),
         const SizedBox(height: 14),
         if (code != null)

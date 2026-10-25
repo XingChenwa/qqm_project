@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width,initial-scale=1,viewport-fit=cover"
+    />
+    <meta name="color-scheme" content="light dark" />
+    <title>QQ Agent · 独立工作区</title>
+    <link rel="icon" href="./logo.png" />
+    <link rel="stylesheet" href="./agent.css" />
+    <script defer src="./agent.js"></script>
+  </head>
+  <body>
+    <header>
+      <a class="back" href="./">← 官方机器人</a>
+      <div>
+        <h1>QQ Agent</h1>
+        <p>QQBOT / ONEBOT 11 · 独立 AI 工作区</p>
+      </div>
+      <button id="refresh">刷新</button>
+    </header>
+    <div id="status" role="status">正在读取 Agent 工作区…</div>
+    <nav id="tabs" aria-label="Agent 导航"></nav>
+    <main id="page"></main>
+    <dialog id="editor">
+      <form id="form">
+        <div class="dialog-heading">
+          <h2 id="editor-title"></h2>
+          <button type="button" id="cancel" aria-label="关闭">×</button>
+        </div>
+        <p id="editor-help"></p>
+        <div id="fields"></div>
+        <p id="form-error" role="alert"></p>
+        <footer>
+          <button type="submit" class="primary" id="save">保存</button>
+        </footer>
+      </form>
+    </dialog>
+    <dialog id="notice">
+      <h2>QQ Agent</h2>
+      <pre id="notice-text"></pre>
+      <button id="notice-close" class="primary">知道了</button>
+    </dialog>
+  </body>
+</html>

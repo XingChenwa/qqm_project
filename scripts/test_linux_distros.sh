@@ -9,7 +9,9 @@ for image in ubuntu:22.04 debian:12-slim rockylinux:9; do
     -v "$package:/app:ro" --entrypoint /bin/bash "$image" -s <<'SMOKE'
 set -euo pipefail
 cd /app
+export FLUTTER_QJS_NEXT_LIBRARY=/app/lib/libqqm_agent_js.so
 ./qqm-server --help >/dev/null
+./qqm-server --check-agent-engine
 ./qqm-server --data /tmp/auth --access-link http://127.0.0.1:23336 > /tmp/private-link
 test -s /tmp/auth/setup-token.txt
 test ! -e /tmp/auth/admin-auth.json

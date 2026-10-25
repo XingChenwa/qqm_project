@@ -553,7 +553,84 @@ Future<void> main() async {
       (await request('/api/state')).data['sessions'].length == 1,
       '切回后恢复原会话',
     );
+    check(
+      (await request('/api/agent/state', header: false)).code == 403,
+      'Agent API 也必须验证自定义请求头',
+    );
+    check(
+      (await request(
+            '/api/agent/state',
+            foreignOrigin: 'https://foreign.invalid',
+          )).code ==
+          403,
+      'Agent API 拒绝跨站来源',
+    );
+    final agentState = await request('/api/agent/state');
+    check(
+      agentState.code == 200 && agentState.data['connections'].isEmpty,
+      'Agent 独立且默认无账号',
+    );
+    check(
+      (agentState.data['extensions'] as List).every(
+        (v) => v['enabled'] == false,
+      ),
+      'Agent 示例扩展默认关闭',
+    );
+    check(
+      (await request('/agent.html')).code == 200 &&
+          (await request('/agent.js')).code == 200,
+      '独立 Agent 网页资源可访问',
+    );
+    check(
+      (await request(
+            '/api/agent/connection/save',
+            body: {
+              'value': {
+                'id': 'fixture-onebot',
+                'name': '离线 Agent',
+                'selfId': '10001',
+                'mode': 'forward',
+                'url': 'ws://127.0.0.1:1/',
+                'token': 'agent-fixture-token',
+                'presetId': 'assistant',
+              },
+            },
+          )).code ==
+          200,
+      'Agent 连接配置保存',
+    );
+    final agentSession = await request(
+      '/api/agent/session/open',
+      body: {
+        'id': 'fixture-onebot',
+        'kind': 'group',
+        'peerId': '10001',
+        'name': 'Agent 群',
+      },
+    );
+    check(agentSession.code == 200, 'Agent 单独创建会话');
+    check(
+      (await request(
+        '/api/agent/messages?session=${Uri.encodeQueryComponent(agentSession.data['session']['key'])}',
+      )).data['messages'].isEmpty,
+      'Agent 不读取原官方聊天',
+    );
+    final visibleAgent = await request('/api/agent/state');
+    check(
+      !visibleAgent.text.contains('agent-fixture-token') &&
+          visibleAgent.data['sessions'].length == 1,
+      'Agent 返回独立会话且不返回密钥',
+    );
+    check(
+      (await request('/api/state')).data['sessions'].length == 1 &&
+          storage.getBotConfig().appId == '10000001',
+      'Agent 操作不改变官方账号或会话',
+    );
     check((await request('/api/logout', body: {})).code == 200, '退出登录');
+    check(
+      (await request('/api/agent/state')).code == 401,
+      '退出后 Agent API 同样失效',
+    );
     check((await request('/api/state')).code == 401, '退出后接口失效');
 
     // Upgrade an existing password-only installation. An unauthenticated

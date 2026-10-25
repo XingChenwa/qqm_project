@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:audioplayers/audioplayers.dart';
 import 'package:dio/dio.dart';
@@ -12,10 +13,12 @@ import 'app_dialogs.dart';
 class VoiceAttachment extends StatefulWidget {
   final ReceivedAttachment attachment;
   final bool allowLocalFile;
+  final Uint8List? inlineBytes;
   const VoiceAttachment({
     super.key,
     required this.attachment,
     this.allowLocalFile = false,
+    this.inlineBytes,
   });
   @override
   State<VoiceAttachment> createState() => _VoiceAttachmentState();
@@ -31,16 +34,18 @@ class _VoiceAttachmentState extends State<VoiceAttachment> {
   bool _busy = false, _playing = false;
   Duration _position = Duration.zero, _duration = Duration.zero;
 
-  Future<PreparedVoice> _prepare() => _voice ??= _service
-      .prepare(
-        widget.attachment,
-        _cancel,
-        allowLocalFile: widget.allowLocalFile,
-      )
-      .catchError((Object error) {
-        _voice = null;
-        throw error;
-      });
+  Future<PreparedVoice> _prepare() => _voice ??=
+      (widget.inlineBytes != null
+              ? _service.prepareBytes(widget.inlineBytes!, _cancel)
+              : _service.prepare(
+                  widget.attachment,
+                  _cancel,
+                  allowLocalFile: widget.allowLocalFile,
+                ))
+          .catchError((Object error) {
+            _voice = null;
+            throw error;
+          });
 
   @override
   void dispose() {

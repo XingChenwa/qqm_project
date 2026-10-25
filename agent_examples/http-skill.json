@@ -1,0 +1,15 @@
+{
+  "schema": 1,
+  "id": "knowledge_search",
+  "name": "知识库查询示例",
+  "kind": "skill",
+  "description": "请将示例域名替换成自己的查询服务，并在私有参数配置 API_KEY",
+  "allowedOrigins": ["https://your-service.example"],
+  "prompt": "需要知识库资料时调用 knowledge_search，不编造查询结果。",
+  "tools": [{
+    "name": "knowledge_search",
+    "description": "查询用户配置的知识库",
+    "parameters": {"type": "object", "properties": {"query": {"type": "string", "description": "搜索词"}}, "required": ["query"], "additionalProperties": false},
+    "handler": {"type": "http", "method": "GET", "url": "https://your-service.example/search", "headers": {"Authorization": "Bearer {{secret.API_KEY}}"}, "query": {"q": "{{args.query}}"}, "resultPath": "data.answer"}
+  }]
+}

@@ -40,6 +40,13 @@ void main() {
     bot = BotClient(storage, apiService: api, webSocketService: gateway);
   });
   tearDown(() => bot.dispose());
+  test('Agent 连接占用同 AppID 时，原工作区在网络请求前停止连接', () async {
+    bot.connectionGuard = (_) => '这个 AppID 正在 QQ Agent 中运行';
+    expect(await bot.connect(), isFalse);
+    expect(bot.isConnecting, isFalse);
+    expect(bot.connectionError, contains('QQ Agent'));
+    expect(gateway.connectionRequested, isFalse);
+  });
 
   test('回复序号按原消息分别递增，切回旧消息不会重复使用序号', () async {
     final a = incoming('a');

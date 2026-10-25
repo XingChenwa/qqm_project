@@ -2,7 +2,7 @@
 # See https://dart.dev/tools/pub/glossary#lockfile
 packages:
   archive:
-    dependency: transitive
+    dependency: "direct main"
     description:
       name: archive
       sha256: "0d58d1fa1fddf6588251ccf2819f3fb3b6d0452c1b2813ac7413a05592bfbefe"
@@ -185,6 +185,14 @@ packages:
       url: "https://pub.flutter-io.cn"
     source: hosted
     version: "2.9.0"
+  csslib:
+    dependency: transitive
+    description:
+      name: csslib
+      sha256: "09bad715f418841f976c77db72d5398dc1253c21fb9c0c7f0b0b985860b2d58e"
+      url: "https://pub.flutter-io.cn"
+    source: hosted
+    version: "1.0.2"
   cupertino_icons:
     dependency: "direct main"
     description:
@@ -234,7 +242,7 @@ packages:
     source: hosted
     version: "2.0.0"
   ffi:
-    dependency: transitive
+    dependency: "direct main"
     description:
       name: ffi
       sha256: "6d7fd89431262d8f3125e81b50d3847a091d846eafcd4fdb88dd06f36d705a45"
@@ -411,6 +419,14 @@ packages:
       url: "https://pub.flutter-io.cn"
     source: hosted
     version: "2.0.35"
+  flutter_qjs_next:
+    dependency: "direct main"
+    description:
+      name: flutter_qjs_next
+      sha256: e5fd66c5abdb3cb81cb6700e3cc203abb5353b244ec8e6a16ba0304faf1f21b5
+      url: "https://pub.flutter-io.cn"
+    source: hosted
+    version: "1.5.2"
   flutter_test:
     dependency: "direct dev"
     description: flutter
@@ -453,6 +469,14 @@ packages:
       url: "https://pub.flutter-io.cn"
     source: hosted
     version: "2.0.2"
+  html:
+    dependency: "direct main"
+    description:
+      name: html
+      sha256: "43b67b8f43321ab066817dfac5619596c98bb1b61624e77203bb4351785f9699"
+      url: "https://pub.flutter-io.cn"
+    source: hosted
+    version: "0.15.7"
   http:
     dependency: transitive
     description:

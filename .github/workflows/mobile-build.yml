@@ -61,7 +61,7 @@ jobs:
         run: flutter config --jdk-dir "$JAVA_HOME_17_X64"
       - run: flutter pub get
       - run: flutter analyze --no-pub
-      - run: flutter test --no-pub
+      - run: flutter test --no-pub --concurrency 2
       - name: 配置固定安卓签名
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -115,7 +115,7 @@ jobs:
       - run: xcodebuild -version
       - run: flutter pub get
       - run: flutter analyze --no-pub
-      - run: flutter test --no-pub
+      - run: flutter test --no-pub --concurrency 2
       - name: 编译 Universal macOS 应用并打包 DMG
         run: bash scripts/build_macos_package.sh
       - name: 保存 macOS 安装包（临时签名，未公证）
@@ -149,7 +149,7 @@ jobs:
       - run: xcodebuild -version
       - run: flutter pub get
       - run: flutter analyze --no-pub
-      - run: flutter test --no-pub
+      - run: flutter test --no-pub --concurrency 2
       - name: 编译 iPhone 真机应用并打包未签名 IPA
         run: bash scripts/build_unsigned_ipa.sh
       - name: 保存未签名 IPA（安装前必须重新签名）
@@ -181,7 +181,7 @@ jobs:
       - run: flutter config --enable-windows-desktop
       - run: flutter pub get
       - run: flutter analyze --no-pub
-      - run: flutter test --no-pub
+      - run: flutter test --no-pub --concurrency 2
       - name: 准备 Inno Setup
         shell: pwsh
         run: ./tool/prepare_inno.ps1

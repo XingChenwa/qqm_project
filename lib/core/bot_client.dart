@@ -186,6 +186,7 @@ class BotClient extends ChangeNotifier {
 
   Function(MessageModel)? onMessageReceived;
   Function(String log)? onLog;
+  String? Function(String appId)? connectionGuard;
 
   BotClient(
     this._storage, {
@@ -371,6 +372,14 @@ class BotClient extends ChangeNotifier {
   /// Connect to QQ Bot. Returns true on success.
   Future<bool> connect() async {
     if (_isConnecting) return false;
+    final conflict = connectionGuard?.call(_config.appId);
+    if (conflict != null) {
+      _connectionError = conflict;
+      _connectionStatus = '连接未启动';
+      _addLog(conflict);
+      notifyListeners();
+      return false;
+    }
     final attempt = ++_connectionAttempt;
     _isConnecting = true;
     _connectionError = '';

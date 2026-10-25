@@ -266,6 +266,8 @@ function openBrowser(value) {
 }
 document.addEventListener("click", (event) => {
   const anchor = event.target.closest("a");
+  // This is an application workspace, not an external chat link.
+  if (anchor && anchor === $("agent-workspace")) return;
   if (!anchor || anchor.classList.contains("brand") || anchor.download) return;
   const url = safeUrl(anchor.href);
   if (url) {

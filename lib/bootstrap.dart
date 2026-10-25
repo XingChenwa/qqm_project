@@ -17,6 +17,8 @@ import 'services/storage_service.dart';
 import 'core/bot_client.dart';
 import 'core/plugin_manager.dart';
 import 'utils/platforms.dart';
+import 'agent/controller.dart';
+import 'agent/models.dart' show AgentException;
 
 Future<Widget> initializeApplication(
   void Function(String) report, {
@@ -57,6 +59,23 @@ Future<Widget> initializeApplication(
     ),
   );
   final onboarding = OnboardingPreferences(preferences);
+  // The Agent database and sockets are lazy: opening the official workspace
+  // never initializes or connects a OneBot account.
+  final agent = AgentController();
+  agent.beforeConnect = (profile) {
+    if (profile.isOfficial &&
+        botClient.config.appId == profile.selfId &&
+        (botClient.isConnecting || botClient.connectionRequested)) {
+      throw const AgentException('这个 AppID 正在原工作区连接，请先断开后再启动 Agent。');
+    }
+  };
+  botClient.connectionGuard = (appId) =>
+      agent.ready &&
+          agent.connections.any(
+            (c) => c.isOfficial && c.selfId == appId && agent.started(c.id),
+          )
+      ? '这个 AppID 正在 QQ Agent 中运行，请先停止 Agent 连接。'
+      : null;
 
   DesktopWindowController? desktopWindow;
   if (isDesktopPlatform) {
@@ -64,6 +83,7 @@ Future<Widget> initializeApplication(
     desktopWindow = DesktopWindowController(
       storageService,
       beforeExit: () async {
+        await agent.shutdown();
         botClient.disconnect();
         await botClient.groups.flush();
         await storageService.flush();
@@ -77,6 +97,7 @@ Future<Widget> initializeApplication(
 
   return MultiProvider(
     providers: [
+      ChangeNotifierProvider<AgentController>(create: (_) => agent),
       Provider<StorageService>.value(value: storageService),
       Provider<OnboardingPreferences>.value(value: onboarding),
       Provider<AuxiliaryWindows>(create: (_) => AuxiliaryWindows()),

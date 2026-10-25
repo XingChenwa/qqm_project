@@ -15,6 +15,7 @@ class MobileWorkspace extends StatelessWidget {
   final ValueChanged<int> onNavigate;
   final VoidCallback? onNotifications;
   final VoidCallback? onHistory;
+  final VoidCallback? onAgent;
   final int notificationCount;
   final String settingsLabel;
 
@@ -38,6 +39,7 @@ class MobileWorkspace extends StatelessWidget {
     this.avatarUrl,
     this.onNotifications,
     this.onHistory,
+    this.onAgent,
     this.notificationCount = 0,
     this.settingsLabel = '设置',
   });
@@ -133,6 +135,12 @@ class MobileWorkspace extends StatelessWidget {
                   ),
                 ),
           actions: [
+            if (!chatting && onAgent != null)
+              IconButton(
+                tooltip: 'QQ Agent 独立工作区',
+                onPressed: onAgent,
+                icon: const Icon(Icons.auto_awesome_outlined, size: 22),
+              ),
             if (chatting && onHistory != null)
               IconButton(
                 tooltip: '聊天记录',
