@@ -12,4 +12,8 @@ if(MSVC)
   target_compile_options(qqm_agent_js PRIVATE /utf-8 /wd4576 /wd4244)
 else()
   target_link_libraries(qqm_agent_js PRIVATE m dl pthread)
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    # Do not require the build runner's newer libstdc++ on supported servers.
+    target_link_options(qqm_agent_js PRIVATE -static-libstdc++ -static-libgcc)
+  endif()
 endif()

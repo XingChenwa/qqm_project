@@ -10,6 +10,8 @@ for image in ubuntu:22.04 debian:12-slim rockylinux:9; do
 set -euo pipefail
 cd /app
 export FLUTTER_QJS_NEXT_LIBRARY=/app/lib/libqqm_agent_js.so
+# Print only public loader diagnostics, so future ABI failures are actionable.
+if command -v ldd >/dev/null; then ldd "$FLUTTER_QJS_NEXT_LIBRARY"; fi
 ./qqm-server --help >/dev/null
 ./qqm-server --check-agent-engine
 ./qqm-server --data /tmp/auth --access-link http://127.0.0.1:23336 > /tmp/private-link

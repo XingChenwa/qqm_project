@@ -9,6 +9,10 @@ import {packageNames} from './package_names.mjs';
 import {releaseNotesSummary} from './release_notes.mjs';
 
 const command = process.argv[2];
+// A validated recovery supplies the original event/clients and a repaired Linux
+// packaging run. Do not try to overwrite Actions' reserved GITHUB_* variables.
+const eventPath = process.env.QQM_RELEASE_EVENT_PATH ?? process.env.GITHUB_EVENT_PATH;
+const sourceRun = process.env.QQM_SOURCE_RUN_ID ?? process.env.GITHUB_RUN_ID;
 const publicKey = process.env.UPDATE_PUBLIC_KEY ?? '';
 const secret = process.env.UPDATE_SIGNING_PRIVATE_KEY ?? '';
 const assert = (condition,message) => {if (!condition) throw new Error(message);};
@@ -80,8 +84,8 @@ try {
   if(command==='preflight') {
     const info=readVersion(await readFile('pubspec.yaml','utf8'),await readFile('lib/utils/constants.dart','utf8'));
     assert((process.env.UPDATE_BASE_URL??pagesUrl).replace(/\/$/,'')===pagesUrl,'更新地址必须使用项目原仓库的 Pages');
-    if(process.env.GITHUB_EVENT_NAME==='release') {
-      const {release}=await json(process.env.GITHUB_EVENT_PATH);releaseMatches(release,info);
+    if(process.env.GITHUB_EVENT_NAME==='release' || process.env.QQM_RELEASE_EVENT_PATH) {
+      const {release}=await json(eventPath);releaseMatches(release,info);
       assert(!api('').private,'公开下载需要先由仓库所有者将项目设为公开；流程不会自动改变可见性');
       const live = api('releases/'+release.id); releaseMatches(live,info);
       assert(releaseChannel(live)===releaseChannel(release),'构建时 Release 渠道发生变化，请重新发布');
@@ -95,7 +99,7 @@ try {
   } else if(command==='publish') {
     assert(process.env.WEBSITE_DIRECTORY,'缺少 docs 分支 checkout，拒绝半配置发布');
     const info=readVersion(await readFile('pubspec.yaml','utf8'),await readFile('lib/utils/constants.dart','utf8'));
-    const {release:eventRelease}=await json(process.env.GITHUB_EVENT_PATH);releaseMatches(eventRelease,info);
+    const {release:eventRelease}=await json(eventPath);releaseMatches(eventRelease,info);
     const release=api('releases/'+eventRelease.id);releaseMatches(release,info);
     assert(releaseChannel(release)===releaseChannel(eventRelease),'构建时 Release 渠道发生变化，拒绝混用安装包');
     signingKeys(secret,publicKey);
@@ -103,7 +107,8 @@ try {
     assert(!previous||info.build>previous.data.build||(info.build===previous.data.build&&info.tag===previous.data.tag),'拒绝发布更低版本或重复构建号');
     const packages=resolve('build/release-packages');await mkdir(packages,{recursive:true});
     const definitions=assetDefinitions(info.version,info.build);
-    gh('run','download',process.env.GITHUB_RUN_ID,'--repo',repository,'--dir',packages,...definitions.flatMap(a=>['--name',a.directory]));
+    assert(/^[1-9]\d*$/.test(sourceRun ?? ''), '客户端构建运行 ID 无效');
+    gh('run','download',sourceRun,'--repo',repository,'--dir',packages,...definitions.flatMap(a=>['--name',a.directory]));
     const notes=releaseNotesSummary(eventRelease.body);
     const data={schema:2,repository,tag:info.tag,version:info.version,build:info.build,channel:releaseChannel(release),
       published_at:Math.floor(Date.parse(eventRelease.published_at)/1000),releases:[]};
@@ -122,7 +127,9 @@ try {
     const linuxNames = packageNames(info.version, info.build);
     const linuxDirectory = join(packages, linuxNames.linux_artifact);
     await mkdir(linuxDirectory, {recursive:true});
-    gh('run','download',process.env.GITHUB_RUN_ID,'--repo',repository,'--dir',linuxDirectory,'--name',linuxNames.linux_artifact);
+    const linuxRun = process.env.LINUX_ARTIFACT_RUN_ID ?? sourceRun;
+    assert(/^[1-9]\d*$/.test(linuxRun ?? ''), 'Linux 构建运行 ID 无效');
+    gh('run','download',linuxRun,'--repo',repository,'--dir',linuxDirectory,'--name',linuxNames.linux_artifact);
     const linuxPath = join(linuxDirectory, linuxNames.linux_file);
     const linuxHash = sha256(await readFile(linuxPath));
     const linuxChecksum = join(linuxDirectory, linuxNames.linux_checksum);

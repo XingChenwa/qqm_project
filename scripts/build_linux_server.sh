@@ -8,10 +8,10 @@ package="$stage/qqbotmanager"
 mkdir -p "$package/server" "$package/assets/branding" "$package/plugins" dist
 # The same embedded QuickJS core as Android/iOS, without Flutter/GTK.
 qjs_package=$(dart run tool/agent_engine_path.dart | tail -1)
-cmake -S tool/native_agent -B "$stage/agent-js" -DCMAKE_BUILD_TYPE=Release -DQJS_PACKAGE="$qjs_package"
-cmake --build "$stage/agent-js" --parallel 2
+bash scripts/build_linux_agent.sh "$qjs_package" "$stage/agent-js"
 mkdir -p "$package/lib"
 cp "$stage/agent-js/libqqm_agent_js.so" "$package/lib/"
+cp "$stage/agent-js/GCC-runtime-LICENSE.txt" "$package/lib/"
 export FLUTTER_QJS_NEXT_LIBRARY="$package/lib/libqqm_agent_js.so"
 flutter test --no-pub --concurrency 2 test/agent_js_packages_test.dart test/agent_local_dependencies_test.dart test/agent_yy_tts_test.dart test/agent_gradio_stream_test.dart
 # Native Dart, no X11, GTK, browser engine or Flutter desktop runtime required.

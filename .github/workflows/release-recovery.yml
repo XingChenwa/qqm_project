@@ -1,0 +1,89 @@
+name: 恢复未完成的版本发布
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 已发布但尚无签名清单的标签
+        required: true
+        type: string
+      source_run:
+        description: 同一标签四端客户端已成功的原构建运行 ID
+        required: true
+        type: string
+      linux_run:
+        description: 当前 main 仅修复包装后成功的 Linux 构建运行 ID
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  UPDATE_PUBLIC_KEY: EmpeSLtZms6Uz7D61o6E3gQzBytIPqsNU+dSq47M9ko=
+  UPDATE_BASE_URL: https://xingchenwa.github.io/qqm_project
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    concurrency:
+      group: project-website-sync
+      cancel-in-progress: false
+    permissions:
+      actions: read
+      contents: write
+      pages: write
+    outputs:
+      tag: ${{ steps.recovery.outputs.tag }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - run: node --test tool/tests/release_recovery.test.mjs
+      - name: 校验原提交、四端产物及仅包装修复的 Linux 产物
+        id: recovery
+        run: node tool/recover_release.mjs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          SOURCE_RUN_ID: ${{ inputs.source_run }}
+          LINUX_RUN_ID: ${{ inputs.linux_run }}
+          RELEASE_EVENT_PATH: ${{ runner.temp }}/qqm-recovery-release.json
+      - name: 检出同仓库的网站分支
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: docs
+          path: build/website
+          persist-credentials: true
+      - name: 复用原产物并完成签名和首页同步，禁止覆盖
+        run: |
+          node tool/github_release.mjs preflight
+          node tool/github_release.mjs publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          QQM_RELEASE_EVENT_PATH: ${{ runner.temp }}/qqm-recovery-release.json
+          QQM_SOURCE_RUN_ID: ${{ steps.recovery.outputs.source_run }}
+          LINUX_ARTIFACT_RUN_ID: ${{ steps.recovery.outputs.linux_run }}
+          WEBSITE_DIRECTORY: build/website
+          UPDATE_SIGNING_PRIVATE_KEY: ${{ secrets.UPDATE_SIGNING_PRIVATE_KEY }}
+
+  gitcode:
+    name: 同步 GitCode 国内安装包与签名清单
+    needs: publish
+    runs-on: macos-15
+    timeout-minutes: 25
+    concurrency:
+      group: project-gitcode-sync
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - run: node tool/mirror_github_release.mjs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITCODE_TOKEN: ${{ secrets.GITCODE_TOKEN }}
+          UPDATE_PUBLIC_KEY: ${{ env.UPDATE_PUBLIC_KEY }}
+          RELEASE_TAG: ${{ needs.publish.outputs.tag }}
