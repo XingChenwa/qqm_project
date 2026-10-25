@@ -30,7 +30,10 @@ class YyTtsHttp extends AgentHttp {
       invalidAudio = false,
       incomplete = false,
       useQueue = true,
-      metadataFail = false;
+      metadataFail = false,
+      directJson = false,
+      directRedirect = false,
+      directLoop = false;
   final sessions = <String, String>{};
   @override
   Future<({Uint8List bytes, int status, Map<String, String> headers})>
@@ -50,7 +53,41 @@ class YyTtsHttp extends AgentHttp {
       isNot(contains('authorization')),
     );
     Object result;
-    if (uri.path == '/config') {
+    if (uri.path.endsWith('/tts')) {
+      expect(method, 'GET');
+      expect(body, isNull);
+      expect(uri.queryParameters.keys.toSet(), {'character', 'text', 'speed'});
+      if (fail) {
+        return (bytes: Uint8List(0), status: 503, headers: <String, String>{});
+      }
+      if (directRedirect) {
+        return (
+          bytes: Uint8List(0),
+          status: 302,
+          headers: {
+            'location': directLoop
+                ? '/%74ts?text=again'
+                : '/generated/voice.wav',
+          },
+        );
+      }
+      if (directJson) {
+        return (
+          bytes: Uint8List.fromList(
+            utf8.encode('{"audio_url":"/generated/voice.wav"}'),
+          ),
+          status: 200,
+          headers: {'content-type': 'application/json'},
+        );
+      }
+      return (
+        bytes: invalidAudio
+            ? Uint8List.fromList(utf8.encode('<html>not audio</html>'))
+            : sampleWav(),
+        status: 200,
+        headers: {'content-type': invalidAudio ? 'text/html' : 'audio/wav'},
+      );
+    } else if (uri.path == '/config') {
       if (metadataFail) {
         return (
           bytes: Uint8List.fromList(utf8.encode('{}')),
@@ -165,7 +202,8 @@ class YyTtsHttp extends AgentHttp {
         status: 200,
         headers: {'content-type': 'text/event-stream'},
       );
-    } else if (uri.path.startsWith('/file=')) {
+    } else if (uri.path.startsWith('/file=') ||
+        uri.path == '/generated/voice.wav') {
       return (
         bytes: invalidAudio
             ? Uint8List.fromList(utf8.encode('<html>not audio</html>'))
@@ -264,7 +302,12 @@ void main() {
         await agent.initialize();
         await agent.importPackage(await yyTtsBundle());
         extension = agent.extensions.firstWhere((e) => e.id == 'yy-tts');
-        await agent.saveExtension(extension.copyWith(enabled: true));
+        await agent.saveExtension(
+          extension.copyWith(
+            enabled: true,
+            settings: {'mode': 'gradio', 'character': '11号'},
+          ),
+        );
         await agent.saveProvider(
           AgentProvider(
             id: 'model',
@@ -324,6 +367,94 @@ void main() {
         );
       }
 
+      test('默认直连仅请求tts一次，中文/空格/特殊符号正确编码且音色语速来自设置', () async {
+        expect(extension.config['mode'], 'direct');
+        expect(extension.config['character'], '甜妹');
+        await agent.saveExtension(
+          extension.copyWith(
+            enabled: true,
+            settings: {
+              'character': '甜妹',
+              'speed': 1.25,
+              'apiBase': 'https://yy.jujiang.js.cn/tts',
+            },
+          ),
+        );
+        http.metadataFail = true;
+        const text = '你好 & name=谁？ + / 😀\n第二行';
+        await run('read_aloud', {'text': text});
+        expect(http.requests, hasLength(1));
+        final request = http.requests.single.uri;
+        expect(request.path, '/tts');
+        expect(request.queryParameters, {
+          'character': '甜妹',
+          'text': text,
+          'speed': '1.25',
+        });
+        expect(jsonEncode(model.requests.last), contains('语音已发送'));
+        expect(jsonEncode(model.requests.last), isNot(contains('情感：')));
+        expect(
+          transport.sent.where((s) => jsonEncode(s).contains('base64://')),
+          hasLength(1),
+        );
+      });
+      test('直连JSON音频地址和302下载均能发送，不再走排队接口', () async {
+        for (final json in [true, false]) {
+          http.requests.clear();
+          model.requests.clear();
+          http.directJson = json;
+          http.directRedirect = !json;
+          await agent.saveExtension(extension.copyWith(enabled: true));
+          await run('read_aloud', {'text': '测试'});
+          expect(http.requests.map((r) => r.uri.path), [
+            '/tts',
+            '/generated/voice.wav',
+          ]);
+          expect(jsonEncode(model.requests.last), contains('语音已发送'));
+        }
+      });
+      test('直连503或重定向回合成端点均只提交一次，无Gradio自动回退', () async {
+        for (final loop in [false, true]) {
+          http.requests.clear();
+          model.requests.clear();
+          http.fail = !loop;
+          http.directRedirect = loop;
+          http.directLoop = loop;
+          await agent.saveExtension(extension.copyWith(enabled: true));
+          await run('read_aloud', {'text': '测试'});
+          expect(http.requests, hasLength(1));
+          expect(
+            jsonEncode(model.requests.last),
+            contains(loop ? '未重复请求合成' : 'HTTP 503'),
+          );
+          expect(jsonEncode(transport.sent), isNot(contains('base64://')));
+        }
+      });
+      test('直连返回HTML或QQ协议发送失败时如实返回失败', () async {
+        for (final badAudio in [true, false]) {
+          model.requests.clear();
+          http.requests.clear();
+          http.invalidAudio = badAudio;
+          transport.failVoice = !badAudio;
+          await agent.saveExtension(extension.copyWith(enabled: true));
+          await run('read_aloud', {'text': '测试'});
+          expect(
+            jsonEncode(model.requests.last),
+            contains(badAudio ? '无法识别音频' : '未返回语音回执'),
+          );
+          expect(jsonEncode(model.requests.last), isNot(contains('语音已发送。角色')));
+        }
+      });
+      test('直连参考音色和情感说明不依赖旧站点配置，不发送语音', () async {
+        await agent.saveExtension(extension.copyWith(enabled: true));
+        await run('list_voices', {'query': '甜妹'});
+        expect(jsonEncode(model.requests.last), contains('随包音色参考列表'));
+        model.requests.clear();
+        await run('list_emotions');
+        expect(jsonEncode(model.requests.last), contains('仅发送角色、正文和语速'));
+        expect(http.requests, isEmpty);
+        expect(jsonEncode(transport.sent), isNot(contains('base64://')));
+      });
       test('17参数、无参考音频、SSE、WAV下载与真实协议回执，设置即时生效', () async {
         expect(extension.enabled, false);
         expect(extension.configSchema['character']['values'], hasLength(371));
@@ -331,7 +462,12 @@ void main() {
         await agent.saveExtension(
           extension.copyWith(
             enabled: true,
-            settings: {'character': '七七', 'emotion': '开心', 'speed': 1.25},
+            settings: {
+              'mode': 'gradio',
+              'character': '七七',
+              'emotion': '开心',
+              'speed': 1.25,
+            },
           ),
         );
         await run('read_aloud', {'text': '你好，这是语音测试'});

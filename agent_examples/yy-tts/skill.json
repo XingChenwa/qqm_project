@@ -1,16 +1,17 @@
 {
   "id": "yy-tts",
   "name": "在线角色语音 · YY TTS",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "apiVersion": 1,
   "entry": "index.js",
-  "description": "使用 yy.jujiang.js.cn 在线合成角色语音。角色、情感、语速在插件设置修改；等待真实语音发送回执。",
+  "description": "默认直连 yy.jujiang.js.cn/tts 合成角色语音。插件设置可选择角色与语速；保留 Gradio 兼容模式。",
   "enabledByDefault": false,
   "permissions": [
     "web_fetch"
   ],
   "settings": {
-    "character": "11号",
+    "mode": "direct",
+    "character": "甜妹",
     "characterOverride": "",
     "emotion": "default",
     "speed": 1,
@@ -19,6 +20,13 @@
     "timeoutSec": 120
   },
   "configSchema": {
+    "mode": {
+      "type": "enum",
+      "label": "接口模式",
+      "values": ["direct", "gradio"],
+      "options": [{"value":"direct","label":"直连 /tts（推荐）"},{"value":"gradio","label":"Gradio 排队接口（兼容）"}],
+      "advanced": true
+    },
     "character": {
       "type": "enum",
       "label": "角色音色",
@@ -406,7 +414,8 @@
     "emotion": {
       "type": "string",
       "label": "情感",
-      "description": "默认 default；其他名称以该角色的情感列表为准，可在聊天中查询当前音色支持哪些情感。"
+      "description": "仅 Gradio 兼容模式生效；直连 /tts 只发送角色、正文和语速。",
+      "advanced": true
     },
     "speed": {
       "type": "number",
@@ -419,6 +428,7 @@
     "language": {
       "type": "enum",
       "label": "文本语言",
+      "description": "仅 Gradio 兼容模式生效。",
       "values": [
         "auto",
         "zh",
@@ -473,7 +483,7 @@
     "sections": [
       {
         "id": "yy-tts-guide",
-        "content": "用户要求朗读、念一下或语音回复时，调用 yy-tts__read_aloud，text 只填写实际要朗读的文字（最多1000字），不要把工具计划或思考当作朗读正文。使用插件设置的角色、情感和语速。查角色可调用 yy-tts__list_voices，查当前角色的情感可调用 yy-tts__list_emotions。只有工具返回真实发送成功才说语音已发送；服务错误、超时、音频不可用或发送失败时如实说明。成功后不要重复发送相同文字。本工具只做语音朗读，不会唱歌、翻唱或训练音色。"
+        "content": "用户要求朗读、念一下或语音回复时，调用 yy-tts__read_aloud，text 只填写实际要朗读的文字（最多1000字），不要把工具计划或思考当作朗读正文。默认直连 /tts，使用插件设置的角色和语速；情感和语言仅 Gradio 兼容模式有效。查音色参考名单可调用 yy-tts__list_voices。只有工具返回真实发送成功才说语音已发送；服务错误、超时、音频不可用或发送失败时如实说明，不要自动重复同一合成。成功后不要重复发送相同文字。本工具只做语音朗读，不会唱歌、翻唱或训练音色。"
       }
     ]
   }
