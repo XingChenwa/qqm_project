@@ -176,11 +176,11 @@ Android、iOS、Windows、macOS 使用内嵌 QuickJS，Linux 网页服务也使�
 
 ### 在线角色语音（YY TTS）
 
-`agent_examples/yy-tts/` 是可修改的独立 Skill，默认将 <https://yy.jujiang.js.cn/tts> 语音链接交给适配器 / 平台获取，按插件设置编码 `character`、实际正文 `text` 和 `speed`；不在管理器中预下载、不加入 Gradio 排队。打包后的 `skills-yy-tts-v1.0.3.zip` 可导入 **QQ Agent → Skills**。URL 方式需要宿主接口版本4；旧客户端可选择本机下载模式，或先安装本次 URL 语音修复客户端。
+`agent_examples/yy-tts/` 是可修改的独立 Skill，支持 URL 和本机下载。`skills-yy-tts-v1.0.4.zip` 默认优先把 <https://yy.jujiang.js.cn/tts> 链接交给适配器 / 平台获取，按设置编码 `character`、实际正文 `text`、`speed`；旧客户端缺少 URL 接口时自动改为本机下载后上传，也可手动选择始终本机下载。真正 URL 转发需要宿主接口版本4，自动兼容不要求旧客户端先升级。两种方式都不访问旧 Gradio 排队接口。
 
 点包的“插件设置”，搜索选择角色音色，修改语速后保存、启用；再到机器人使用的 **AI 预设** 中选中这个 Skill。群聊按原规则 @ 机器人说“读一下：你好”，单聊直接提出朗读要求即可。高级设置可修改接口模式、服务地址及超时；情感与语言仅 Gradio 模式生效。不需要安装 npm、Python 或本地模型。同 ID 旧包请先导出备份，删除后导入新版，并重新确认设置与预设选择。
 
-源码中的 `requiresMediaAck: true` 表示朗读工具必须收到实际语音发送回执；查询工具声明 `false`。`ctx.sender.sendMediaUrl(ctx.chatKey, url)` 等同于 `ctx.sender.sendMedia(ctx.chatKey, [{type:'record',data:{file:url}}])`：OneBot 下发 URL 消息段，QQBot 按 `file_type:3,url,srv_send_msg:false` 上传后发送；两者都等待消息 ID，不在管理器本机预下载音频。只允许当前会话、公共 HTTPS 地址，拒绝内网、账号与片段；远端格式 / 大小由协议处理。本机下载模式保留真实音频校验及5 MB上限。默认甜妹、语速1；情感和语言仅高级的 Gradio 模式有效。完整用法见 [YY TTS README](../agent_examples/yy-tts/README.md)。服务条款及音色署名要求见站点，代码许可不改变音色资源的使用范围。
+源码中的 `requiresMediaAck: true` 表示朗读必须收到实际发送回执；查询工具声明 `false`。`ctx.sender.sendMediaUrl(ctx.chatKey, url)` 等同于发送 `record` URL：OneBot 下发消息段，QQBot 按 `file_type:3,url,srv_send_msg:false` 上传后发送，均等待消息 ID。URL 仅允许当前会话、公共 HTTPS 地址，远端格式 / 大小由协议处理。旧宿主没有方法时，Skill 在任何发送发生前改用 `ctx.sender.sendMedia` 的本地音频路径，保留真实音频校验与5 MB上限；网络 / 回执失败后不自动重复发送。本预设明确要求默认语音也可触发朗读，用户要求只发文字时优先遵守。默认甜妹、语速1，情感与语言仅 Gradio 模式有效。完整用法见 [YY TTS README](../agent_examples/yy-tts/README.md)。
 
 ### sing-cover 翻唱包：导入与运行条件
 

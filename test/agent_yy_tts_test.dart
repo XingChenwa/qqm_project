@@ -14,11 +14,33 @@ import 'package:qq_bot_manager/agent/ui/editor.dart';
 import 'agent_audio_test.dart' show sampleWav;
 import 'agent_core_test.dart' as fixture;
 
-Future<Uint8List> yyTtsBundle() async {
+Future<Uint8List> yyTtsBundle({bool legacySender = false}) async {
   final archive = Archive();
   for (final name in ['skill.json', 'index.js', 'service.json', 'README.md']) {
-    final bytes = await File('agent_examples/yy-tts/$name').readAsBytes();
+    var bytes = await File('agent_examples/yy-tts/$name').readAsBytes();
+    if (name == 'skill.json' && legacySender) {
+      final manifest = jsonDecode(utf8.decode(bytes)) as Map<String, dynamic>;
+      manifest['entry'] = 'legacy-fixture.js';
+      bytes = Uint8List.fromList(utf8.encode(jsonEncode(manifest)));
+    }
     archive.addFile(ArchiveFile(name, bytes.length, bytes));
+  }
+  if (legacySender) {
+    const wrapper = '''
+import {setup as original, available} from './index.js';
+export {available};
+export function setup(api) {
+  original({...api, registerTool(tool) {
+    const execute=tool.execute;
+    api.registerTool({...tool, execute(ctx,args) {
+      delete ctx.sender.sendMediaUrl;
+      return execute(ctx,args);
+    }});
+  }});
+}
+''';
+    final bytes = utf8.encode(wrapper);
+    archive.addFile(ArchiveFile('legacy-fixture.js', bytes.length, bytes));
   }
   return Uint8List.fromList(ZipEncoder().encode(archive));
 }
@@ -380,6 +402,12 @@ void main() {
         );
       }
 
+      String lastToolResult() => text(
+        (model.requests.last['messages'] as List)
+            .map(object)
+            .lastWhere((row) => row['role'] == 'tool')['content'],
+      );
+
       test('默认URL语音把编码后的TTS链接交给OneBot，不在本机请求TTS或排队', () async {
         expect(extension.config['delivery'], 'url');
         await agent.saveExtension(
@@ -408,6 +436,39 @@ void main() {
           'speed': '0.9',
         });
         expect(jsonEncode(model.requests.last), contains('已通过适配器'));
+      });
+      test('旧客户端缺少URL方法时自动本机下载并发送真实音频，无需等待升级', () async {
+        await agent.deleteExtension('yy-tts');
+        await agent.importPackage(await yyTtsBundle(legacySender: true));
+        final imported = agent.extensions.firstWhere((e) => e.id == 'yy-tts');
+        await agent.saveExtension(imported.copyWith(enabled: true));
+        await run('read_aloud', {'text': '晚上好'});
+        expect(http.requests.map((r) => r.uri.path), ['/tts']);
+        expect(
+          transport.sent.where((s) => jsonEncode(s).contains('base64://')),
+          hasLength(1),
+        );
+        expect(jsonEncode(model.requests.last), contains('语音已发送'));
+        expect(lastToolResult(), isNot(contains('升级')));
+        expect(
+          agent.logs.any((row) => text(row['message']).contains('自动按本机下载')),
+          true,
+        );
+      });
+      test('旧客户端本机合成失败如实报告HTTP，不误报URL不支持或重复发送', () async {
+        await agent.deleteExtension('yy-tts');
+        await agent.importPackage(await yyTtsBundle(legacySender: true));
+        final imported = agent.extensions.firstWhere((e) => e.id == 'yy-tts');
+        await agent.saveExtension(imported.copyWith(enabled: true));
+        http.fail = true;
+        await run('read_aloud', {'text': '晚上好'});
+        expect(http.requests.map((r) => r.uri.path), ['/tts']);
+        expect(jsonEncode(model.requests.last), contains('HTTP 503'));
+        expect(lastToolResult(), isNot(contains('升级')));
+        expect(
+          transport.sent.where((s) => jsonEncode(s).contains('"record"')),
+          isEmpty,
+        );
       });
       test('URL语音拒绝本地地址，并在协议失败或没有消息ID时不报告成功', () async {
         for (final scenario in ['private', 'failed', 'no-id']) {

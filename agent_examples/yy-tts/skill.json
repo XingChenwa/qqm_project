@@ -1,10 +1,10 @@
 {
   "id": "yy-tts",
   "name": "在线角色语音 · YY TTS",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "apiVersion": 1,
   "entry": "index.js",
-  "description": "默认将 yy.jujiang.js.cn/tts 语音链接交给机器人适配器 / 平台获取；音色与语速可配置，也可选择本机下载。",
+  "description": "支持 URL 和本机下载两种语音发送方式；优先适配器获取，旧客户端自动使用本机下载，音色与语速可配置。",
   "enabledByDefault": false,
   "permissions": [
     "web_fetch"
@@ -25,8 +25,8 @@
       "type": "enum",
       "label": "语音发送方式",
       "values": ["url", "download"],
-      "options": [{"value":"url","label":"适配器 / 平台获取音频（推荐）"},{"value":"download","label":"管理器本机下载后发送"}],
-      "description": "适配器方式与 segment.record(ttsUrl) 相同，需要新版客户端；OneBot 将链接交给协议端，QQBot 交给 QQ 平台拉取。仅直连模式支持 URL 方式。"
+      "options": [{"value":"url","label":"URL 优先，旧客户端自动用本机（推荐）"},{"value":"download","label":"管理器本机下载后发送"}],
+      "description": "URL 接口可用时，OneBot 将链接交给协议端，QQBot 交给平台拉取；旧客户端缺少接口时自动先下载音频再发送。也可手动选择始终本机下载。已提交发送而结果不明时不自动补发。"
     },
     "mode": {
       "type": "enum",
@@ -491,7 +491,7 @@
     "sections": [
       {
         "id": "yy-tts-guide",
-        "content": "用户要求朗读、念一下或语音回复时，调用 yy-tts__read_aloud，text 只填写实际要朗读的文字（最多1000字），不要把工具计划或思考当作朗读正文。默认直连 /tts，使用插件设置的角色和语速；情感和语言仅 Gradio 兼容模式有效。查音色参考名单可调用 yy-tts__list_voices。只有工具返回真实发送成功才说语音已发送；服务错误、超时、音频不可用或发送失败时如实说明，不要自动重复同一合成。成功后不要重复发送相同文字。本工具只做语音朗读，不会唱歌、翻唱或训练音色。"
+        "content": "用户要求朗读、语音回复，或当前预设明确选择默认语音模式时，调用 yy-tts__read_aloud；用户要求只发文字时尊重该要求。text 只填实际要朗读的正文（最多1000字），不含工具计划或思考。插件按设置优先 URL 或本机下载；客户端缺少 URL 接口时会自动改用本机下载，不要凭旧日志认定必须等升级才能发送。音色与语速在插件设置修改，情感和语言仅 Gradio 模式有效。查音色参考名单用 yy-tts__list_voices。只根据本次实际发送回执判断成功；最终失败或状态不明时如实说明，不自动重复合成或补发。成功后不重复同一正文。这是语音朗读，不是唱歌、翻唱或训练音色。"
       }
     ]
   }

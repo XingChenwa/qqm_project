@@ -224,7 +224,7 @@ export function setup(api) {
   warn=message=>api.warn?.(message);
   api.registerTool({
     id:'read_aloud',name:'语音朗读',requiresMediaAck:true,
-    description:'用插件设置的角色和语速朗读指定文字，并将真实语音发送到当前会话。默认直连 /tts，情感仅 Gradio 兼容模式生效。仅在用户要求朗读或语音回复时调用；这是 TTS，不是唱歌或翻唱。',
+    description:'用插件设置的角色和语速朗读文字并发送到当前会话。用于用户要求朗读、语音回复或当前预设已选择默认语音模式；用户要求只发文字时不调用。支持 URL 与本机下载，旧客户端自动本机发送。情感仅 Gradio 模式有效。这是 TTS，不是唱歌或翻唱。',
     parameters:{type:'object',properties:{text:{type:'string',description:'要朗读的文字，最多 1000 字。'}},required:['text'],additionalProperties:false},
     async execute(ctx, args) {
       let file;
@@ -233,11 +233,14 @@ export function setup(api) {
         if(!text || text.length > 1000) return fail('朗读文字须为 1–1000 字。');
         if(!ctx?.chatKey || typeof ctx.sender?.sendMedia !== 'function') return fail('请从聊天会话调用朗读工具，当前没有可用的语音发送通道。');
         const c = settings();
-        if(c.mode==='direct' && c.delivery==='url') {
-          if(typeof ctx.sender.sendMediaUrl!=='function')throw new Error('当前客户端尚未支持 URL 语音，请安装提供 URL 语音支持的新版管理器，或在高级设置选择本机下载方式。');
+        const urlAvailable=typeof ctx.sender.sendMediaUrl==='function';
+        if(c.mode==='direct' && c.delivery==='url' && urlAvailable) {
           const receipt=await ctx.sender.sendMediaUrl(ctx.chatKey,ttsUrl(c,text));
           if(receipt?.ok!==true || !Array.isArray(receipt.sent) || !receipt.sent.length)throw new Error('没有收到语音发送回执，未确认发送成功。');
           return {content:`语音已发送。角色：${c.character}；语速：${c.speed}。已通过适配器 / 平台按 URL 获取音频，无需重复发送相同正文。`};
+        }
+        if(c.mode==='direct' && c.delivery==='url' && !urlAvailable) {
+          api.log?.('客户端未提供 URL 语音接口，自动按本机下载后发送方式处理。');
         }
         let bytes;
         if(c.mode==='direct') {
