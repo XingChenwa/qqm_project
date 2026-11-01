@@ -109,7 +109,7 @@ try {
     const definitions=assetDefinitions(info.version,info.build);
     assert(/^[1-9]\d*$/.test(sourceRun ?? ''), '客户端构建运行 ID 无效');
     gh('run','download',sourceRun,'--repo',repository,'--dir',packages,...definitions.flatMap(a=>['--name',a.directory]));
-    const notes=releaseNotesSummary(eventRelease.body);
+    const notes=releaseNotesSummary(release.body);
     const data={schema:2,repository,tag:info.tag,version:info.version,build:info.build,channel:releaseChannel(release),
       published_at:Math.floor(Date.parse(eventRelease.published_at)/1000),releases:[]};
     const files=[];

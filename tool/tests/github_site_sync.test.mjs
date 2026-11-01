@@ -77,6 +77,17 @@ test('网页允许项目源码链接，但拒绝源码文件、配置、密钥�
     if(name!=='index.html')await rm(join(f.checkout,name));
   }
 });
+test('专门的日志刷新可写入同版本新签名，但仍拒绝所有安装字段变化',async t=>{
+  const f=await fixture(t),options={directory:f.checkout,publicKey,push:false},previous=selected();
+  await syncWebsiteMetadata({...options,selected:previous});
+  const next=structuredClone(previous);next.data.releases.forEach(r=>{r.notes='反馈群：1134318752';});
+  next.envelope=signManifest(next.data,secret,publicKey);
+  assert.equal(await syncWebsiteMetadata({...options,selected:next,allowNotesUpdate:true}),true);
+  assert.equal(await syncWebsiteMetadata({...options,selected:next,allowNotesUpdate:true}),false);
+  const changed=structuredClone(next);changed.data.releases[0].sha256='f'.repeat(64);changed.envelope=signManifest(changed.data,secret,publicKey);
+  await assert.rejects(syncWebsiteMetadata({...options,selected:changed,allowNotesUpdate:true}),/仅能更新日志/);
+  assert.equal(git(f.checkout,'status','--porcelain'),'');
+});
 test('docs 分支只包含静态网页，不携带工作流、源码或私密配置',{skip:!process.env.WEBSITE_DIRECTORY},async()=>{
   await assertPublicTree(process.env.WEBSITE_DIRECTORY);
   const html=await readFile(join(process.env.WEBSITE_DIRECTORY,'index.html'),'utf8');

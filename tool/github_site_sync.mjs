@@ -1,7 +1,7 @@
 import {readdir, readFile, writeFile, mkdir, realpath} from 'node:fs/promises';
 import {resolve, join, extname} from 'node:path';
 import {execFileSync, spawnSync} from 'node:child_process';
-import {repository, websiteBranch, verifyManifest, manifestChannel} from './github_release_core.mjs';
+import {repository, websiteBranch, verifyManifest, manifestChannel, assertNotesOnlyChange} from './github_release_core.mjs';
 
 const assert = (value,message) => {if (!value) throw new Error(message);};
 const git = (directory,...args) => execFileSync('git',['-C',directory,...args],{encoding:'utf8',stdio:['ignore','pipe','pipe']}).trim();
@@ -26,7 +26,7 @@ export async function assertPublicTree(directory, root = true) {
 }
 
 // Only generated metadata is changed. Hand-written HTML/CSS on docs stays intact.
-export async function syncWebsiteMetadata({directory,publicKey,selected,push=true,channel=selected ? manifestChannel(selected.data) : 'stable'}) {
+export async function syncWebsiteMetadata({directory,publicKey,selected,push=true,allowNotesUpdate=false,channel=selected ? manifestChannel(selected.data) : 'stable'}) {
   const target = await realpath(resolve(directory));
   assert(await realpath(git(target,'rev-parse','--show-toplevel')) === target, '网站目录不是独立 checkout');
   const remote = git(target,'remote','get-url','origin');
@@ -43,7 +43,10 @@ export async function syncWebsiteMetadata({directory,publicKey,selected,push=tru
     const envelope = JSON.parse(await readFile(stablePath,'utf8'));
     const previous = verifyManifest(envelope,publicKey,0,channel);
     assert(data && data.build >= previous.build, '拒绝将已发布清单变为空或回退版本');
-    if (data.build === previous.build) assert(selected.envelope.payload === envelope.payload, '同一构建号不能改写');
+    if (data.build === previous.build && selected.envelope.payload !== envelope.payload) {
+      assert(allowNotesUpdate, '同一构建号不能改写');
+      assertNotesOnlyChange(previous, data);
+    }
   } catch(error) {if(error.code !== 'ENOENT') throw error;}
   if (!data) {
     try {

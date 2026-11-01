@@ -1,4 +1,5 @@
 import {createHash, createPrivateKey, createPublicKey, sign, verify} from 'node:crypto';
+import {isDeepStrictEqual} from 'node:util';
 
 export const repository = 'XingChenwa/qqm_project';
 export const pagesUrl = 'https://xingchenwa.github.io/qqm_project';
@@ -73,6 +74,17 @@ export function verifyManifest(envelope, publicKey, minimumBuild = 0, channel) {
   const key = createPublicKey({key: Buffer.concat([publicPrefix, base64(publicKey, [32])]), type: 'spki', format: 'der'});
   requireThat(verify(null, bytes, key, base64(envelope.signature, [64])), '更新清单签名校验失败');
   return validateManifest(JSON.parse(bytes.toString('utf8')), minimumBuild, Date.now(), channel);
+}
+// A publisher may correct release notes without changing an already released
+// installer. Every other field, including unknown metadata, remains immutable.
+export function assertNotesOnlyChange(previous, next) {
+  validateManifest(previous); validateManifest(next);
+  const withoutNotes = value => {
+    const copy = structuredClone(value);
+    for (const release of copy.releases) delete release.notes;
+    return copy;
+  };
+  requireThat(isDeepStrictEqual(withoutNotes(previous), withoutNotes(next)), '仅能更新日志，版本、渠道、安装包及其余签名字段不能改写');
 }
 export function assetDefinitions(version, build) {
   requireThat(typeof version === 'string' && version.length <= 80 && versionPattern.test(version) &&

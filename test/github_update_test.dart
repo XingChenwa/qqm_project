@@ -397,6 +397,42 @@ void main() {
     expect(preferences.highestGitHubBuild, 20);
   });
 
+  test('同一构建仅更新已签名日志时，旧客户端检查即可刷新，缓存节点不影响包校验', () async {
+    final data = manifest();
+    final oldEnvelope = await sign(data);
+    var githubEnvelope = oldEnvelope;
+    await preferences.setNode(UpdateNode.github);
+    final updates = service(
+      UpdateAdapter(
+        (request) async => ResponseBody.fromString(
+          jsonEncode(
+            request.uri.host == 'xingchenwa.github.io'
+                ? githubEnvelope
+                : request.uri.path.endsWith('/latest')
+                ? {'tag_name': 'v1.3.7'}
+                : oldEnvelope,
+          ),
+          200,
+        ),
+      ),
+    );
+    await updates.check();
+    final original = updates.release!;
+    expect(original.notes, '测试清单');
+    for (final release in data['releases']) {
+      release['notes'] = '反馈群：1134318752';
+    }
+    githubEnvelope = await sign(data);
+    await updates.check();
+    expect(updates.phase, UpdatePhase.available);
+    expect(updates.release!.notes, '反馈群：1134318752');
+    expect(updates.release!.sha256, original.sha256);
+    expect(updates.release!.size, original.size);
+    expect(updates.release!.url, original.url);
+    expect(updates.release!.build, original.build);
+    expect(preferences.highestGitHubBuild, original.build);
+  });
+
   test('同构建签名内容冲突时拒绝选择任一节点', () async {
     final first = manifest();
     final second = manifest();

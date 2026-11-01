@@ -1,0 +1,56 @@
+name: 同步更新日志（不重新构建安装包）
+on:
+  release:
+    types: [edited]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 已发布版本标签
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: project-website-sync
+  cancel-in-progress: false
+env:
+  UPDATE_PUBLIC_KEY: ${{ vars.UPDATE_PUBLIC_KEY || 'EmpeSLtZms6Uz7D61o6E3gQzBytIPqsNU+dSq47M9ko=' }}
+jobs:
+  notes:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: main
+          persist-credentials: false
+      - run: node --test tool/tests/release_notes_refresh.test.mjs tool/tests/github_site_sync.test.mjs
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: docs
+          path: build/website
+          persist-credentials: true
+      - name: 仅更新日志并重新签名，保留旧清单修订备份
+        id: refreshed
+        run: node tool/refresh_release_notes.mjs github
+        env:
+          GH_TOKEN: ${{ github.token }}
+          UPDATE_SIGNING_PRIVATE_KEY: ${{ secrets.UPDATE_SIGNING_PRIVATE_KEY }}
+          RELEASE_TAG: ${{ inputs.tag || github.event.release.tag_name }}
+          WEBSITE_DIRECTORY: build/website
+      - name: 保存签名清单及公开修订记录
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: release-notes-${{ github.run_id }}
+          path: build/release-notes/*.json
+          if-no-files-found: ignore
+          retention-days: 30
+      - name: 同步 GitCode 新日志和签名（仅上传小清单）
+        if: steps.refreshed.outputs.ready == 'true'
+        run: node tool/refresh_release_notes.mjs gitcode
+        env:
+          GITCODE_TOKEN: ${{ secrets.GITCODE_TOKEN }}
