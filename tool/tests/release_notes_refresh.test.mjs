@@ -65,22 +65,45 @@ test('新清单上传失败不换名；第二次改名失败自动恢复旧清�
 });
 function mirrorFixture() {
   const f=fixture(),updated=updatedNotesManifest(f.envelope,f.release,publicKey,secret);
-  let remote=f.content;const writes=[];
+  const remote=new Map([[manifestName,f.content]]),writes=[],deletes=[];
+  let nextId=11;
   const release={tag_name:'v1.4.1',release_status:'latest',prerelease:false,assets:f.release.assets.map(a=>({...a,type:'attach'}))};
   const request=async(url,options={})=>{
     assert.equal(new URL(url).host,'api.gitcode.com');assert.equal(new URL(url).searchParams.get('access_token'),'fixture-publisher');
+    if(options.method==='DELETE') {
+      const id=Number(new URL(url).pathname.split('/').at(-1)),asset=release.assets.find(a=>a.id===id);
+      assert.equal(asset.name,manifestName);deletes.push(id);release.assets=release.assets.filter(a=>a.id!==id);remote.delete(manifestName);
+      return new Response(null,{status:204});
+    }
     assert.equal(options.method,'GET');
     return new Response(JSON.stringify(new URL(url).pathname.endsWith('/upload_url')?{
-      url:'https://file.gitcode.com/fixture',headers:{'Content-Type':'application/json','x-obs-acl':'public-read'},
+      url:'https://file.gitcode.com/fixture/'+new URL(url).searchParams.get('file_name'),headers:{'Content-Type':'application/json','x-obs-acl':'public-read'},
     }:release));
   };
-  const readPublic=async(url)=>{assert.equal(new URL(url).searchParams.has('access_token'),false);return remote;};
-  return {...f,updated,release,request,readPublic,writes,uploader:async(d,bytes)=>{writes.push(bytes);remote=bytes;}};
+  const readPublic=async(url)=>{assert.equal(new URL(url).searchParams.has('access_token'),false);const name=new URL(url).pathname.split('/').at(-2);assert.ok(remote.has(name));return remote.get(name);};
+  const uploader=async(d,bytes)=>{
+    const name=new URL(d.url).pathname.split('/').at(-1);writes.push({name,bytes});
+    // Reproduce the live server's HTTP 203 behavior for duplicate filenames.
+    if(remote.has(name))return;
+    remote.set(name,bytes);release.assets.push({id:nextId++,type:'attach',name,size:bytes.length});
+  };
+  return {...f,updated,release,request,readPublic,writes,deletes,uploader,remote};
 }
 test('GitCode 同名小清单更新后读回签名，不重新上传或删除安装包；重试幂等',async()=>{
   const f=mirrorFixture(),options={...f,envelope:f.updated.envelope,publicKey,token:'fixture-publisher'};
-  await refreshGitCodeNotes(options);assert.equal(f.writes.length,1);assert.ok(f.writes[0].length<65536);
-  await refreshGitCodeNotes(options);assert.equal(f.writes.length,1);
+  await refreshGitCodeNotes(options);assert.equal(f.writes.length,3);assert.ok(f.writes.every(w=>w.bytes.length<65536&&w.name.endsWith('.json')));
+  assert.deepEqual(f.deletes,[10]);
+  await refreshGitCodeNotes(options);assert.equal(f.writes.length,3);assert.deepEqual(f.deletes,[10]);
+});
+test('GitCode 没有旧清单替换权限时保留原文件；替换上传失败时还原原签名',async()=>{
+  const f=mirrorFixture();
+  await assert.rejects(refreshGitCodeNotes({...f,envelope:f.updated.envelope,publicKey,token:'fixture-publisher',
+    request:async(url,options)=>options.method==='DELETE'?new Response('{}',{status:403}):f.request(url,options)}));
+  assert.deepEqual(f.remote.get(manifestName),f.content);assert.deepEqual(f.deletes,[]);
+  const second=mirrorFixture();let failed=false;
+  await assert.rejects(refreshGitCodeNotes({...second,envelope:second.updated.envelope,publicKey,token:'fixture-publisher',
+    uploader:async(d,bytes)=>{if(new URL(d.url).pathname.endsWith('/'+manifestName)&&!failed){failed=true;throw Error('offline');}return second.uploader(d,bytes);}}));
+  assert.deepEqual(second.remote.get(manifestName),second.content);assert.deepEqual(second.deletes,[10]);
 });
 test('GitCode 已签名安装元数据不同或渠道错误时不执行上传',async()=>{
   const f=mirrorFixture(),altered=structuredClone(f.data);altered.releases[0].force_update=true;

@@ -79,7 +79,7 @@ export async function refreshGitCodeNotes({envelope,publicKey,token,readPublic=p
     const url=new URL(base+path);url.searchParams.set('access_token',token);
     const response=await request(url,{method,redirect:'manual',signal:AbortSignal.timeout(30000),
       headers:{'Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{})});
-    check(response.ok,'GitCode 日志接口失败（HTTP '+response.status+'）');return response.json();
+    check(response.ok,'GitCode 日志接口失败（HTTP '+response.status+'）');return response.status===204?null:response.json();
   };
   const release=await api('/tags/'+data.tag),source={tagName:data.tag,isDraft:false,isPrerelease:manifestChannel(data)==='beta'};
   const status=gitCodeReleaseStatus(source,data);
@@ -88,18 +88,45 @@ export async function refreshGitCodeNotes({envelope,publicKey,token,readPublic=p
   const oldContent=await readPublic(manifestUrl,{mirror:true}),previous=verifyManifest(JSON.parse(oldContent),publicKey);
   assertNotesOnlyChange(previous,data);
   const snapshot=assetSnapshot(release.assets),content=Buffer.from(JSON.stringify(envelope));
+  const uploadFile=async(name,bytes)=>{
+    const descriptor=await api(`/${data.tag}/upload_url?file_name=${encodeURIComponent(name)}`);
+    validateUploadDescriptor(descriptor);await uploader(descriptor,bytes,{onProgress});
+  };
+  const verifyFile=async(name,expected)=>{
+    const url=`${base}/${data.tag}/attach_files/${name}/download`;
+    for(let attempt=0;attempt<5;attempt++) {
+      const actual=await readPublic(url,{mirror:true});
+      if(sha256(actual)===sha256(expected)){verifyManifest(JSON.parse(actual),publicKey);return;}
+      if(attempt<4)await new Promise(r=>setTimeout(r,1000));
+    }
+    throw Error('GitCode 新签名日志未读回，不宣称同步完成');
+  };
   if(!content.equals(oldContent)) {
-    const descriptor=await api(`/${data.tag}/upload_url?file_name=${manifestName}`);
-    validateUploadDescriptor(descriptor);
-    await uploader(descriptor,content,{onProgress});
-  }
-  let verified=false;
-  for(let attempt=0;attempt<5;attempt++) {
-    const readBack=await readPublic(manifestUrl,{mirror:true});
-    if(sha256(readBack)===sha256(content)){verifyManifest(JSON.parse(readBack),publicKey);verified=true;break;}
-    if(attempt<4)await new Promise(r=>setTimeout(r,1000));
-  }
-  check(verified,'GitCode 新签名日志未读回，不宣称同步完成');
+    // GitCode may return HTTP 203 for an already present filename without
+    // replacing it. Back up BOTH signed revisions before removing only this
+    // tiny canonical manifest. Never delete a package, release or tag.
+    for(const bytes of [oldContent,content]) {
+      const name='update-manifest-notes-'+sha256(bytes)+'.json';
+      if(!release.assets.some(a=>a.type==='attach'&&a.name===name))await uploadFile(name,bytes);
+      await verifyFile(name,bytes);
+    }
+    const original=release.assets.find(a=>a.type==='attach'&&a.name===manifestName);
+    check(original&&/^[1-9]\d*$/.test(String(original.id))&&original.size===oldContent.length,'GitCode 原清单身份不符，停止替换');
+    // Confirm no concurrent publisher changed the file after our backups.
+    const live=await api('/tags/'+data.tag);
+    check(live.assets.some(a=>a.id===original.id&&a.name===manifestName&&a.size===original.size)&&
+      same(snapshot,assetSnapshot(live.assets)),'GitCode 附件已被其他操作修改，停止替换');
+    await api(`/${data.tag}/attach_files/${original.id}`,{method:'DELETE'});
+    try {await uploadFile(manifestName,content);await verifyFile(manifestName,content);}
+    catch(error) {
+      const state=await api('/tags/'+data.tag);
+      if(!state.assets.some(a=>a.type==='attach'&&a.name===manifestName)) {
+        try {await uploadFile(manifestName,oldContent);await verifyFile(manifestName,oldContent);}
+        catch {throw Error('GitCode 清单恢复未完成；新旧签名修订均有备份，安装包未改动');}
+      }
+      throw error;
+    }
+  } else await verifyFile(manifestName,content);
   const after=await api('/tags/'+data.tag);
   check(same(snapshot,assetSnapshot(after.assets))&&after.release_status===status&&after.prerelease===source.isPrerelease,'GitCode 安装包或发布状态发生变化');
   return data;
