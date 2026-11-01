@@ -9,7 +9,8 @@ const configuration = resolve('.dart_tool/package_config.json');
 const packages = JSON.parse(await readFile(configuration, 'utf8')).packages;
 const qjs = packages.find(p => p.name === 'flutter_qjs_next');
 if (!qjs) throw Error('Run flutter pub get before preparing the test engine');
-const packagePath = fileURLToPath(new URL(qjs.rootUri, pathToFileURL(configuration)));
+// CMake 3.x expands backslash escapes in variable-based source lists on Windows.
+const packagePath = fileURLToPath(new URL(qjs.rootUri, pathToFileURL(configuration))).replaceAll('\\', '/');
 const output = resolve('build/agent-ci-native');
 const run = (...args) => execFileSync('cmake', args, {stdio:'inherit', windowsHide:true});
 run('-S', 'tool/native_agent', '-B', output, '-DCMAKE_BUILD_TYPE=Release', '-DQJS_PACKAGE='+packagePath);
