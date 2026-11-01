@@ -1,5 +1,6 @@
-// Resume an incomplete release using the original four clients and a packaging-
-// only Linux repair. Never move a tag, replace an asset, or re-sign a full release.
+// Resume an incomplete release after packaging or host-test environment repairs.
+// Application sources must still match the original tag. Never replace assets,
+// move the tag, skip successful checks, or re-sign a complete release.
 import {execFileSync} from 'node:child_process';
 import {readFile, writeFile, appendFile} from 'node:fs/promises';
 import {pathToFileURL} from 'node:url';
@@ -11,6 +12,10 @@ const packagingFiles = new Set([
   'scripts/build_linux_server.sh', 'scripts/test_linux_distros.sh',
   'tool/github_release.mjs', 'tool/recover_release.mjs',
   'tool/tests/release_recovery.test.mjs', '.github/workflows/release-recovery.yml',
+  // E2E synchronization changes do not change either client or server assets.
+  'tool/tests/server_browser.mjs',
+  'tool/prepare_agent_test.mjs', 'test/data_migration_test.dart',
+  '.github/workflows/mobile-build.yml',
 ]);
 const check = (value, message) => { if (!value) throw new Error(message); };
 const success = (jobs, name) => jobs.some(j => j.name === name && j.status === 'completed' && j.conclusion === 'success');
@@ -24,16 +29,24 @@ export function validateRecovery({tag, release, sourceRun, linuxRun, sourceJobs,
     check(Number.isSafeInteger(run.id) && run.id > 0, '构建 ID 无效');
   }
   check(sourceRun.id !== linuxRun.id && sourceRun.event === 'release' && sourceRun.head_branch === tag && sourceRun.head_sha === tagSha, '原构建不属于此发布标签');
-  check(linuxRun.event === 'workflow_dispatch' && linuxRun.head_branch === 'main' && linuxRun.head_sha === head && linuxRun.conclusion === 'success', 'Linux 修复构建与当前工具提交不一致');
+  check(linuxRun.event === 'workflow_dispatch' && linuxRun.head_branch === 'main' && linuxRun.head_sha === head && linuxRun.conclusion === 'success', '修复构建与当前工具提交不一致');
   check(changes.length > 0 && changes.every(file => packagingFiles.has(file)), '修复包含应用源码改动，不能复用原客户端或发布标签');
   const definitions = assetDefinitions(info.version, info.build);
+  // An original release may fail before compiling because its CI host lacks
+  // the test engine or supplies an aliased temporary directory. In that case
+  // require a complete new preflight + five-platform run at the checked HEAD.
+  // Only the explicit QA/packaging allowlist above may differ from the tag.
+  const originalClients = definitions.every(asset => success(sourceJobs, asset.platform));
+  const clientJobs = originalClients ? sourceJobs : linuxJobs;
+  const clientArtifacts = originalClients ? sourceArtifacts : linuxArtifacts;
+  if (!originalClients) check(success(linuxJobs, 'preflight'), '完整修复构建未通过发布预检');
   for (const asset of definitions) {
-    check(success(sourceJobs, asset.platform), `${asset.platform} 原构建没有成功`);
-    check(sourceArtifacts.some(a => a.name === asset.directory && !a.expired && a.size_in_bytes > 0), `${asset.platform} 原产物缺失或已过期`);
+    check(success(clientJobs, asset.platform), `${asset.platform} 构建没有成功`);
+    check(clientArtifacts.some(a => a.name === asset.directory && !a.expired && a.size_in_bytes > 0), `${asset.platform} 产物缺失或已过期`);
   }
   const linuxName = packageNames(info.version, info.build).linux_artifact;
   check(success(linuxJobs, 'linux') && linuxArtifacts.some(a => a.name === linuxName && !a.expired && a.size_in_bytes > 0), 'Linux 修复产物未通过检查');
-  return {source_run: sourceRun.id, linux_run: linuxRun.id, tag};
+  return {source_run: originalClients ? sourceRun.id : linuxRun.id, linux_run: linuxRun.id, tag};
 }
 
 async function main() {

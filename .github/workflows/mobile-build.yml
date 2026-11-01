@@ -61,6 +61,8 @@ jobs:
         run: flutter config --jdk-dir "$JAVA_HOME_17_X64"
       - run: flutter pub get
       - run: flutter analyze --no-pub
+      - name: 准备宿主脚本引擎并执行完整测试
+        run: node tool/prepare_agent_test.mjs
       - run: flutter test --no-pub --concurrency 2
       - name: 配置固定安卓签名
         env:
@@ -115,6 +117,8 @@ jobs:
       - run: xcodebuild -version
       - run: flutter pub get
       - run: flutter analyze --no-pub
+      - name: 准备宿主脚本引擎并执行完整测试
+        run: node tool/prepare_agent_test.mjs
       - run: flutter test --no-pub --concurrency 2
       - name: 编译 Universal macOS 应用并打包 DMG
         run: bash scripts/build_macos_package.sh
@@ -149,6 +153,8 @@ jobs:
       - run: xcodebuild -version
       - run: flutter pub get
       - run: flutter analyze --no-pub
+      - name: 准备宿主脚本引擎并执行完整测试
+        run: node tool/prepare_agent_test.mjs
       - run: flutter test --no-pub --concurrency 2
       - name: 编译 iPhone 真机应用并打包未签名 IPA
         run: bash scripts/build_unsigned_ipa.sh
@@ -181,6 +187,8 @@ jobs:
       - run: flutter config --enable-windows-desktop
       - run: flutter pub get
       - run: flutter analyze --no-pub
+      - name: 准备宿主脚本引擎并执行完整测试
+        run: node tool/prepare_agent_test.mjs
       - run: flutter test --no-pub --concurrency 2
       - name: 准备 Inno Setup
         shell: pwsh

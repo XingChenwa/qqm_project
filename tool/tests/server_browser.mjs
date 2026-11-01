@@ -464,6 +464,10 @@ try {
     const m = document.querySelector("#messages");
     return m.scrollHeight - m.scrollTop - m.clientHeight < 3;
   });
+  // Clearing the draft and reaching the bottom happen before the complete
+  // post-send refresh. A second Enter while the control is disabled is ignored.
+  // Wait for the same readiness a user sees before testing a slow second send.
+  await page.waitForFunction(() => !document.querySelector("#send").disabled);
   holdNext = true;
   const pendingSend = page.waitForRequest("**/api/send");
   await page.locator("#draft").fill("较慢的发送");

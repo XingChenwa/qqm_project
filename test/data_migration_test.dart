@@ -54,7 +54,12 @@ void main() {
   }
 
   setUp(() async {
-    root = await Directory.systemTemp.createTemp('qqm-data-backup-test-');
+    final temporary = await Directory.systemTemp.createTemp(
+      'qqm-data-backup-test-',
+    );
+    // CI's TEMP can be a junction (Windows) or /var -> /private/var (macOS).
+    // Supply the real data root, as required by the restore containment checks.
+    root = Directory(await temporary.resolveSymbolicLinks());
     await prepare('source');
   });
   tearDown(() async {
