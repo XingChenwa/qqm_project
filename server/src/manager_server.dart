@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
+import 'dart:typed_data';
 import 'package:path/path.dart' as p;
 import 'package:qq_bot_manager/core/bot_client.dart';
 import 'package:qq_bot_manager/core/plugin_dispatcher.dart';
@@ -13,6 +14,12 @@ import 'package:qq_bot_manager/models/received_message.dart';
 import 'package:qq_bot_manager/services/ip_whitelist_service.dart';
 import 'package:qq_bot_manager/services/plugin_workspace.dart';
 import 'package:qq_bot_manager/services/storage_service.dart';
+import 'package:qq_bot_manager/services/data_migration_service.dart';
+import 'package:qq_bot_manager/core/plugin_service_dispatcher.dart';
+import 'package:qq_bot_manager/services/node_plugin_service.dart';
+import 'package:uuid/uuid.dart';
+import 'package:qq_bot_manager/services/data_backup_archive.dart';
+import 'package:qq_bot_manager/agent/store.dart';
 import 'package:qq_bot_manager/utils/constants.dart';
 import 'package:qq_bot_manager/core/group_management.dart';
 import 'package:qq_bot_manager/models/group_notice.dart';
@@ -20,7 +27,7 @@ import 'admin_auth.dart';
 import 'voice_export.dart';
 import 'agent_api.dart';
 import 'package:qq_bot_manager/agent/controller.dart';
-import 'package:qq_bot_manager/agent/models.dart' show AgentException;
+import 'package:qq_bot_manager/core/official_workspace_link.dart';
 import 'package:qq_bot_manager/utils/message_history.dart';
 import 'package:qq_bot_manager/utils/voice_file.dart';
 
@@ -28,10 +35,13 @@ import 'package:qq_bot_manager/utils/voice_file.dart';
 /// subprocess or command-execution route is exposed to the browser.
 class ManagerServer {
   final BotClient bot;
+  final _nodeRegistrations = <String, Future<void>>{};
   final PluginManager plugins;
   final StorageService storage;
   final Directory assets;
+  final Directory data;
   final PluginWorkspace workspace;
+  final DataMigrationService migration;
   final String publicUrl;
   final AdminAuth _auth;
   final bool _autoConnect;
@@ -40,7 +50,7 @@ class ManagerServer {
   final _logs = <Map<String, dynamic>>[];
   final _ip = PublicIpService();
   final _voice = VoiceExport();
-  final _agent = AgentController();
+  late final _agent = AgentController(store: migration.agent);
   late final _agentApi = AgentApi(_agent);
   late final HttpServer _server;
   int _revision = 0, _logId = 0, _activeRequests = 0;
@@ -53,10 +63,11 @@ class ManagerServer {
     this.plugins,
     this.storage,
     this.assets,
-    Directory data,
+    this.data,
     this.publicUrl,
     this._auth,
     this._autoConnect,
+    this.migration,
   ) : workspace = PluginWorkspace(
         Directory(p.join(data.path, 'plugin_workspace')),
       );
@@ -71,6 +82,7 @@ class ManagerServer {
     int port = 23336,
     String publicUrl = '',
     bool autoConnect = false,
+    DataMigrationService? migration,
   }) async {
     if (publicUrl.isNotEmpty) {
       final uri = Uri.tryParse(publicUrl);
@@ -86,6 +98,9 @@ class ManagerServer {
       publicUrl = uri.origin;
     }
     final auth = await AdminAuth.open(data);
+    plugins.nodePackages ??= NodePluginService(
+      Directory(p.join(data.path, 'node_plugins')),
+    );
     final result = ManagerServer._(
       bot,
       plugins,
@@ -95,27 +110,49 @@ class ManagerServer {
       publicUrl,
       auth,
       autoConnect,
+      migration ??
+          DataMigrationService(
+            storage: storage,
+            agent: AgentStore(),
+            dataRoot: data,
+            workspaceRoot: Directory(p.join(data.path, 'plugin_workspace')),
+          ),
     );
     await result.workspace.ensureRoot();
-    result._server = await HttpServer.bind(host, port);
-    result._server.autoCompress = true;
-    result._agent.beforeConnect = (profile) {
-      if (profile.isOfficial &&
-          bot.config.appId == profile.selfId &&
-          (bot.isConnecting || bot.connectionRequested)) {
-        throw const AgentException('这个 AppID 正在原工作区连接，请先断开后再启动 Agent。');
+    PluginServiceDispatcher(bot, storage).bind(plugins);
+    result.migration.beforeRestore = () async {
+      await result._agentApi.pauseForMigration();
+      bot.disconnect();
+      await Future.wait([
+        bot.pauseForMigration(),
+        plugins.pauseForMigration(),
+        result._agent.pauseForMigration(),
+      ]);
+      await plugins.nodePackages!.pause();
+    };
+    result.migration.beforeSnapshot = () async {
+      await plugins.nodePackages!.pause();
+      try {
+        await result._agent.pauseExternalSources();
+      } catch (_) {
+        plugins.nodePackages!.resume();
+        rethrow;
       }
     };
-    bot.connectionGuard = (appId) =>
-        result._agent.ready &&
-            result._agent.connections.any(
-              (c) =>
-                  c.isOfficial &&
-                  c.selfId == appId &&
-                  result._agent.started(c.id),
-            )
-        ? '这个 AppID 正在 QQ Agent 中运行，请先停止 Agent 连接。'
-        : null;
+    result.migration.afterSnapshot = () async {
+      result._agent.resumeExternalSources();
+      plugins.nodePackages!.resume();
+    };
+    result.migration.onStageFailure = () async {
+      result._agent.migrationPaused = false;
+      result._agent.resumeExternalSources();
+      plugins.nodePackages!.resume();
+      result._agentApi.resumeAfterMigrationFailure();
+      await plugins.init();
+    };
+    result._server = await HttpServer.bind(host, port);
+    result._server.autoCompress = true;
+    linkOfficialWorkspaces(bot, result._agent, storage);
     bot.refresh();
     bot.addListener(result._changed);
     plugins.addListener(result._changed);
@@ -179,6 +216,102 @@ class ManagerServer {
     request.response.statusCode = code;
     request.response.headers.contentType = ContentType.json;
     request.response.write(jsonEncode(value));
+  }
+
+  Future<Uint8List> _backupBody(HttpRequest request) async {
+    if (request.contentLength > DataBackupArchive.maxZipBytes) {
+      throw const FormatException('备份ZIP不能超过128MB。');
+    }
+    final bytes = BytesBuilder(copy: false);
+    await for (final chunk in request.timeout(const Duration(seconds: 120))) {
+      if (bytes.length + chunk.length > DataBackupArchive.maxZipBytes) {
+        throw const FormatException('备份ZIP不能超过128MB。');
+      }
+      bytes.add(chunk);
+    }
+    return bytes.takeBytes();
+  }
+
+  void _zip(HttpRequest request, Uint8List bytes, String filename) {
+    request.response.headers
+      ..set('Content-Type', 'application/zip')
+      ..set('Content-Disposition', 'attachment; filename="$filename"');
+    request.response.contentLength = bytes.length;
+    request.response.add(bytes);
+  }
+
+  Future<void> _migrationRequest(HttpRequest request, String route) async {
+    if (route == '/api/migration/status' && request.method == 'GET') {
+      _json(request, {
+        'busy': migration.busy,
+        'restartRequired': migration.restartRequired,
+        'stage': migration.stage,
+        'notice': migration.startupNotice,
+        'recovery': [
+          for (final file in await migration.recoveryBackups())
+            {
+              'filename': p.basename(file.path),
+              'createdAt': (await file.lastModified())
+                  .toUtc()
+                  .toIso8601String(),
+              'bytes': await file.length(),
+            },
+        ],
+      });
+      return;
+    }
+    if (migration.busy || migration.restartRequired) {
+      _json(request, {
+        'error': '已有迁移任务，请完成后再操作。',
+        'restartRequired': migration.restartRequired,
+      }, 409);
+      return;
+    }
+    if (route == '/api/migration/recovery' && request.method == 'GET') {
+      final name = request.uri.queryParameters['file'];
+      final file = (await migration.recoveryBackups())
+          .where((f) => p.basename(f.path) == name)
+          .firstOrNull;
+      if (file == null) throw const FormatException('恢复备份不存在。');
+      _zip(request, await migration.readZip(file), p.basename(file.path));
+      return;
+    }
+    if (request.method != 'POST') {
+      request.response.statusCode = 405;
+      return;
+    }
+    if (route == '/api/migration/export') {
+      await _serial(() async {
+        final bytes = await migration.exportZip();
+        _zip(
+          request,
+          bytes,
+          'qqbotmanager-backup-v${AppConstants.appVersion}-build${AppConstants.appBuild}-${DateTime.now().millisecondsSinceEpoch}.zip',
+        );
+      });
+      return;
+    }
+    if (route == '/api/migration/inspect' ||
+        route == '/api/migration/restore') {
+      if (route.endsWith('/restore') &&
+          request.headers.value('X-QQM-Confirm-Restore') != '1') {
+        throw const FormatException('请先预览备份并确认恢复。');
+      }
+      final bytes = await _backupBody(request);
+      if (route.endsWith('/inspect')) {
+        final data = await migration.inspectZip(bytes);
+        _json(request, {'metadata': data.metadata, 'counts': data.counts});
+      } else {
+        await _serial(() => migration.stageRestore(bytes));
+        _json(request, {
+          'ok': true,
+          'restartRequired': true,
+          'recoveryFile': p.basename(migration.recoveryPath),
+        });
+      }
+      return;
+    }
+    request.response.statusCode = 404;
   }
 
   Future<Map<String, dynamic>> _body(
@@ -375,6 +508,10 @@ class ManagerServer {
         const files = {
           '/': ('server/web/index.html', 'text/html; charset=utf-8'),
           '/app.js': ('server/web/app.js', 'text/javascript; charset=utf-8'),
+          '/migration.js': (
+            'server/web/migration.js',
+            'text/javascript; charset=utf-8',
+          ),
           '/chat-history.js': (
             'server/web/chat-history.js',
             'text/javascript; charset=utf-8',
@@ -387,6 +524,10 @@ class ManagerServer {
           '/agent.html': ('server/web/agent.html', 'text/html; charset=utf-8'),
           '/agent.js': (
             'server/web/agent.js',
+            'text/javascript; charset=utf-8',
+          ),
+          '/agent-files.js': (
+            'server/web/agent-files.js',
             'text/javascript; charset=utf-8',
           ),
           '/agent.css': ('server/web/agent.css', 'text/css; charset=utf-8'),
@@ -460,6 +601,23 @@ class ManagerServer {
         _json(request, {'error': '请先设置安全入口', 'needsEntrance': true}, 428);
         return;
       }
+      if (route.startsWith('/api/migration/')) {
+        await _migrationRequest(request, route);
+        return;
+      }
+      if (migration.busy || migration.restartRequired) {
+        _json(request, {
+          'error': migration.restartRequired
+              ? '完整恢复已准备好，请重启管理器服务。'
+              : '正在准备数据迁移，请稍后重试。',
+          'restartRequired': migration.restartRequired,
+        }, 409);
+        return;
+      }
+      if (route.startsWith('/api/plugins/node/')) {
+        await _nodePluginRequest(request, route);
+        return;
+      }
       if (route.startsWith('/api/agent/')) {
         try {
           if (request.method == 'GET') {
@@ -474,7 +632,9 @@ class ManagerServer {
                 route,
                 await _body(
                   request,
-                  maxBytes: route == '/api/agent/extension/import'
+                  maxBytes: route == '/api/agent/extension/files/save'
+                      ? 34 * 1024 * 1024
+                      : route == '/api/agent/extension/import'
                       ? 23 * 1024 * 1024
                       : 1048576,
                 ),
@@ -508,7 +668,12 @@ class ManagerServer {
         _json(request, {'ok': true});
         return;
       }
-      await _serial(() => _post(request, body, route));
+      await _serial(() {
+        if (migration.busy || migration.restartRequired) {
+          throw StateError('迁移正在进行，请重启服务后再修改。');
+        }
+        return _post(request, body, route);
+      });
     } catch (error) {
       if (error is FormatException ||
           error is PluginManifestException ||
@@ -528,6 +693,132 @@ class ManagerServer {
     } finally {
       _activeRequests--;
       await response.close();
+    }
+  }
+
+  Future<void> _nodePluginRequest(HttpRequest request, String route) async {
+    if (request.method != 'POST') {
+      _json(request, {'error': '请使用 POST'}, 405);
+      return;
+    }
+    final service = plugins.nodePackages!;
+    if (route == '/api/plugins/node/inspect') {
+      final name = request.uri.queryParameters['filename'] ?? 'plugin.zip';
+      final suffix = RegExp(r'\.[cm]?js$', caseSensitive: false).hasMatch(name)
+          ? '.js'
+          : '.zip';
+      final file = File(
+        p.join(data.path, '.node-import-${const Uuid().v4()}$suffix'),
+      );
+      final sink = file.openWrite();
+      var size = 0;
+      try {
+        await for (final chunk in request.timeout(const Duration(minutes: 3))) {
+          size += chunk.length;
+          if (size > 128 * 1024 * 1024) {
+            throw const FormatException('原版插件包不能超过 128 MB。');
+          }
+          sink.add(chunk);
+        }
+        await sink.flush();
+        await sink.close();
+        final preview = await service.inspectFile(file, filename: name);
+        if (plugins.plugins.any((plugin) => plugin.info.id == preview['id'])) {
+          preview['exists'] = true;
+        }
+        _json(request, preview);
+      } finally {
+        await sink.close();
+        if (await file.exists()) await file.delete();
+      }
+      return;
+    }
+    final body = await _body(request, maxBytes: 8 * 1024 * 1024);
+    final action = route.substring('/api/plugins/node/'.length);
+    switch (action) {
+      case 'repository':
+        final preview = await service.inspectRepository(
+          _str(body, 'url', 1000),
+        );
+        if (plugins.plugins.any((plugin) => plugin.info.id == preview['id'])) {
+          preview['exists'] = true;
+        }
+        _json(request, preview);
+      case 'install':
+        if (body['approved'] != true) throw const FormatException('请先确认信任此原包。');
+        final preview = await service.request('/packages/stage', {
+          'stage_id': _str(body, 'stage_id', 100),
+        });
+        final previous = plugins.plugins
+            .where((plugin) => plugin.info.id == preview['id'])
+            .firstOrNull;
+        if (previous != null) {
+          if (body['replace'] != true) {
+            throw const FormatException('插件已存在，请选择替换。');
+          }
+          if (previous.info.isEnabled) {
+            await plugins.disablePlugin(previous.info.id);
+          }
+        }
+        _json(
+          request,
+          await service.request('/packages/install', {
+            'stage_id': _str(body, 'stage_id', 100),
+            'replace': body['replace'] == true,
+            'approved': true,
+          }),
+        );
+      case 'job':
+        final job = await service.request('/packages/job', {
+          'id': _str(body, 'id', 100),
+        });
+        if (job['status'] == 'done' && job['kind'] == 'install') {
+          final metadata = Map<String, dynamic>.from(job['package'] as Map);
+          final jobId = job['id'].toString();
+          try {
+            await _nodeRegistrations.putIfAbsent(jobId, () async {
+              final existing = plugins.plugins.any(
+                (plugin) => plugin.info.id == metadata['id'],
+              );
+              await plugins.registerNodePackage(
+                metadata,
+                replaceExisting: existing,
+              );
+            });
+          } catch (_) {
+            _nodeRegistrations.remove(jobId);
+            rethrow;
+          }
+          if (_nodeRegistrations.length > 256) {
+            _nodeRegistrations.remove(_nodeRegistrations.keys.first);
+          }
+        }
+        _json(request, job);
+      case 'files':
+      case 'file':
+        _json(
+          request,
+          await service.request('/packages/$action', {
+            ...body,
+            'app_id': bot.config.appId,
+          }),
+        );
+      case 'reload':
+        await plugins.reloadNodePackage(_str(body, 'id', 64));
+        _json(request, {'ok': true});
+      case 'dependencies':
+        _json(
+          request,
+          await service.request('/packages/dependencies', {
+            'id': _str(body, 'id', 64),
+          }),
+        );
+      case 'remove':
+        _json(request, {
+          'ok': await plugins.uninstallPlugin(_str(body, 'id', 64)),
+        });
+      default:
+        throw const FormatException('原版插件管理接口不存在。');
     }
   }
 
@@ -672,6 +963,7 @@ class ManagerServer {
                 'description': plugin.info.description,
                 'enabled': plugin.info.isEnabled,
                 'bundled': plugins.isBundled(plugin.info.id),
+                'runtime': plugin.info.manifest['runtime'],
                 'error': plugins.errorFor(plugin.info.id),
                 'commands': [
                   for (final command in plugin.commands)
@@ -1097,6 +1389,7 @@ class ManagerServer {
     bot.removeListener(_changed);
     plugins.removeListener(_changed);
     bot.dispose();
+    await plugins.nodePackages?.stopLocal();
     plugins.dispose();
     _ip.dispose();
     await storage.flush();

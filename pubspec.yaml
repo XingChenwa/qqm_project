@@ -1,7 +1,7 @@
 name: qq_bot_manager
 description: QQ 机器人管理器 - 跨平台 QQ 官方机器人桌面管理工具
 publish_to: 'none'
-version: 1.4.1-beta.1+35
+version: 1.4.1+44
 
 environment:
   sdk: ^3.12.2
@@ -85,6 +85,7 @@ flutter:
   uses-material-design: true
 
   assets:
+    - assets/node_plugins/
     - assets/updater/windows-update.ps1
     - assets/branding/logo.png
     - assets/branding/tray.ico
@@ -110,6 +111,7 @@ flutter:
     - plugins/examples/buttons/plugin.json
     - plugins/examples/media/plugin.json
     - docs/plugin-development.md
+    - docs/original-node-plugins.md
     - docs/agent-development.md
     - docs/licenses/QQ-agent-MIT.txt
     - docs/licenses/QuickJS-MIT.txt

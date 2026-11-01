@@ -39,7 +39,12 @@ try {
     });
   });
   const token = (await readFile(join(data, "setup-token.txt"), "utf8")).trim();
-  browser = await chromium.launch({ headless: true });
+  browser = await chromium.launch({
+    headless: true,
+    ...(process.env.QQM_BROWSER_EXECUTABLE
+      ? { executablePath: process.env.QQM_BROWSER_EXECUTABLE }
+      : {}),
+  });
   page = await browser.newPage({ viewport: { width: 1360, height: 900 } });
   const errors = [];
   page.on("pageerror", (error) => errors.push(error.message));

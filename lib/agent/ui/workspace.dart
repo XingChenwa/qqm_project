@@ -13,7 +13,13 @@ import '../controller.dart';
 import '../models.dart';
 import '../extensions.dart';
 import '../package_bundle.dart';
+import '../builtin_tools.dart';
 import 'editor.dart';
+import 'extension_file_manager.dart';
+import '../../services/data_migration_service.dart';
+import '../../services/desktop_file_location.dart';
+import '../../utils/platforms.dart';
+import '../../ui/screens/data_migration_screen.dart';
 import 'chat.dart';
 
 class AgentWorkspace extends StatefulWidget {
@@ -38,6 +44,7 @@ class _AgentWorkspaceState extends State<AgentWorkspace> {
     'AI 插件',
     'Skills',
     '运行日志',
+    '能力与资料',
   ];
   static const _icons = [
     Icons.chat_bubble_outline,
@@ -47,6 +54,7 @@ class _AgentWorkspaceState extends State<AgentWorkspace> {
     Icons.extension_outlined,
     Icons.psychology_outlined,
     Icons.receipt_long_outlined,
+    Icons.inventory_2_outlined,
   ];
   @override
   void didChangeDependencies() {
@@ -133,6 +141,21 @@ class _AgentWorkspaceState extends State<AgentWorkspace> {
       ),
       actions: [
         IconButton(
+          tooltip: '数据迁移',
+          icon: const Icon(Icons.inventory_2_outlined),
+          onPressed: () {
+            final service = context.read<DataMigrationService?>();
+            if (service != null) {
+              Navigator.push(
+                context,
+                MaterialPageRoute<void>(
+                  builder: (_) => DataMigrationScreen(service: service),
+                ),
+              );
+            }
+          },
+        ),
+        IconButton(
           tooltip: '使用与开发文档',
           onPressed: () => _run(_manual, key: 'manual'),
           icon: const Icon(Icons.help_outline),
@@ -216,6 +239,7 @@ class _AgentWorkspaceState extends State<AgentWorkspace> {
                             3 => _presets(),
                             4 => _extensions('plugin'),
                             5 => _extensions('skill'),
+                            7 => _builtinDataPage(),
                             _ => _logs(),
                           },
                         ),
@@ -408,7 +432,7 @@ class _AgentWorkspaceState extends State<AgentWorkspace> {
                   serviceFactory: widget.qrServiceFactory,
                   introduction: '授权后仅保存到 QQ Agent，并连接官方机器人。',
                   confirmationDescription:
-                      '授权会重置该机器人的密钥，其他使用旧密钥的程序需要同步更新。\n\n新凭证仅保存到 QQ Agent，不修改原工作区的配置。同一 AppID 同时只能在一个工作区连接，请先停止原连接。',
+                      '授权会重置该机器人的密钥，其他使用旧密钥的程序需要同步更新。\n\n新凭证仅保存到 QQ Agent，不修改原工作区的配置。同一 AppID 可以与工作台同时运行；请确保两边使用有效的新密钥。',
                   onConfirm: (credentials) async {
                     final old = agent.connections
                         .where(
@@ -561,8 +585,8 @@ class _AgentWorkspaceState extends State<AgentWorkspace> {
           advanced: true,
           type: 'choice',
           choices: {
-            'mention': '被 @ 或额外唤醒前缀',
-            'command': '命令或额外唤醒前缀',
+            'mention': '唤醒后连续聊天 · 空闲 5 分钟结束',
+            'command': '插件命令＋唤醒后连续聊天',
             'all': '全部群消息',
             'off': '关闭群聊自动处理',
           },
@@ -570,7 +594,7 @@ class _AgentWorkspaceState extends State<AgentWorkspace> {
         const AgentField(
           'commandPrefix',
           'AI 命令前缀',
-          hint: '默认 /ai，后面加空格和问题。',
+          hint: '默认 /ai，后面加空格和问题。@ 当前机器人、/ai 或额外前缀均可唤醒群聊，之后可直接聊天。',
           advanced: true,
         ),
         const AgentField(
@@ -579,7 +603,7 @@ class _AgentWorkspaceState extends State<AgentWorkspace> {
           type: 'list',
           lines: 3,
           hint:
-              '一行一个，例如“小助手”或“hey bot”，最多 20 个。可免 @ 唤醒；关闭群聊和白名单仍然有效。QQBot 需开通接收全量群消息才能收到未 @ 消息。',
+              '一行一个，例如“小助手”或“hey bot”，最多 20 个。唤醒当前群后可连续聊天，5 分钟无人发言自动休眠。关闭群聊和白名单仍有效；QQBot 需开通接收全量群消息。',
           advanced: true,
         ),
         const AgentField(
@@ -626,7 +650,7 @@ class _AgentWorkspaceState extends State<AgentWorkspace> {
 
   Widget _providers() => _page(
     'AI 模型',
-    '配置兼容 Chat Completions 的服务，也可连接本地模型的兼容接口。',
+    '配置兼容 Chat Completions 的服务，也可连接本地模型。AI 持续等待直到返回，可在聊天中手动停止。',
     [
       if (agent.providers.isEmpty) _empty('还没有模型配置。填写接口根地址、API Key 和模型 ID。'),
       for (final p in agent.providers)
@@ -640,11 +664,15 @@ class _AgentWorkspaceState extends State<AgentWorkspace> {
               child: const Text('编辑'),
             ),
             TextButton(
-              onPressed: () => _run(() async {
-                final r = await agent.testModel(p);
-                if (mounted) await AppDialogs.show(context, r, title: '模型测试');
-              }),
-              child: const Text('测试'),
+              onPressed: _busy.contains('model-test:${p.id}')
+                  ? agent.stopModelTests
+                  : () => _run(() async {
+                      final r = await agent.testModel(p);
+                      if (mounted) {
+                        await AppDialogs.show(context, r, title: '模型测试');
+                      }
+                    }, key: 'model-test:${p.id}'),
+              child: Text(_busy.contains('model-test:${p.id}') ? '停止测试' : '测试'),
             ),
             TextButton(
               onPressed: () => _run(() async {
@@ -719,10 +747,26 @@ class _AgentWorkspaceState extends State<AgentWorkspace> {
         hint: '仅在模型确实支持图片时开启，可直接看图或供预设选择为图片转述模型。',
       ),
       const AgentField(
-        'timeoutSeconds',
-        '请求超时（秒）',
-        type: 'int',
+        'video',
+        '支持原生视频输入（video_url）',
+        type: 'bool',
         advanced: true,
+        hint: '仅为接口实际支持视频输入的模型开启，例如兼容video_url的多模态模型；普通文本或图片模型不能直接读取视频文件。',
+      ),
+      const AgentField(
+        'videoAudio',
+        '视频模型同时理解音轨',
+        type: 'bool',
+        advanced: true,
+        when: {'video': true},
+        hint: '仅在所选原生视频模型确实能听懂音轨时开启；多帧图片识别不会读取声音。',
+      ),
+      const AgentField(
+        'stream',
+        '接口要求流式返回',
+        type: 'bool',
+        advanced: true,
+        hint: '部分Omni模型只支持SSE。开启后接收完整流再展示，不影响工具与用量统计。',
       ),
       const AgentField(
         'inputPrice',
@@ -747,6 +791,7 @@ class _AgentWorkspaceState extends State<AgentWorkspace> {
     ],
     actionLabel: '测试模型',
     action: (j) => agent.testModel(AgentProvider.fromJson(j)),
+    cancelAction: agent.stopModelTests,
     save: (j) => agent.saveProvider(AgentProvider.fromJson(j)),
   ).then((_) {});
   Widget _presets() => _page(
@@ -759,7 +804,9 @@ class _AgentWorkspaceState extends State<AgentWorkspace> {
           subtitle: clipped(p.prompt, 180),
           icon: Icons.face_retouching_natural,
           details: Text(
-            '模型：${agent.providers.where((v) => v.id == p.providerId).firstOrNull?.name ?? '尚未选择'} · ${p.skillIds.length} 个 Skill',
+            '模型：${agent.providers.where((v) => v.id == p.providerId).firstOrNull?.name ?? '尚未选择'} · ${p.skillIds.length} 个 Skill\n'
+            '${p.builtinToolsEnabled ? '内置能力已开启，可在编辑预设中选择停用项。' : '内置能力已关闭。'}'
+            '${agent.providers.any((v) => (v.id == p.providerId || v.id == p.imageDescriptionProviderId) && v.vision) ? ' 已配置看图模型。' : ' 评价头像/看图需配置视觉或图片转述模型。'}',
           ),
           actions: [
             FilledButton.tonal(
@@ -823,11 +870,87 @@ class _AgentWorkspaceState extends State<AgentWorkspace> {
       ),
       const AgentField('prompt', '系统提示词 / 人设', lines: 6),
       const AgentField(
+        'videoUnderstandingEnabled',
+        '读取视频内容',
+        type: 'bool',
+        hint: '当前消息带视频时先分析内容；也可通过read_video查询本会话旧视频。会额外调用所选模型。',
+      ),
+      AgentField(
+        'videoProviderId',
+        '视频理解模型',
+        type: 'choice',
+        choices: {
+          '': '自动 · 复用图片转述或主模型',
+          for (final p in agent.providers.where((p) => p.video || p.vision))
+            p.id: '${p.name} · ${p.video ? '原生视频' : '多帧图片'}',
+        },
+        when: const {'videoUnderstandingEnabled': true},
+        hint: '原生视频模型读取视频文件；客户端也可将2–8张带时间点的画面交给视觉模型。普通DeepSeek文本模型需要另配视觉/视频模型。',
+      ),
+      const AgentField(
+        'videoFrames',
+        '视频抽帧数量',
+        type: 'int',
+        advanced: true,
+        when: {'videoUnderstandingEnabled': true},
+        hint: '2–8张，默认6。多帧模式限20MB、10分钟，不识别音轨；原生视频模式由模型处理。',
+      ),
+      const AgentField(
+        'builtinToolsEnabled',
+        '内置 Agent 能力',
+        type: 'bool',
+        hint: '提供头像、历史、资料、消息、记忆、表情库和提醒。无需导入额外 Skill，按当前协议和模型能力自动提供。',
+      ),
+      AgentField(
+        'disabledBuiltinTools',
+        '停用的内置工具',
+        type: 'multi',
+        advanced: true,
+        choices: agentBuiltinToolLabels,
+        when: const {'builtinToolsEnabled': true},
+      ),
+      const AgentField(
+        'crossChatSendEnabled',
+        '允许跨会话转告',
+        type: 'bool',
+        advanced: true,
+        hint: '默认关闭。开启后，用户明确要求转告时，可发到当前机器人已有会话。',
+      ),
+      const AgentField(
+        'maxToolCalls',
+        '每轮最多调用工具次数',
+        type: 'int',
+        advanced: true,
+        hint: '1–32，默认12。次数越高，复杂任务可执行更多步骤，也可能增加模型调用。',
+      ),
+      const AgentField(
         'webSearchEnabled',
-        '网页搜索 · Bing',
+        '网页搜索',
         type: 'bool',
         hint:
             '向支持工具调用的模型提供 web_search 和 web_fetch。仅搜索时访问网络；公开网页解析可能受网络、验证或改版影响。',
+      ),
+      const AgentField(
+        'webSearchBackend',
+        '搜索服务',
+        type: 'choice',
+        choices: {'bing': 'Bing · 公开网页', 'deepseek': 'DeepSeek · 官方内置搜索'},
+        when: {'webSearchEnabled': true},
+      ),
+      AgentField(
+        'webSearchProviderId',
+        'DeepSeek搜索凭证',
+        type: 'choice',
+        choices: {
+          '': '复用当前预设模型的官方凭证',
+          for (final p in agent.providers.where(
+            (p) => Uri.tryParse(p.baseUrl)?.host == 'api.deepseek.com',
+          ))
+            p.id: p.name,
+        },
+        when: const {'webSearchEnabled': true, 'webSearchBackend': 'deepseek'},
+        hint:
+            '先添加https://api.deepseek.com的模型配置及官方API Key。搜索和网页读取按DeepSeek规则计费，不复用其他中转站密钥。',
       ),
       const AgentField(
         'timeAwareness',
@@ -852,7 +975,7 @@ class _AgentWorkspaceState extends State<AgentWorkspace> {
         'multiMessageReply',
         '分多条消息回复',
         type: 'bool',
-        hint: '根据人设和语气，用一次模型请求生成多条对话，不为每条重新请求模型。实际 token 开销仍取决于总字数和历史上下文；默认关闭。',
+        hint: '用一次模型请求生成多条对话。开启后普通正文的空行分段也会拆开发送，代码、列表和表格保留完整；关闭时只发送一条。默认关闭。',
       ),
       const AgentField(
         'maxReplyMessages',
@@ -921,7 +1044,9 @@ class _AgentWorkspaceState extends State<AgentWorkspace> {
               Text(
                 e.isJavaScript
                     ? '原包 JavaScript · 手机 / 桌面共用引擎\n${strings(e.packageManifest['permissions']).contains('web_fetch') || strings(e.compatibility['requirements']).contains('publicFetch')
-                          ? '网络访问：公共 HTTPS 资源'
+                          ? strings(e.compatibility['requirements']).contains('nodeHttp')
+                                ? '网络访问：公共 HTTP / HTTPS 资源'
+                                : '网络访问：公共 HTTPS 资源'
                           : strings(object(e.manifest['compatibility'])['requirements']).contains('websocket')
                           ? '网络访问：公共 WSS 语音服务'
                           : '仅本地运行'}'
@@ -956,19 +1081,60 @@ class _AgentWorkspaceState extends State<AgentWorkspace> {
                         () => agent.saveExtension(e.copyWith(enabled: v)),
                       ),
               ),
+              if (agent.sourceStatus(e.id).isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Text(
+                    agent.sourceStatus(e.id),
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                ),
             ],
           ),
           actions: [
+            if (text(e.manifest['settingsUrl']).isNotEmpty)
+              OutlinedButton.icon(
+                onPressed: () =>
+                    openInAppBrowser(context, text(e.manifest['settingsUrl'])),
+                icon: const Icon(Icons.tune_rounded),
+                label: const Text('打开设置页'),
+              ),
             OutlinedButton(
               onPressed: () => e.isJavaScript
                   ? _configurePackage(e)
-                  : _editExtension(e, kind),
-              child: Text(e.isJavaScript ? '插件设置' : '编辑源码 / 配置'),
+                  : _configureDeclarative(e),
+              child: const Text('插件设置'),
             ),
-            if (e.isJavaScript)
-              OutlinedButton(
-                onPressed: () => _packageFiles(e),
-                child: const Text('查看 / 编辑文件'),
+            OutlinedButton.icon(
+              onPressed: () => isDesktopPlatform
+                  ? _run(() async {
+                      final directory = await agent.extensionSourceDirectory(
+                        e.id,
+                      );
+                      await DesktopFileLocation.open(directory.path);
+                    }, key: 'source:${e.id}')
+                  : Navigator.push(
+                      context,
+                      MaterialPageRoute<void>(
+                        builder: (_) => AgentExtensionFileManager(
+                          controller: agent,
+                          extensionId: e.id,
+                        ),
+                      ),
+                    ),
+              icon: const Icon(Icons.folder_open_outlined),
+              label: Text(isDesktopPlatform ? '打开源码文件夹' : '文件管理'),
+            ),
+            if (isDesktopPlatform)
+              TextButton.icon(
+                onPressed: () => _run(() async {
+                  await agent.reloadExtensionSource(e.id);
+                  if (mounted) {
+                    await AppDialogs.show(context, '源码已重新加载，后续消息使用修改后的逻辑。');
+                  }
+                }, key: 'source:${e.id}'),
+                icon: const Icon(Icons.refresh),
+                label: const Text('重新加载源码'),
               ),
             TextButton(
               onPressed: () => _run(() async {
@@ -1022,8 +1188,9 @@ class _AgentWorkspaceState extends State<AgentWorkspace> {
                 'ZIP 不能超过 16 MB，JSON / YAML / MD 不能超过 256 KB。',
               );
             }
+            var updated = false;
             if (isZip) {
-              await agent.importPackage(f.bytes!);
+              updated = await agent.importPackage(f.bytes!);
             } else {
               await agent.importExtension(
                 utf8.decode(f.bytes!),
@@ -1033,8 +1200,10 @@ class _AgentWorkspaceState extends State<AgentWorkspace> {
             if (mounted) {
               await AppDialogs.show(
                 context,
-                '已导入，默认关闭。请在扩展卡片查看兼容情况，完善设置后再启用并选择到连接 / 预设。',
-                title: '导入完成',
+                updated
+                    ? '已更新，保留原设置、启用状态与扩展数据。请在扩展卡片查看新功能和兼容情况。'
+                    : '已导入，默认关闭。请在扩展卡片查看兼容情况，完善设置后再启用并选择到连接 / 预设。',
+                title: updated ? '更新完成' : '导入完成',
               );
             }
           }),
@@ -1101,73 +1270,40 @@ class _AgentWorkspaceState extends State<AgentWorkspace> {
     );
   }
 
-  Future<void> _packageFiles(AgentExtension e) async {
-    final files = object(e.manifest['files']);
-    final names = files.keys.toList()..sort();
-    final selected = await showDialog<String>(
-      context: context,
-      builder: (dialog) => AlertDialog(
-        title: Text('${e.name} · 文件'),
-        content: SizedBox(
-          width: 500,
-          height: 400,
-          child: ListView(
-            children: [
-              for (final n in names)
-                ListTile(
-                  leading: const Icon(Icons.description_outlined),
-                  title: Text(n),
-                  onTap: () => Navigator.pop(dialog, n),
-                ),
-            ],
-          ),
+  Future<void> _configureDeclarative(AgentExtension e) => editAgent(
+    context,
+    title: '${e.name} · 设置',
+    initial: {'secrets': jsonEncode(e.secrets), 'enabled': e.enabled},
+    description: isDesktopPlatform
+        ? '源码请点击“打开源码文件夹”，使用自己的编辑器修改；保存后会自动重新加载。'
+        : '源码请在“文件管理”中编辑；这里单独保存私有参数和启用状态。',
+    fields: const [
+      AgentField('secrets', '私有参数 JSON', type: 'secret'),
+      AgentField('enabled', '启用扩展', type: 'bool'),
+    ],
+    save: (value) async {
+      final raw = text(value['secrets']).trim();
+      Json secrets;
+      try {
+        final parsed = raw.isEmpty ? <String, dynamic>{} : jsonDecode(raw);
+        if (parsed is! Map || parsed.values.any((v) => v is! String)) {
+          throw const FormatException();
+        }
+        secrets = object(parsed);
+      } catch (_) {
+        throw const AgentException(
+          '私有参数需要 JSON 字符串对象，例如 {"API_KEY":"值"}，留空可清空。',
+        );
+      }
+      final current = agent.extensions.firstWhere((v) => v.id == e.id);
+      await agent.saveExtension(
+        current.copyWith(
+          secrets: secrets.map((k, v) => MapEntry(k, text(v))),
+          enabled: value['enabled'] == true,
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialog),
-            child: const Text('关闭'),
-          ),
-        ],
-      ),
-    );
-    if (selected == null || !mounted) return;
-    try {
-      final bytes = base64Decode(text(files[selected]));
-      if (bytes.length > 262144) {
-        throw const AgentException('编辑器支持 256 KB 以内的文本文件。');
-      }
-      final source = utf8.decode(bytes);
-      await editAgent(
-        context,
-        title: selected,
-        initial: {'source': source},
-        description: selected == e.manifest['manifestFile']
-            ? '包清单为只读；参数请使用插件设置，修改元数据请重新导入。'
-            : '保存后立即生效；正在执行的旧任务会停止。',
-        fields: const [AgentField('source', '文件内容', type: 'code', lines: 16)],
-        save: (j) async {
-          if (selected == e.manifest['manifestFile'] && source != j['source']) {
-            throw const AgentException('请在插件设置中修改参数，包清单不在这里改写。');
-          }
-          await agent.saveExtension(
-            e.copyWith(
-              manifest: {
-                ...e.manifest,
-                'files': {
-                  ...files,
-                  selected: base64Encode(utf8.encode(text(j['source']))),
-                },
-              },
-            ),
-          );
-        },
       );
-    } catch (error) {
-      if (mounted) {
-        await AppDialogs.show(context, agent.describeError(error), error: true);
-      }
-    }
-  }
+    },
+  ).then((_) {});
 
   Future<void> _editExtension(AgentExtension? e, String kind) => editAgent(
     context,
@@ -1232,6 +1368,123 @@ class _AgentWorkspaceState extends State<AgentWorkspace> {
       );
     },
   ).then((_) {});
+
+  Widget _builtinDataPage() {
+    if (agent.connections.isEmpty) {
+      return _page('能力与资料', '按机器人管理内置能力的数据。', [_empty('先添加一个机器人连接。')]);
+    }
+    final current =
+        agent.connections
+            .where((c) => c.id == _selectedConnection)
+            .firstOrNull ??
+        agent.connections.first;
+    final data = agent.builtinData(current.id);
+    Future<void> remove(String category, Json row) => _run(() async {
+      if (await _confirm(
+        category == 'reminders' ? '取消这条提醒？' : '删除这条记录？',
+        '仅处理当前机器人的这条本地记录。',
+      )) {
+        await agent.removeBuiltinData(current.id, category, text(row['id']));
+      }
+    }, key: 'builtin:${row['id']}');
+    Widget group(String title, String category) {
+      final rows = (data[category] as List? ?? []).map(object).toList();
+      return Card(
+        child: ExpansionTile(
+          title: Text('$title · ${rows.length}'),
+          children: [
+            if (rows.isEmpty)
+              const Padding(padding: EdgeInsets.all(18), child: Text('暂无记录')),
+            for (final row in rows.take(100))
+              ListTile(
+                title: Text(
+                  clipped(
+                    text(
+                      row['content'] ?? row['text'] ?? row['note'] ?? '未备注表情',
+                    ),
+                    500,
+                  ),
+                ),
+                subtitle: Text(
+                  [
+                    text(row['chatName']),
+                    text(row['target'] ?? row['userId']),
+                    text(row['at']),
+                    text(row['status']),
+                    text(row['error']),
+                  ].where((v) => v.isNotEmpty).join(' · '),
+                ),
+                trailing: Wrap(
+                  children: [
+                    if (category == 'stickers')
+                      IconButton(
+                        tooltip: '预览表情',
+                        icon: const Icon(Icons.image_outlined),
+                        onPressed: () {
+                          final bytes = agent.builtinStickerBytes(
+                            current.id,
+                            text(row['id']),
+                          );
+                          if (bytes != null) {
+                            showDialog<void>(
+                              context: context,
+                              builder: (context) => Dialog(
+                                child: Padding(
+                                  padding: const EdgeInsets.all(16),
+                                  child: Image.memory(
+                                    bytes,
+                                    fit: BoxFit.contain,
+                                  ),
+                                ),
+                              ),
+                            );
+                          }
+                        },
+                      ),
+                    if (category != 'reminders' || row['status'] == 'pending')
+                      IconButton(
+                        tooltip: category == 'reminders' ? '取消提醒' : '删除记录',
+                        icon: const Icon(Icons.delete_outline),
+                        onPressed: () => remove(category, row),
+                      ),
+                  ],
+                ),
+              ),
+          ],
+        ),
+      );
+    }
+
+    return _page('能力与资料', '内置能力在“预设”中管理开关。资料按机器人隔离，提醒在应用运行且机器人在线时执行。', [
+      DropdownButtonFormField<String>(
+        key: ValueKey('builtin-data:${current.id}'),
+        initialValue: current.id,
+        decoration: const InputDecoration(labelText: '当前机器人'),
+        items: [
+          for (final c in agent.connections)
+            DropdownMenuItem(
+              value: c.id,
+              child: Text(
+                '${agent.nickname(c.id).isEmpty ? c.name : agent.nickname(c.id)} · ${c.selfId}',
+              ),
+            ),
+        ],
+        onChanged: (value) => setState(() {
+          _selectedConnection = value;
+          _selectedSession = null;
+        }),
+      ),
+      const SizedBox(height: 12),
+      FilledButton.tonal(
+        onPressed: () => setState(() => _section = 3),
+        child: const Text('管理预设与工具开关'),
+      ),
+      group('长期印象', 'memories'),
+      group('提醒任务', 'reminders'),
+      group('收藏表情', 'stickers'),
+      group('本地反馈', 'feedback'),
+    ]);
+  }
 
   Widget _logs() => _page(
     '运行日志',

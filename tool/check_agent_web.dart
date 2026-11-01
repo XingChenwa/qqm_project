@@ -8,9 +8,13 @@ import 'package:qq_bot_manager/agent/web.dart';
 Future<void> main(List<String> args) async {
   final http = AgentHttp();
   try {
-    final result = await AgentWeb(
-      http,
-    ).search(args.isEmpty ? 'QQ机器人 官方文档' : args.join(' '), CancelToken());
+    final web = AgentWeb(http);
+    final result = args.isNotEmpty && args.first == '--images'
+        ? await web.searchImages(args.skip(1).join(' '), CancelToken())
+        : await web.search(
+            args.isEmpty ? 'QQ机器人 官方文档' : args.join(' '),
+            CancelToken(),
+          );
     stdout.writeln(const JsonEncoder.withIndent('  ').convert(result));
   } catch (e) {
     stderr.writeln('公开 Bing 搜索检查未通过：$e');

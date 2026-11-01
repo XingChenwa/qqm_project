@@ -29,6 +29,46 @@ class AgentStore {
   }
 
   bool get isOpen => _ready;
+  String? get dataPath => _box?.path;
+  Future<Map<String, String>> exportAllData() async {
+    await open();
+    await _writes;
+    return {
+      for (final key in keys)
+        key: memoryOnly ? jsonEncode(_memory[key]) : _box!.get(key)!,
+    };
+  }
+
+  static void validateAllData(Map<String, String> values) {
+    for (final entry in values.entries) {
+      if (entry.key.isEmpty ||
+          entry.key.length > 4096 ||
+          jsonDecode(entry.value) is! Map) {
+        throw const FormatException('QQ Agent备份记录无效。');
+      }
+    }
+  }
+
+  Future<void> replaceAllData(Map<String, String> values) async {
+    validateAllData(values);
+    await open();
+    await _serial(() async {
+      if (memoryOnly) {
+        _memory.clear();
+        for (final entry in values.entries) {
+          _memory[entry.key] = object(jsonDecode(entry.value));
+        }
+      } else {
+        await _box!.clear();
+        await _box!.putAll(values);
+        await _box!.flush();
+      }
+      _versions.clear();
+      _keyVersions.clear();
+      _openedRevision = ++_revision;
+    });
+  }
+
   Future<void> _writes = Future.value();
   AgentStore() : memoryOnly = false, _memory = {};
   AgentStore.memory() : memoryOnly = true, _memory = {};

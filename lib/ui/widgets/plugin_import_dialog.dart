@@ -210,6 +210,11 @@ class _PluginImportDialogState extends State<PluginImportDialog> {
                         '启用后，命中规则的消息正文、发送者及会话 OpenID 会传给此服务。QQ 机器人密钥和 access_token 不会传入。只安装不会请求服务。',
                         style: TextStyle(fontSize: 13, height: 1.5),
                       ),
+                      if ((definition.http['send_secret_keys'] as List? ?? [])
+                          .isNotEmpty)
+                        Text(
+                          '此服务还会接收以下插件配置：${definition.fields.where((field) => (definition.http['send_secret_keys'] as List).contains(field.key)).map((field) => field.label).join('、')}。',
+                        ),
                     ],
                     const SizedBox(height: 16),
                     CheckboxListTile(

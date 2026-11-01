@@ -1,6 +1,13 @@
 import 'dart:convert';
 import 'models.dart';
 
+/// Some role cards return this envelope even with the UI's split switch off.
+/// This check is only for model output; manual JSON messages stay untouched.
+bool agentReplyEnvelope(String source) => RegExp(
+  r'^\s*(?:```(?:json)?\s*)?\{\s*"messages"\s*:',
+  caseSensitive: false,
+).hasMatch(source);
+
 /// A single model completion can contain several QQ bubbles. Combining overflow
 /// preserves the answer when QQBot has fewer passive replies left than planned.
 List<String> agentReplyMessages(
@@ -16,27 +23,31 @@ List<String> agentReplyMessages(
   ).firstMatch(source);
   if (fence != null) source = fence[1]!;
   List<String>? parts;
+  Object? decoded;
   try {
-    final decoded = jsonDecode(source);
-    if (decoded is Map &&
-        decoded['messages'] is List &&
-        (decoded['messages'] as List).isNotEmpty &&
-        (decoded['messages'] as List).every((v) => v is String)) {
-      parts = (decoded['messages'] as List)
-          .cast<String>()
-          .map((s) => s.trim())
-          .where((s) => s.isNotEmpty)
-          .toList();
-    }
+    decoded = jsonDecode(source);
   } catch (_) {
-    // A plain-text reply is valid fallback, not a reason to call the model again.
-    if (RegExp(r'^\{\s*"messages"\s*:').hasMatch(source)) {
+    // Plain text is valid too. Split ordinary paragraphs below instead of
+    // depending on every compatible model obeying the JSON instruction.
+    if (agentReplyEnvelope(source)) {
       throw const AgentException(
         '模型的分条回复 JSON 未完整返回，请增加最大输出长度或关闭分条回复后重试；本轮未发送残缺 JSON。',
       );
     }
   }
+  if (decoded is Map && decoded.containsKey('messages')) {
+    final values = decoded['messages'];
+    if (values is! List || values.any((value) => value is! String)) {
+      throw const AgentException('模型的分条回复messages格式无效；本轮未发送原始JSON。');
+    }
+    parts = values
+        .cast<String>()
+        .map((value) => value.trim())
+        .where((value) => value.isNotEmpty)
+        .toList();
+  }
   parts ??= [answer.trim()];
+  if (parts.length == 1) parts = _plainReplyParagraphs(parts.single);
   if (parts.isEmpty) throw const AgentException('模型返回的分条回复为空。');
   final limit = maxParts.clamp(1, 5);
   if (parts.length > limit) {
@@ -51,4 +62,24 @@ List<String> agentReplyMessages(
     if (value.isNotEmpty) result.add(value);
   }
   return result;
+}
+
+/// A blank line between plain chat paragraphs is a fallback bubble boundary.
+/// Structured replies with several explicit messages retain their boundaries.
+/// Be conservative with Markdown: a list, code sample or table may contain
+/// blank lines internally and must remain a single, complete message.
+List<String> _plainReplyParagraphs(String source) {
+  if (source.startsWith('{') ||
+      source.startsWith('[') ||
+      RegExp(
+        r'^(?:[ \t]{4}|\t)|^[ \t]*(?:`{3,}|~{3,}|#{1,6}(?:[ \t]|$)|>|[-+*][ \t]+|\d{1,9}[.)][ \t]+|(?:[-*_][ \t]*){3,}$|={2,}[ \t]*$|\$\$|\\\[|<[/!A-Za-z]|!?\[[^\]\r\n]+\]:)|^[^\r\n]*\|[^\r\n]*$',
+        multiLine: true,
+      ).hasMatch(source)) {
+    return [source];
+  }
+  return source
+      .split(RegExp(r'\r?\n(?:[ \t]*\r?\n)+'))
+      .map((part) => part.trim())
+      .where((part) => part.isNotEmpty)
+      .toList();
 }

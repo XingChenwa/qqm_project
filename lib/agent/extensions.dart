@@ -7,6 +7,8 @@ import 'script.dart';
 import 'js_packages.dart';
 import 'package_bundle.dart';
 import 'redaction.dart';
+import 'audio.dart';
+import 'package_compatibility.dart';
 
 class AgentExtension {
   final Json manifest;
@@ -133,6 +135,9 @@ class AgentExtension {
   }
 
   void validate() {
+    if (integer(manifest['minHostVersion'], 1) > agentPackageHostVersion) {
+      throw const AgentException('此扩展需要新版 QQ机器人管理器，请先更新客户端。');
+    }
     if (manifest['schema'] != 1 ||
         !safeId(id) ||
         name.isEmpty ||
@@ -189,6 +194,10 @@ class AgentExtension {
         throw const AgentException('allowedOrigins 必须为完整源地址（协议、域名、端口，不含路径）。');
       }
     }
+    if (manifest['settingsUrl'] != null &&
+        !origins.contains(httpEndpoint(text(manifest['settingsUrl'])).origin)) {
+      throw const AgentException('扩展设置页必须属于已声明的服务源。');
+    }
     final names = <String>{};
     for (final tool in tools) {
       final n = text(tool['name']);
@@ -227,6 +236,10 @@ class AgentExtension {
       );
     }
     if (type == 'http') {
+      if (handler['responseType'] != null &&
+          !{'json', 'audio'}.contains(handler['responseType'])) {
+        throw const AgentException('HTTP responseType 仅支持 json / audio。');
+      }
       final uri = httpEndpoint(text(handler['url']));
       if (!origins.contains(uri.origin) ||
           !{'GET', 'POST'}.contains(handler['method'] ?? 'GET') ||
@@ -362,6 +375,10 @@ class AgentExtensions {
       case 'script':
         result = await scripts.run(text(handler['source']), input);
       case 'http':
+        final audioResponse = handler['responseType'] == 'audio';
+        if (audioResponse && sendMedia == null) {
+          throw const AgentException('当前会话没有可用的语音发送通道。');
+        }
         final url = httpEndpoint(text(handler['url']));
         if (!extension.origins.contains(url.origin)) {
           throw const AgentException('扩展没有此接口的访问权限。');
@@ -386,9 +403,42 @@ class AgentExtensions {
               ? null
               : object(_renderObject(handler['body'], input)),
           timeoutSeconds: 15,
-          maxBytes: 262144,
+          maxBytes: audioResponse ? 8 * 1024 * 1024 : 262144,
           cancel: cancel,
         );
+        final errorPath = text(handler['errorPath']);
+        if (errorPath.isNotEmpty && _lookup(value, errorPath) == true) {
+          result = {
+            'text': clipped(
+              text(object(value)['message']).isEmpty
+                  ? '本地服务未完成此操作。'
+                  : text(object(value)['message']),
+              4000,
+            ),
+            'isError': true,
+          };
+          break;
+        }
+        if (audioResponse) {
+          final encoded = _lookup(
+            value,
+            text(handler['audioDataPath']).isEmpty
+                ? 'audioBase64'
+                : text(handler['audioDataPath']),
+          );
+          if (encoded is! String || encoded.length > 7 * 1024 * 1024) {
+            throw const AgentException('音频服务没有返回有效的音频数据。');
+          }
+          final audio = AgentAudio(base64Decode(encoded));
+          if (!active()) throw const AgentException('任务已停止。');
+          final receipt = await sendMedia!(audio.bytes, audio.name, 'record');
+          if (receipt['ok'] != true ||
+              text(receipt['message_id'] ?? receipt['messageId']).isEmpty) {
+            throw const AgentException('没有收到语音消息回执，未确认发送成功。');
+          }
+          result = {'text': '翻唱试听已发送。', 'sent': true};
+          break;
+        }
         final selected = text(handler['resultPath']).isEmpty
             ? value
             : _lookup(value, text(handler['resultPath']));
@@ -431,7 +481,10 @@ String _render(String template, Json input) => template.replaceAllMapped(
   (m) => text(_lookup(input, m[1]!)),
 );
 Object? _renderObject(Object? value, Json input) {
-  if (value is String) return _render(value, input);
+  if (value is String) {
+    final match = RegExp(r'^\{\{([A-Za-z0-9_.]+)\}\}$').firstMatch(value);
+    return match == null ? _render(value, input) : _lookup(input, match[1]!);
+  }
   if (value is Map) {
     return value.map((k, v) => MapEntry(k, _renderObject(v, input)));
   }

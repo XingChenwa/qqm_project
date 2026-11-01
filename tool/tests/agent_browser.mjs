@@ -144,6 +144,7 @@ export async function verifyAgent(page, shots) {
   await tab("AI 模型");
   await page.getByRole("button", { name: "＋ 新建", exact: true }).click();
   await page.getByLabel("配置名称", { exact: true }).fill("本地测试模型");
+  await page.getByLabel("接口根地址", { exact: true }).fill("https://api.deepseek.com/v1");
   await page
     .getByLabel("API Key", { exact: true })
     .fill("local-fixture-model-key");
@@ -170,6 +171,9 @@ export async function verifyAgent(page, shots) {
   await page.unroute("**/api/agent/provider/models");
   await page.locator("#fields .advanced > summary").click();
   await page.getByLabel("支持图片输入（视觉模型）", { exact: true }).check();
+  await page.getByLabel("支持原生视频输入（video_url）", {exact:true}).check();
+  await page.getByLabel("视频模型同时理解音轨", {exact:true}).check();
+  await page.getByLabel("接口要求流式返回", {exact:true}).check();
   await page.locator("#save").click();
   await page.locator("#editor").waitFor({ state: "hidden" });
   state = await agentState();
@@ -186,7 +190,10 @@ export async function verifyAgent(page, shots) {
   await page
     .getByLabel("图片转述模型", { exact: true })
     .selectOption(state.providers[0].id);
-  await page.getByLabel("网页搜索 · Bing", { exact: true }).check();
+  await page.getByLabel("网页搜索", { exact: true }).check();
+  await page.getByLabel("搜索服务", {exact:true}).selectOption("deepseek");
+  await page.getByLabel("DeepSeek搜索凭证", {exact:true}).selectOption(state.providers[0].id);
+  await page.getByLabel("视频理解模型", {exact:true}).selectOption(state.providers[0].id);
   await page.getByLabel("显示思考内容", { exact: true }).check();
   await page.getByLabel("分多条消息回复", { exact: true }).check();
   assert.equal(
@@ -203,6 +210,9 @@ export async function verifyAgent(page, shots) {
     .fill("768");
   await page.getByLabel("每轮最多发送几条", { exact: true }).fill("4");
   await page.getByLabel("分条发送间隔（毫秒）", { exact: true }).fill("800");
+  await page.getByLabel("每轮最多调用工具次数", { exact: true }).fill("16");
+  await page.getByLabel("视频抽帧数量", {exact:true}).fill("8");
+  await page.getByLabel("停用的内置工具", { exact: true }).selectOption(["get_chats"]);
   for (const width of [1360, 390]) {
     await page.setViewportSize({ width, height: 900 });
     await page
@@ -220,11 +230,31 @@ export async function verifyAgent(page, shots) {
   assert.equal(settings.imageDescriptionProviderId, state.providers[0].id);
   assert.equal(settings.imageMaxEdge, 768);
   assert.equal(settings.webSearchEnabled, true);
+  assert.equal(settings.webSearchBackend, "deepseek");
+  assert.equal(settings.webSearchProviderId, state.providers[0].id);
+  assert.equal(settings.videoProviderId, state.providers[0].id);
+  assert.equal(settings.videoFrames, 8);
+  assert.equal(state.providers[0].video, true);
+  assert.equal(state.providers[0].videoAudio, true);
+  assert.equal(state.providers[0].stream, true);
   assert.equal(settings.showReasoning, true);
   assert.equal(settings.multiMessageReply, true);
   assert.equal(settings.readMessageContext, true);
   assert.equal(settings.maxReplyMessages, 4);
   assert.equal(settings.replyIntervalMs, 800);
+  assert.equal(settings.builtinToolsEnabled, true);
+  assert.equal(settings.maxToolCalls, 16);
+  assert.deepEqual(settings.disabledBuiltinTools, ["get_chats"]);
+
+  await tab("能力与资料");
+  await page.getByText("长期印象 · 0", { exact: true }).waitFor();
+  await page.getByText("提醒任务 · 0", { exact: true }).waitFor();
+  for (const width of [1360,390]) {
+    await page.setViewportSize({width,height:900});
+    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth+1),false);
+    await page.screenshot({path:join(shots,`agent-builtin-data-${width}.png`)});
+  }
+  await page.setViewportSize({width:1360,height:900});
 
   await tab("Skills");
   const chooser = page.waitForEvent("filechooser");
@@ -296,20 +326,24 @@ export async function verifyAgent(page, shots) {
     assert.equal(value.enabled, true);
     assert.equal(value.manifest.files, undefined);
     await card
-      .getByRole("button", { name: "查看 / 编辑文件", exact: true })
+      .getByRole("button", { name: "文件管理", exact: true })
       .click();
-    await page.getByLabel("包内文件", { exact: true }).selectOption("index.js");
-    await page.locator("#save").click();
-    await page.getByLabel("文件内容", { exact: true }).waitFor();
+    await page.getByLabel("扩展源码", { exact: true }).waitFor();
     assert.equal(
-      await page.getByLabel("文件内容", { exact: true }).inputValue(),
+      await page.getByLabel("扩展源码", { exact: true }).inputValue(),
       source,
     );
     await page
-      .getByLabel("文件内容", { exact: true })
+      .getByLabel("扩展源码", { exact: true })
       .fill(source + "\n// edited in browser");
-    await page.locator("#save").click();
-    await page.locator("#editor").waitFor({ state: "hidden" });
+    await page.locator('.source-manager').getByRole('button',{name:'保存并应用',exact:true}).click();
+    await page.locator('.source-manager').getByText('已保存并应用',{exact:true}).waitFor();
+    await page.screenshot({path:join(shots,'agent-files-desktop.png')});
+    await page.setViewportSize({width:390,height:844});
+    assert.ok(await page.locator('.source-manager').evaluate(n=>n.scrollWidth<=n.clientWidth+1),'手机文件管理不溢出');
+    await page.screenshot({path:join(shots,'agent-files-mobile.png')});
+    await page.setViewportSize({width:1360,height:900});
+    await page.locator('.source-manager').getByRole('button',{name:'关闭',exact:true}).click();
     const download = page.waitForEvent("download");
     await card.getByRole("button", { name: "导出", exact: true }).click();
     assert.equal((await download).suggestedFilename(), "browser_zip_skill.zip");

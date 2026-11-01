@@ -378,6 +378,10 @@ class _MainScreenState extends State<MainScreen> {
       sessionId: message.sessionId,
       senderId: message.senderId,
       senderName: message.senderName,
+      selfId: activeBot.botId,
+      selfName: activeBot.botName,
+      mentions: [for (final value in (message.extra?['mentions'] is List ? message.extra!['mentions'] as List : message.rawEvent['mentions'] as List? ?? []).whereType<Map>())
+        {for (final key in ['id', 'member_openid', 'user_openid', 'username', 'bot']) if (value[key] != null) key: value[key]}],
       content: commandContext.content,
       messageType: message.messageType,
       isGroup: message.extra?['isGroup'] == true,

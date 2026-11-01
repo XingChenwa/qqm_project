@@ -25,19 +25,37 @@ class AgentHttpException extends AgentException {
   });
 }
 
-/// Bounded requests with no redirects, so credentials cannot follow a redirect.
+enum AgentNetworkFailure { timeout, connection }
+
+/// A transport failure, without URLs, response bodies or credentials. Model
+/// callers can distinguish an elapsed deadline from a deliberate cancellation.
+class AgentNetworkException extends AgentException {
+  final AgentNetworkFailure failure;
+  const AgentNetworkException(super.message, {required this.failure});
+}
+
+/// Requests do not follow redirects. Non-model operations keep their explicit
+/// deadline; timeoutSeconds == 0 waits until completion or cancellation.
 class AgentHttp {
   final Dio _dio;
   final Dio Function()? downloadDioFactory;
   AgentHttp({Dio? dio, this.downloadDioFactory}) : _dio = dio ?? Dio();
 
   /// Shared public-address check for both downloads and protocol image URLs.
-  Future<List<InternetAddress>> validatePublicUri(Uri uri) async {
-    if (uri.scheme != 'https' ||
+  Future<List<InternetAddress>> validatePublicUri(Uri uri) =>
+      _validatePublicUri(uri);
+
+  Future<List<InternetAddress>> _validatePublicUri(
+    Uri uri, {
+    bool allowHttp = false,
+  }) async {
+    if ((uri.scheme != 'https' && !(allowHttp && uri.scheme == 'http')) ||
         uri.host.isEmpty ||
         uri.userInfo.isNotEmpty ||
         uri.hasFragment) {
-      throw const AgentException('扩展只允许公共 HTTPS 地址。');
+      throw AgentException(
+        allowHttp ? '扩展只允许公共 HTTP / HTTPS 地址。' : '扩展只允许公共 HTTPS 地址。',
+      );
     }
     final literal = InternetAddress.tryParse(uri.host);
     if (literal != null &&
@@ -113,9 +131,63 @@ class AgentHttp {
     CancelToken? cancel,
     int maxBytes = 12 * 1024 * 1024,
     int timeoutSeconds = 15,
+  }) => _fetchBytes(
+    uri,
+    method: method,
+    headers: headers,
+    body: body,
+    cancel: cancel,
+    maxBytes: maxBytes,
+    timeoutSeconds: timeoutSeconds,
+  );
+
+  /// Node HTTP client compatibility only. Existing fetch/media callers retain
+  /// their HTTPS-only contract, DNS pinning, and redirect/auth restrictions.
+  Future<({Uint8List bytes, int status, Map<String, String> headers})>
+  fetchNodeBytes(
+    Uri uri, {
+    String method = 'GET',
+    Map<String, String> headers = const {},
+    Object? body,
+    CancelToken? cancel,
+    int maxBytes = 12 * 1024 * 1024,
+    int timeoutSeconds = 15,
+  }) => uri.scheme == 'https'
+      ? fetchBytes(
+          uri,
+          method: method,
+          headers: headers,
+          body: body,
+          cancel: cancel,
+          maxBytes: maxBytes,
+          timeoutSeconds: timeoutSeconds,
+        )
+      : _fetchBytes(
+          uri,
+          method: method,
+          headers: headers,
+          body: body,
+          cancel: cancel,
+          maxBytes: maxBytes,
+          timeoutSeconds: timeoutSeconds,
+          allowHttp: true,
+        );
+
+  Future<({Uint8List bytes, int status, Map<String, String> headers})>
+  _fetchBytes(
+    Uri uri, {
+    required String method,
+    required Map<String, String> headers,
+    required Object? body,
+    required CancelToken? cancel,
+    required int maxBytes,
+    required int timeoutSeconds,
+    bool allowHttp = false,
   }) async {
     if (cancel?.isCancelled == true) throw const AgentException('任务已停止。');
-    final addresses = await validatePublicUri(uri);
+    final addresses = allowHttp
+        ? await _validatePublicUri(uri, allowHttp: true)
+        : await validatePublicUri(uri);
     final pinned =
         addresses
             .where((a) => a.type == InternetAddressType.IPv4)
@@ -137,12 +209,14 @@ class AgentHttp {
                 }
                 final task = await Socket.startConnect(pinned, uri.port);
                 Socket? raw;
-                final secure = task.socket.then((socket) {
+                final secure = task.socket.then<Socket>((socket) async {
                   raw = socket;
                   // connectionFactory replaces HttpClient's TLS setup too. Preserve
                   // the ORIGINAL hostname for SNI and certificate verification while
                   // connecting to the validated address. Never send plaintext to 443.
-                  return SecureSocket.secure(socket, host: uri.host);
+                  return uri.scheme == 'https'
+                      ? SecureSocket.secure(socket, host: uri.host)
+                      : socket;
                 });
                 return ConnectionTask.fromSocket<Socket>(secure, () {
                   task.cancel();
@@ -268,38 +342,42 @@ class AgentHttp {
         if (!finished) requestCancel.cancel();
       }),
     );
-    final deadline = Timer(Duration(seconds: timeoutSeconds), () {
-      timedOut = true;
-      requestCancel.cancel();
-    });
+    final budget = Duration(seconds: timeoutSeconds > 0 ? timeoutSeconds : 0);
+    final deadline = timeoutSeconds > 0
+        ? Timer(budget, () {
+            timedOut = true;
+            requestCancel.cancel();
+          })
+        : null;
     try {
-      final response = await _dio
-          .requestUri<ResponseBody>(
-            query == null
-                ? uri
-                : uri.replace(
-                    queryParameters: {
-                      ...uri.queryParameters,
-                      ...query.map((k, v) => MapEntry(k, text(v))),
-                    },
-                  ),
-            data: body,
-            cancelToken: requestCancel,
-            options: Options(
-              method: method,
-              headers: headers,
-              responseType: ResponseType.stream,
-              followRedirects: false,
-              sendTimeout: Duration(seconds: timeoutSeconds),
-              receiveTimeout: Duration(seconds: timeoutSeconds),
-              validateStatus: (s) => s != null,
-            ),
-          )
-          .timeout(Duration(seconds: timeoutSeconds));
+      final pending = _dio.requestUri<ResponseBody>(
+        query == null
+            ? uri
+            : uri.replace(
+                queryParameters: {
+                  ...uri.queryParameters,
+                  ...query.map((k, v) => MapEntry(k, text(v))),
+                },
+              ),
+        data: body,
+        cancelToken: requestCancel,
+        options: Options(
+          method: method,
+          headers: headers,
+          responseType: ResponseType.stream,
+          followRedirects: false,
+          sendTimeout: budget,
+          receiveTimeout: budget,
+          validateStatus: (s) => s != null,
+        ),
+      );
+      final response = timeoutSeconds > 0
+          ? await pending.timeout(budget)
+          : await pending;
       final bytes = <int>[];
-      await for (final chunk in response.data!.stream.timeout(
-        Duration(seconds: timeoutSeconds),
-      )) {
+      final bodyStream = response.data!.stream;
+      await for (final chunk
+          in timeoutSeconds > 0 ? bodyStream.timeout(budget) : bodyStream) {
         if (requestCancel.isCancelled) {
           throw const AgentException('任务已停止。');
         }
@@ -308,7 +386,7 @@ class AgentHttp {
         }
         bytes.addAll(chunk);
       }
-      final content = utf8.decode(bytes);
+      final content = utf8.decode(bytes, allowMalformed: true);
       Object? decoded;
       try {
         decoded = jsonDecode(content);
@@ -320,6 +398,7 @@ class AgentHttp {
         final candidate =
             response.headers.value('x-tps-trace-id') ??
             response.headers.value('x-trace-id') ??
+            response.headers.value('x-request-id') ??
             text(data['trace_id']);
         final trace = RegExp(r'^[A-Za-z0-9_-]{1,128}$').hasMatch(candidate)
             ? candidate
@@ -337,21 +416,62 @@ class AgentHttp {
       }
       return decoded ?? content;
     } on AgentException {
+      if (cancel?.isCancelled == true) {
+        throw const AgentException('任务已停止。');
+      }
+      if (timedOut) {
+        throw const AgentNetworkException(
+          '接口请求超时，已停止。',
+          failure: AgentNetworkFailure.timeout,
+        );
+      }
       rethrow;
     } on DioException catch (e) {
-      if (timedOut) throw const AgentException('接口请求超时，已停止。');
+      if (cancel?.isCancelled == true) {
+        throw const AgentException('任务已停止。');
+      }
+      if (timedOut ||
+          {
+            DioExceptionType.connectionTimeout,
+            DioExceptionType.sendTimeout,
+            DioExceptionType.receiveTimeout,
+          }.contains(e.type)) {
+        throw const AgentNetworkException(
+          '接口请求超时，已停止。',
+          failure: AgentNetworkFailure.timeout,
+        );
+      }
       if (CancelToken.isCancel(e)) throw const AgentException('任务已停止。');
       final code = e.response?.statusCode;
-      throw AgentException(
-        code == null
-            ? '网络请求失败，请检查接口地址和网络。'
-            : '接口请求失败（HTTP $code），请检查密钥、模型 ID 和服务状态。',
+      if (code != null) {
+        throw AgentHttpException('接口请求失败（HTTP $code）。', statusCode: code);
+      }
+      throw const AgentNetworkException(
+        '网络请求失败，请检查接口地址和网络。',
+        failure: AgentNetworkFailure.connection,
+      );
+    } on TimeoutException {
+      if (cancel?.isCancelled == true) {
+        throw const AgentException('任务已停止。');
+      }
+      throw const AgentNetworkException(
+        '接口请求超时，已停止。',
+        failure: AgentNetworkFailure.timeout,
       );
     } catch (_) {
+      if (cancel?.isCancelled == true) {
+        throw const AgentException('任务已停止。');
+      }
+      if (timedOut) {
+        throw const AgentNetworkException(
+          '接口请求超时，已停止。',
+          failure: AgentNetworkFailure.timeout,
+        );
+      }
       throw const AgentException('接口连接超时或响应格式无效。');
     } finally {
       finished = true;
-      deadline.cancel();
+      deadline?.cancel();
       requestCancel.cancel();
     }
   }

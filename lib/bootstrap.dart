@@ -18,7 +18,17 @@ import 'core/bot_client.dart';
 import 'core/plugin_manager.dart';
 import 'utils/platforms.dart';
 import 'agent/controller.dart';
-import 'agent/models.dart' show AgentException;
+import 'core/official_workspace_link.dart';
+import 'agent/pending_imports.dart';
+import 'services/video_thumbnail_service.dart';
+import 'services/video_frame_service.dart';
+import 'dart:io';
+import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
+import 'agent/store.dart';
+import 'services/data_migration_service.dart';
+import 'core/plugin_service_dispatcher.dart';
+import 'services/node_plugin_service.dart';
 
 Future<Widget> initializeApplication(
   void Function(String) report, {
@@ -38,14 +48,36 @@ Future<Widget> initializeApplication(
   report('读取本地配置和聊天记录');
   await storageService.init(report: report);
 
+  report('检查完整数据迁移');
+  final agentStore = AgentStore();
+  final migration = DataMigrationService(
+    storage: storageService,
+    agent: agentStore,
+    dataRoot: Directory(p.dirname(storageService.dataPath!)),
+    workspaceRootResolver: () async => Directory(
+      p.join((await getApplicationSupportDirectory()).path, 'plugin_workspace'),
+    ),
+  );
+  migration.startupNotice = await migration.applyPendingRestore();
+  if (migration.startupNotice != null) {
+    await storageService.init(report: report);
+  }
+
   // 从 plugins/ 清单加载内置实现，并恢复已安装的 JSON/YAML/HTTP 插件。
-  final pluginManager = PluginManager(storageService);
+  final nodePackages = NodePluginService(
+    Directory(p.join(p.dirname(storageService.dataPath!), 'node_plugins')),
+  );
+  final pluginManager = PluginManager(
+    storageService,
+    nodePackages: nodePackages,
+  );
   report('加载内置插件');
   await pluginManager.init();
 
   // Initialize bot client
   report('准备机器人工作台');
   final botClient = BotClient(storageService);
+  PluginServiceDispatcher(botClient, storageService).bind(pluginManager);
   final preferences = await SharedPreferences.getInstance();
   final updates = AppUpdateService(
     UpdatePreferences(
@@ -61,21 +93,41 @@ Future<Widget> initializeApplication(
   final onboarding = OnboardingPreferences(preferences);
   // The Agent database and sockets are lazy: opening the official workspace
   // never initializes or connects a OneBot account.
-  final agent = AgentController();
-  agent.beforeConnect = (profile) {
-    if (profile.isOfficial &&
-        botClient.config.appId == profile.selfId &&
-        (botClient.isConnecting || botClient.connectionRequested)) {
-      throw const AgentException('这个 AppID 正在原工作区连接，请先断开后再启动 Agent。');
+  final agent = AgentController(
+    store: agentStore,
+    pendingImportsDirectory: defaultAgentPendingImportsDirectory(),
+    videoThumbnail: VideoThumbnailService.shared.load,
+    videoFrameReader: VideoFrameService.shared.extract,
+  );
+  linkOfficialWorkspaces(botClient, agent, storageService);
+  migration.beforeRestore = () async {
+    botClient.disconnect();
+    await Future.wait([
+      botClient.pauseForMigration(),
+      agent.pauseForMigration(),
+      pluginManager.pauseForMigration(),
+    ]);
+    await nodePackages.pause();
+  };
+  migration.beforeSnapshot = () async {
+    await nodePackages.pause();
+    try {
+      await agent.pauseExternalSources();
+    } catch (_) {
+      nodePackages.resume();
+      rethrow;
     }
   };
-  botClient.connectionGuard = (appId) =>
-      agent.ready &&
-          agent.connections.any(
-            (c) => c.isOfficial && c.selfId == appId && agent.started(c.id),
-          )
-      ? '这个 AppID 正在 QQ Agent 中运行，请先停止 Agent 连接。'
-      : null;
+  migration.afterSnapshot = () async {
+    agent.resumeExternalSources();
+    nodePackages.resume();
+  };
+  migration.onStageFailure = () async {
+    agent.migrationPaused = false;
+    agent.resumeExternalSources();
+    nodePackages.resume();
+    await pluginManager.init();
+  };
 
   DesktopWindowController? desktopWindow;
   if (isDesktopPlatform) {
@@ -97,6 +149,7 @@ Future<Widget> initializeApplication(
 
   return MultiProvider(
     providers: [
+      ChangeNotifierProvider<DataMigrationService>.value(value: migration),
       ChangeNotifierProvider<AgentController>(create: (_) => agent),
       Provider<StorageService>.value(value: storageService),
       Provider<OnboardingPreferences>.value(value: onboarding),

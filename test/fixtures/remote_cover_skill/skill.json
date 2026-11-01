@@ -1,0 +1,91 @@
+{
+  "id": "remote_rvc_cover",
+  "name": "远程 AI 翻唱 · 家用算力",
+  "version": "1.3.1",
+  "apiVersion": 1,
+  "minHostVersion": 7,
+  "entry": "index.js",
+  "description": "服务器调度家用CPU/NVIDIA GPU，支持整首、自动高潮或指定时间段翻唱，并发送所选范围的完整成品。",
+  "enabledByDefault": false,
+  "permissions": [
+    "web_fetch",
+    "cover_delivery"
+  ],
+  "license": "GPL-2.0",
+  "settings": {
+    "baseOrigin": "https://gqu.uuze.cn",
+    "apiKey": "",
+    "apiPath": "/api/tool",
+    "timeoutSec": "60",
+    "autoSend": true,
+    "allowProactive": false
+  },
+  "configSchema": {
+    "baseOrigin": {
+      "type": "string",
+      "label": "翻唱服务器地址",
+      "description": "默认 https://gqu.uuze.cn；只填 HTTPS 域名和可选端口，不追加 /api/tool。"
+    },
+    "apiKey": {
+      "type": "string",
+      "secret": true,
+      "label": "Skill API 密钥",
+      "description": "复制服务器「机器人接入」的 Skill 密钥，不带 Bearer；不是管理员密码、配对码或 AI 模型 Key。"
+    },
+    "autoSend": {
+      "type": "boolean",
+      "label": "完成后自动发送",
+      "description": "默认开启。需要支持后台翻唱任务的新版管理器保持运行和机器人连接；任务完成回传后发到原会话，不调用AI反复轮询。"
+    },
+    "allowProactive": {
+      "type": "boolean",
+      "label": "官机超时后尝试主动发送",
+      "description": "需要机器人已经获得平台主动消息权限。关闭时，回复窗口过期会等待原提问者的新消息。",
+      "advanced": true
+    },
+    "apiPath": {
+      "type": "string",
+      "label": "API 路径",
+      "description": "默认 /api/tool；自定义接口路由时才修改。",
+      "advanced": true
+    },
+    "timeoutSec": {
+      "type": "enum",
+      "label": "接口请求超时（秒）",
+      "values": [
+        "30",
+        "60",
+        "90",
+        "120"
+      ],
+      "options": [
+        {
+          "value": "30",
+          "label": "30 秒"
+        },
+        {
+          "value": "60",
+          "label": "60 秒（推荐）"
+        },
+        {
+          "value": "90",
+          "label": "90 秒"
+        },
+        {
+          "value": "120",
+          "label": "120 秒"
+        }
+      ],
+      "description": "默认 60 秒，只限制单次请求，不限制歌曲或后台翻唱时长。",
+      "advanced": true
+    }
+  },
+  "prompt": {
+    "sections": [
+      {
+        "id": "remote-cover",
+        "content": "用户要求唱歌或翻唱时使用本 Skill。先查询环境、实际音色和歌曲；歌曲不在本地时，根据用户说的歌名调用 remote_rvc_cover__remote_cover_search_qq 按服务端所选来源搜索歌曲，不要让用户自己找详情链接。返回 needs_selection 时，必须在当前原会话回复给原提问者完整的候选序号、歌名和歌手，请他回复“选1”“选2”或歌手名；本轮到此结束，绝不能代选或通过重新搜索绕过选择。同一歌手的不同版本也要展示全名供选择。列表保留20分钟，只认可原提问者在本会话的新消息；他选好后，直接调用 remote_rvc_cover__remote_cover_select_qq，可省略search_id，服务会读取当前提问者本会话的候选，不要重新搜歌。选择内容由宿主核对，不能在工具参数中伪造确认。只有一个候选时可直接调用确认导入工具；用户明确提供详情链接/MID时可调用链接导入。导入是后台任务，查询确认成功后才可选择实际音色开始翻唱。音色来自用户导入的RVC模型，YY TTS朗读音色不能代替；缺少模型时说明本机网页导入方式。开始任务只表示排队，不表示唱完；CPU可能较久，不要重复提交或一轮循环查询。用户稍后询问时查状态，成功后调用发送成品工具，将真实音频发到当前会话；取得消息回执才算已发送。不用原曲冒充翻唱，不伪造成品。任务在已配对的家用电脑执行，服务器只调度和接收成品。音色和歌曲必须来自同一执行端。断网时查询状态，不要重复提交。 翻唱范围分整首whole、自动高潮chorus、指定时间段range。用户说“整首/全部”用whole；“高潮/副歌”用chorus，未给长度时duration_seconds=0，按歌曲结构估计高潮的起止和持续时间，不固定30秒或60秒；“从1分20秒唱40秒/1:20到2:00”用range、start_seconds=80、duration_seconds=40。用户未说明范围时先询问整首、自动高潮（跟随段落长度）还是指定时间段；已说明就直接按要求提交。片段在分离人声前裁剪，只计算选中部分。自动高潮由重复旋律与能量估计，并非人工标注，实际起止时间以任务selection为准；如果原音源仅30秒，不声称能生成更长的原曲，说明需换更长音源。发送工具返回的是本次所选范围的完整成品，不固定取前30秒；极长成品超过本Skill音频大小限制时说明服务器任务列表下载方法，不发送短试听冒充整首。 环境工具应返回features包含cover-selection-v1。缺少此能力或范围工具报“未知翻唱工具”时说明服务器需升级到0.1.2，不能改用旧接口绕过范围检查。 服务端可选择QQ音乐或网易云，环境返回music_settings说明当前来源。搜歌和导入跟随服务端选择，不要擅自切换平台或把QQ的MID当作网易云ID。网易云引用格式为netease:数字ID，也接受music.163.com歌曲详情链接；QQ引用保留MID或qq:MID。歌曲只下载到执行端不等于已回传，status.completed且source_saved=true才算服务器已保存原曲。无权限、仅试听或没有音频时明确说明，不用其他版本替换已确认的歌，不宣称任意VIP曲目均可下载。 ZIP版配置在本Skill的插件设置中填写。搜歌和确认只用本条真实消息，不引用历史内容冒充用户选择。报接口错误时说明具体原因；未配置密钥时指导填写服务器的Skill密钥，绝不要求用户在QQ聊天发送密钥。 歌曲列表可能只有旧文件名（时间戳.wav或QQ音乐/网易云-ID.mp3），不能让用户指出哪个文件是想唱的歌。用户已给歌名时调用remote_rvc_cover__remote_cover_songs并传query，按服务端所选来源搜索，工具会用来源和真实ID补齐本地歌名歌手。搜索资料只恢复名称，不表示用户已同意任何一个版本；多版本照常让原提问者选择歌名和歌手，不能用本地文件存在来跳过确认。不猜测未知本地录音的内容。 任务提交不等于已安排自动发送。只有工具返回auto_send=true且delivery已登记时，才可以说完成后自动发；必须说明管理器需要保持运行和连接。 auto_send=false或delivery_error时，按delivery_hint解释具体原因，不得承诺稍后主动发、不再让用户一直等。 查状态会为旧的未登记翻唱补登记；delivery.state=sent表示已有回执，不再次发送；waiting_message表示官机需原提问者发送新消息或配置主动消息权限；uncertain表示发送结果不明，需先在QQ核对，不自动重发。 后台检查由管理器直接完成，不需要AI多轮循环查询；发送工具与后台共用去重记录。"
+      }
+    ]
+  }
+}

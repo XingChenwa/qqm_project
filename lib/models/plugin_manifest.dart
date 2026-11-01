@@ -168,6 +168,7 @@ class PluginManifest {
       'cooldown_ms',
       'media_hosts',
       'script',
+      'node',
     };
     if (data.keys.any((key) => !knownFields.contains(key))) {
       invalid('清单包含未知字段，请对照 v2 协议检查拼写。');
@@ -217,9 +218,10 @@ class PluginManifest {
       'rules',
       'http',
       'script',
+      'node',
       if (allowBuiltin) 'builtin',
     ].contains(runtime)) {
-      invalid('插件支持 rules、http 或 script 运行时。');
+      invalid('插件支持 rules、http、script 或 node 运行时。');
     }
     if (runtime != 'script' && data.containsKey('script') ||
         runtime == 'script' && data.containsKey('http')) {
@@ -240,6 +242,11 @@ class PluginManifest {
       'interaction:read',
       'events:group-all',
       if (runtime == 'http' || runtime == 'script') 'network:http',
+      if (runtime == 'http' || runtime == 'node') ...[
+        'group:members',
+        'message:recall',
+      ],
+      if (runtime == 'node') 'node:execute',
       if (runtime == 'script') 'storage:local',
       if (allowBuiltin && runtime == 'builtin') ...[
         'network:amap',
@@ -252,6 +259,34 @@ class PluginManifest {
     }
     if (runtime == 'http' && !permissions.contains('network:http')) {
       invalid('HTTP 插件必须声明 network:http。');
+    }
+    if (runtime == 'node') {
+      final node = data['node'];
+      if (!permissions.contains('node:execute') ||
+          node is! Map ||
+          node.keys.any(
+            (k) => !['package_id', 'revision', 'entries'].contains(k),
+          ) ||
+          node['package_id'] != data['id'] ||
+          !RegExp(r'^node_[a-z0-9_]{1,50}$').hasMatch(data['id']) ||
+          node['revision'] is! String ||
+          !RegExp(r'^[a-f0-9]{64}$').hasMatch(node['revision']) ||
+          node['entries'] is! List ||
+          (node['entries'] as List).isEmpty ||
+          (node['entries'] as List).any(
+            (entry) =>
+                entry is! String ||
+                entry.length > 500 ||
+                entry.startsWith('/') ||
+                entry.contains(':') ||
+                entry.contains('\\') ||
+                entry.contains('..') ||
+                !RegExp(r'\.[cm]?js$').hasMatch(entry),
+          )) {
+        invalid('原版 Node 插件元数据无效，请直接导入原包 ZIP／JS 或 GitHub 地址。');
+      }
+    } else if (data.containsKey('node')) {
+      invalid('node 元数据仅用于原版 Node 插件。');
     }
     if (data['listen_all'] == true &&
         !permissions.contains('events:group-all')) {
@@ -330,7 +365,7 @@ class PluginManifest {
     final rawRules = data['rules'] ?? [];
     if (rawRules is! List ||
         rawRules.length > 64 ||
-        !['builtin', 'script'].contains(runtime) && rawRules.isEmpty) {
+        !['builtin', 'script', 'node'].contains(runtime) && rawRules.isEmpty) {
       invalid('rules 必须包含 1–64 条触发规则。');
     }
     final rules = <PluginRule>[];
@@ -522,6 +557,9 @@ class PluginManifest {
           'timeout_ms',
           'token_config',
           'send_config_keys',
+          'protocol',
+          'send_secret_keys',
+          'poll_interval_ms',
         ].contains(key),
       )) {
         invalid('http 包含未知字段。');
@@ -553,6 +591,29 @@ class PluginManifest {
             (key) => !fields.any((f) => f.key == key && f.type != 'secret'),
           )) {
         invalid('send_config_keys 只能包含已声明的非密钥配置项。');
+      }
+      final protocol = http['protocol'];
+      if (protocol != null && protocol != 'qqm-bridge-v1') {
+        invalid('不支持此 HTTP 插件协议。');
+      }
+      final secretKeys = http['send_secret_keys'] ?? [];
+      if (secretKeys is! List ||
+          secretKeys.any(
+            (key) =>
+                key == tokenKey ||
+                !fields.any((f) => f.key == key && f.type == 'secret'),
+          ) ||
+          secretKeys.isNotEmpty && protocol != 'qqm-bridge-v1') {
+        invalid('send_secret_keys 仅可用于桥接服务，且只能指定插件自己的 secret 配置，不能包含服务令牌。');
+      }
+      if (protocol == 'qqm-bridge-v1') {
+        if (tokenKey == null) invalid('桥接服务需要 token_config 鉴权。');
+        final interval = http['poll_interval_ms'] ?? 1500;
+        if (interval is! int || interval < 1000 || interval > 30000) {
+          invalid('桥接轮询间隔需为 1000–30000 毫秒。');
+        }
+      } else if (http.containsKey('poll_interval_ms')) {
+        invalid('轮询间隔仅可用于桥接服务。');
       }
     }
     return PluginManifest._(data, fields, rules);

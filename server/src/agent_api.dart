@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:typed_data';
 import 'package:qq_bot_manager/agent/controller.dart';
 import 'package:qq_bot_manager/agent/models.dart';
 import 'package:qq_bot_manager/agent/extensions.dart';
@@ -9,10 +10,40 @@ import 'package:qq_bot_manager/agent/package_bundle.dart';
 class AgentApi {
   final AgentController controller;
   Future<void> _mutations = Future.value();
+  bool _migrationPaused = false;
   AgentApi(this.controller);
+  Future<void> pauseForMigration() async {
+    _migrationPaused = true;
+    await _mutations;
+  }
+
+  void resumeAfterMigrationFailure() {
+    _migrationPaused = false;
+  }
+
   Future<dynamic> get(String route, Map<String, String> query) async {
+    if (_migrationPaused) throw const AgentException('正在恢复完整数据，请重启服务。');
     await controller.initialize();
     if (route == '/api/agent/state') return controller.snapshot();
+    if (route == '/api/agent/extension/files') {
+      return controller.extensionFiles(query['id'] ?? '').toJson();
+    }
+    if (route == '/api/agent/builtin-data' ||
+        route == '/api/agent/builtin-sticker') {
+      final connectionId = query['connection'] ?? '';
+      if (controller.connection(connectionId) == null) {
+        throw const AgentException('机器人连接不存在。');
+      }
+      if (route.endsWith('builtin-sticker')) {
+        final bytes = controller.builtinStickerBytes(
+          connectionId,
+          query['id'] ?? '',
+        );
+        if (bytes == null) throw const AgentException('当前机器人没有这个表情。');
+        return {'data': base64Encode(bytes)};
+      }
+      return controller.builtinData(connectionId);
+    }
     if (route == '/api/agent/extension/file' ||
         route == '/api/agent/extension/export') {
       final e = controller.extensions
@@ -54,9 +85,14 @@ class AgentApi {
   }
 
   Future<dynamic> post(String route, Json body) async {
+    if (_migrationPaused) throw const AgentException('正在恢复完整数据，请重启服务。');
     await controller.initialize();
     final id = text(body['id']), key = text(body['session']);
     // Long-running work can be stopped or configured through other requests.
+    if (route == '/api/agent/provider/stop-tests') {
+      controller.stopModelTests();
+      return {'ok': true};
+    }
     if (route == '/api/agent/send') {
       await controller.send(key, text(body['text']));
       return {'ok': true};
@@ -97,8 +133,33 @@ class AgentApi {
   }
 
   Future<Json> _mutate(String route, Json body) async {
+    if (_migrationPaused) throw const AgentException('正在恢复完整数据，请重启服务。');
     final id = text(body['id']), key = text(body['session']);
     switch (route) {
+      case '/api/agent/extension/files/save':
+        final files = object(body['files']);
+        if (files.length > 300 ||
+            files.values.any(
+              (v) => v is! String || v.length > 12 * 1024 * 1024,
+            )) {
+          throw const AgentException('文件数量或大小超过限制。');
+        }
+        await controller.saveExtensionFiles(
+          id,
+          files.map(
+            (k, v) =>
+                MapEntry(k, Uint8List.fromList(base64Decode(v as String))),
+          ),
+          expectedRevision: text(body['revision']),
+        );
+        return controller.extensionFiles(id).toJson();
+      case '/api/agent/builtin-data/remove':
+        await controller.removeBuiltinData(
+          text(body['connection']),
+          text(body['category']),
+          id,
+        );
+        return {'ok': true};
       case '/api/agent/connection/save':
         final value = object(body['value']);
         final old = controller.connection(text(value['id']));

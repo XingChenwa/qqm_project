@@ -428,6 +428,8 @@ void main() {
       expect(find.text('学习为目的编写的'), findsOneWidget);
       expect(find.text('作者QQ：2377130783'), findsOneWidget);
       expect(find.text('问题建议可以反馈'), findsOneWidget);
+      expect(find.text('嘿壳群聊 QQ机器人管理器'), findsOneWidget);
+      expect(find.text('加入反馈群'), findsOneWidget);
       expect(
         find.text('https://github.com/XingChenwa/qqm_project'),
         findsOneWidget,

@@ -309,6 +309,16 @@ class _UpdateDialog extends StatelessWidget {
                             style: const TextStyle(height: 1.5),
                           ),
                         ),
+                      if (communityInviteFromNotes(release.notes)
+                          case final String invite)
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: TextButton.icon(
+                            onPressed: () => openInAppBrowser(context, invite),
+                            icon: const Icon(Icons.groups_outlined),
+                            label: const Text('点击链接加入群聊【嘿壳群聊 QQ机器人管理器】'),
+                          ),
+                        ),
                       Align(
                         alignment: Alignment.centerLeft,
                         child: TextButton(

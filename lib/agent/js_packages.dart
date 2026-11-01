@@ -16,6 +16,7 @@ import 'models.dart';
 import 'store.dart';
 import 'http.dart';
 import 'js_bootstrap.dart';
+import 'js_node_compat.dart';
 import 'audio.dart';
 
 typedef AgentImageSender = Future<Json> Function(Uint8List bytes, String name);
@@ -232,7 +233,11 @@ class AgentJsPackages {
             await sockets.remove(text(a['id']))?.close();
             value = null;
           case 'fetch':
-            final r = await http.fetchBytes(
+          case 'nodeHttp':
+            final fetch = message['op'] == 'nodeHttp'
+                ? http.fetchNodeBytes
+                : http.fetchBytes;
+            final r = await fetch(
               Uri.parse(text(a['url'])),
               method: text(a['method']),
               headers: object(a['headers']).map((k, v) => MapEntry(k, text(v))),
@@ -756,6 +761,34 @@ class _WorkerHttp extends AgentHttp {
   _WorkerHttp(this.forward);
   @override
   Future<({Uint8List bytes, int status, Map<String, String> headers})>
+  fetchNodeBytes(
+    Uri uri, {
+    String method = 'GET',
+    Map<String, String> headers = const {},
+    Object? body,
+    CancelToken? cancel,
+    int maxBytes = 12 * 1024 * 1024,
+    int timeoutSeconds = 15,
+  }) async {
+    final r = object(
+      await forward('nodeHttp', {
+        'url': uri.toString(),
+        'method': method,
+        'headers': headers,
+        'body': body,
+        'timeoutSeconds': timeoutSeconds,
+      }, cancel),
+    );
+    if (cancel?.isCancelled == true) throw const AgentException('任务已停止。');
+    return (
+      bytes: r['bytes'] as Uint8List,
+      status: integer(r['status'], 0),
+      headers: object(r['headers']).map((k, v) => MapEntry(k, text(v))),
+    );
+  }
+
+  @override
+  Future<({Uint8List bytes, int status, Map<String, String> headers})>
   fetchBytes(
     Uri uri, {
     String method = 'GET',
@@ -1006,6 +1039,7 @@ class _PackageEngine {
       try {
         final name = ptr.cast<Utf8>().toDartString();
         final builtins = <String, List<String>>{
+          ...agentNodeExports,
           'fs': [
             'readFileSync',
             'writeFileSync',
@@ -1016,6 +1050,8 @@ class _PackageEngine {
             'renameSync',
             'unlinkSync',
             'promises',
+            'createReadStream',
+            'createWriteStream',
           ],
           'fs/promises': [
             'readFile',
@@ -1053,14 +1089,29 @@ class _PackageEngine {
           ],
           'qqm-config': ['DATA_DIR', 'getConfig', 'updateConfig'],
           'qqm-logger': ['logger'],
-          'qqm-safe-fetch': ['validateImageUrl'],
+          'qqm-safe-fetch': [
+            'validateImageUrl',
+            'safeFetchBinary',
+            'safeFetchBinaryToFile',
+            'browseLockState',
+            'checkBrowseLock',
+          ],
           'qqm-stickers': ['localStickerPath'],
           'qqm-model-prices': ['resolveModelPrice', 'priceAt', 'modelLabel'],
           'qqm-tool-registry': ['getToolAvailability'],
+          'qqm-llm': ['chatCompletion'],
+          'qqm-web': ['webSearch', 'webFetch', 'searchImages'],
         };
         var key = name.replaceFirst(RegExp(r'^node:'), '');
         final legacy = name.replaceFirst(RegExp(r'^file://'), '');
-        for (final prefix in ['src/', '/src/', '/qqm-compat/src/']) {
+        for (final prefix in [
+          'src/',
+          '/src/',
+          '/qqm-compat/src/',
+          '../src/',
+          '../../src/',
+          '../../../src/',
+        ]) {
           if (!legacy.startsWith(prefix)) continue;
           key = switch (legacy.substring(prefix.length)) {
             'config.js' => 'qqm-config',
@@ -1069,6 +1120,8 @@ class _PackageEngine {
             'sticker-manager.js' => 'qqm-stickers',
             'model-prices.js' => 'qqm-model-prices',
             'tool-registry.js' => 'qqm-tool-registry',
+            'llm.js' => 'qqm-llm',
+            'web-search.js' => 'qqm-web',
             _ => key,
           };
         }
@@ -1200,7 +1253,7 @@ class _PackageEngine {
   Object? _host(String op, Json a) {
     switch (op) {
       case 'packageInfo':
-        return {'id': manifest['id']};
+        return {'id': manifest['id'], 'inspecting': operation == 'inspect'};
       case 'uuid':
         return const Uuid().v4();
       case 'decodeText':
@@ -1517,6 +1570,7 @@ class _PackageEngine {
         if (hostCall == null) throw const AgentException('插件宿主接口不可用。');
         return hostCall!(text(a['operation']), object(a['args']));
       case 'fetch':
+      case 'nodeHttp':
         if (!permissions.contains('web_fetch') &&
             !strings(
               object(manifest['compatibility'])['requirements'],
@@ -1564,12 +1618,43 @@ class _PackageEngine {
             ),
           };
         }
-        if (uri.scheme != 'https') {
+        final nodeHttp = op == 'nodeHttp';
+        if (uri.scheme != 'https' && !(nodeHttp && uri.scheme == 'http')) {
           throw const AgentException('JavaScript 网络请求只允许 HTTPS。');
         }
         final headers = object(
           a['headers'],
         ).map((k, v) => MapEntry(k, text(v)));
+        final payload = object(a['body'])['__qqmBinary'] == true
+            ? Uint8List.fromList(base64Decode(text(object(a['body'])['data'])))
+            : a['body'];
+        final bodyLength = payload is Uint8List
+            ? payload.length
+            : payload is String
+            ? utf8.encode(payload).length
+            : 0;
+        if (bodyLength > 8 * 1024 * 1024) {
+          throw const AgentException('请求正文超过 8 MB。');
+        }
+        if (nodeHttp) {
+          for (final entry in headers.entries.toList()) {
+            switch (entry.key.toLowerCase()) {
+              case 'content-length':
+                if (int.tryParse(entry.value) != bodyLength) {
+                  throw const AgentException('Content-Length 与实际正文长度不一致。');
+                }
+                headers.remove(entry.key);
+              case 'connection':
+                if (!{
+                  'close',
+                  'keep-alive',
+                }.contains(entry.value.toLowerCase())) {
+                  throw const AgentException('不支持此连接请求头。');
+                }
+                headers.remove(entry.key);
+            }
+          }
+        }
         final apiKey = text(settings['apiKey']);
         final cookieDomains = <String, List<String>>{
           'bilibiliCookie': ['bilibili.com'],
@@ -1607,7 +1692,7 @@ class _PackageEngine {
                           (e.value == apiKey ||
                               e.value == 'Bearer $apiKey'))) ||
                   (e.key.toLowerCase() == 'cookie' &&
-                      !cookieAllowed(e.value)) ||
+                      (uri.scheme != 'https' || !cookieAllowed(e.value))) ||
                   {
                     'host',
                     'connection',
@@ -1616,18 +1701,18 @@ class _PackageEngine {
             )) {
           throw const AgentException('扩展请求头无效或包含不允许的鉴权头。');
         }
-        if (!{'GET', 'POST', 'HEAD'}.contains(a['method'])) {
+        final methods = nodeHttp
+            ? {'GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'}
+            : {'GET', 'POST', 'HEAD'};
+        if (!methods.contains(a['method'])) {
           throw const AgentException('网络请求方式不支持。');
         }
-        final r = await http.fetchBytes(
+        final fetch = nodeHttp ? http.fetchNodeBytes : http.fetchBytes;
+        final r = await fetch(
           uri,
           method: text(a['method']),
           headers: headers,
-          body: object(a['body'])['__qqmBinary'] == true
-              ? Uint8List.fromList(
-                  base64Decode(text(object(a['body'])['data'])),
-                )
-              : a['body'],
+          body: payload,
           cancel: token,
           timeoutSeconds: integer(settings['timeoutSec'], 15).clamp(1, 120),
         );
@@ -1644,13 +1729,33 @@ class _PackageEngine {
         };
       case 'sendImage':
         if (sendImage == null) throw const AgentException('当前上下文不能发送图片。');
-        final p = _file(text(a['file']));
-        final bytes = base64Decode(_read(p));
+        final imageRef = text(a['file']);
+        if (imageRef.startsWith('https://')) {
+          if (hostCall == null) throw const AgentException('当前上下文没有图片链接发送通道。');
+          return hostCall!('sendImageUrl', {'url': imageRef});
+        }
+        final inline =
+            imageRef.startsWith('base64://') ||
+            imageRef.startsWith('data:image/');
+        if (inline && imageRef.length > 7 * 1024 * 1024) {
+          throw const AgentException('图片超过5MB。');
+        }
+        final p = inline ? '' : _file(imageRef);
+        final bytes = inline
+            ? base64Decode(
+                imageRef.startsWith('base64://')
+                    ? imageRef.substring(9)
+                    : imageRef.substring(imageRef.indexOf(',') + 1),
+              )
+            : base64Decode(_read(p));
         if (bytes.isEmpty || bytes.length > 5 * 1024 * 1024) {
           throw const AgentException('图片需要在 5 MB 以内。');
         }
         _check();
-        return await sendImage!(bytes, path.posix.basename(p));
+        return await sendImage!(
+          bytes,
+          inline ? 'image.png' : path.posix.basename(p),
+        );
       case 'sendText':
         if (hostCall != null && a['chatKey'] != null) {
           return hostCall!('sendText', a);

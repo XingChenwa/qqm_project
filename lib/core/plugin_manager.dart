@@ -11,6 +11,9 @@ import '../services/storage_service.dart';
 import 'plugins/manifest_plugin.dart';
 import 'plugins/script_plugin.dart';
 import 'plugins/script_runner.dart';
+import 'plugins/bridge_plugin.dart';
+import 'plugins/node_plugin.dart';
+import '../services/node_plugin_service.dart';
 
 class PluginManager extends ChangeNotifier {
   static final _botScope = Object();
@@ -22,12 +25,19 @@ class PluginManager extends ChangeNotifier {
   final Map<String, int> _active = {};
   final Map<String, DateTime> _cooldowns = {};
   bool _disposed = false;
+  bool _migrationPaused = false;
+  final _tickTasks = <Future<void>>{};
   final _bundledIds = <String>{};
+  bool Function()? serviceReady;
+  Future<Map<String, dynamic>> Function(Map<String, dynamic>)? serviceRequest;
+  NodePluginService? nodePackages;
+  String get activeBotAppId => _storage.activeBotAppId;
 
   final PluginScriptRunner Function() _scriptRunnerFactory;
   PluginManager(
     this._storage, {
     PluginScriptRunner Function()? scriptRunnerFactory,
+    this.nodePackages,
   }) : _scriptRunnerFactory = scriptRunnerFactory ?? PluginScriptRunner.new;
 
   List<BotPlugin> get plugins => List.unmodifiable(_plugins);
@@ -41,8 +51,17 @@ class PluginManager extends ChangeNotifier {
   bool isBundled(String id) => _bundledIds.contains(id);
 
   BotPlugin _create(PluginManifest definition, PluginInfo info) =>
-      definition.runtime == 'script'
+      definition.runtime == 'node'
+      ? NodePlugin(
+          info,
+          definition,
+          nodePackages ??
+              (throw const PluginManifestException('原版插件运行环境尚未初始化。')),
+        )
+      : definition.runtime == 'script'
       ? ScriptPlugin(info, definition, runnerFactory: _scriptRunnerFactory)
+      : definition.http['protocol'] == 'qqm-bridge-v1'
+      ? BridgePlugin(info, definition)
       : ManifestPlugin(info, definition);
 
   String commandHelp() {
@@ -61,8 +80,44 @@ class PluginManager extends ChangeNotifier {
   }
 
   void _bind(BotPlugin plugin) {
+    if (plugin is BridgePlugin) {
+      plugin.onError = (error) {
+        if (_disposed || !_plugins.contains(plugin)) return;
+        if (error.isEmpty) {
+          if (_errors.remove(plugin.info.id) == null) return;
+        } else {
+          _errors[plugin.info.id] = error;
+          _log.warning('插件 ${plugin.info.name}：$error');
+        }
+        notifyListeners();
+      };
+    }
     plugin.host = PluginHost(
       help: commandHelp,
+      currentAppId: () => _storage.activeBotAppId,
+      serviceReady: () =>
+          !_disposed &&
+          !_migrationPaused &&
+          plugin.info.isEnabled &&
+          (serviceReady?.call() ?? false),
+      serviceRequest: (request) async {
+        if (_disposed ||
+            _migrationPaused ||
+            !plugin.info.isEnabled ||
+            !_plugins.contains(plugin) ||
+            request['app_id'] != _storage.activeBotAppId ||
+            !plugin.info.permissions.contains('message:send') ||
+            request['action'] == 'members' &&
+                !plugin.info.permissions.contains('group:members') ||
+            request['action'] == 'recall' &&
+                !plugin.info.permissions.contains('message:recall') ||
+            request['format'] == 'media' &&
+                !plugin.info.permissions.contains('message:media')) {
+          return {'ok': false, 'error': '插件已停用、机器人已切换或权限不足。'};
+        }
+        return await serviceRequest?.call(request) ??
+            {'ok': false, 'error': '宿主未连接。'};
+      },
       appId: () =>
           Zone.current[_botScope] as String? ?? _storage.activeBotAppId,
       store: () {
@@ -88,6 +143,9 @@ class PluginManager extends ChangeNotifier {
       } catch (_) {}
     }
     _plugins.clear();
+    _migrationPaused = false;
+    _stores.clear();
+    _cooldowns.clear();
     _errors.clear();
     _bundledIds.clear();
     final savedConfigs = _savedPluginConfigsById();
@@ -135,6 +193,13 @@ class PluginManager extends ChangeNotifier {
     }
     for (final saved in savedConfigs.values.where((p) => !isBundled(p.id))) {
       if (saved.manifest.isEmpty) continue;
+      // Retire the previous one-off service adapter without erasing its saved
+      // credentials or bindings. New imports use their original package ID.
+      if (saved.id == 'steam_bridge' && saved.version == '1.13.2-qqm.1') {
+        saved.isEnabled = false;
+        await _storage.savePluginConfig(saved);
+        continue;
+      }
       try {
         final definition = PluginManifest.parse(jsonEncode(saved.manifest));
         if (definition.id != saved.id) {
@@ -166,8 +231,14 @@ class PluginManager extends ChangeNotifier {
   Future<PluginInfo> installPlugin(
     String source, {
     bool replaceExisting = false,
+    bool originalPackageInstalled = false,
   }) async {
     final definition = PluginManifest.parse(source);
+    if (definition.runtime == 'node' && !originalPackageInstalled) {
+      throw const PluginManifestException(
+        '原版 Node 插件请直接导入 ZIP／JS 或 GitHub 仓库；安装元数据不是插件源码包。',
+      );
+    }
     if (definition.runtime == 'script' &&
         definition.data['script']['source'] is! String) {
       throw const PluginManifestException('导入需要完整脚本源码；请从工作台安装含 .ht 的项目。');
@@ -208,6 +279,85 @@ class PluginManager extends ChangeNotifier {
       jsonEncode(plugin.info.manifest),
       allowBuiltin: true,
     ).exportDefinition();
+  }
+
+  Future<PluginInfo> installNodePackage(
+    String stage, {
+    bool replaceExisting = false,
+  }) async {
+    final service = nodePackages;
+    if (service == null) throw const PluginManifestException('原版插件运行环境尚未初始化。');
+    final preview = await service.request('/packages/stage', {
+      'stage_id': stage,
+    });
+    final previous = _findPlugin(preview['id'].toString());
+    if (previous != null) {
+      if (!replaceExisting) throw const PluginManifestException('插件已存在，请选择替换。');
+      if (previous.info.isEnabled) await disablePlugin(previous.info.id);
+    }
+    final metadata = await service.install(stage, replace: replaceExisting);
+    return registerNodePackage(metadata, replaceExisting: replaceExisting);
+  }
+
+  Future<PluginInfo> registerNodePackage(
+    Map<String, dynamic> metadata, {
+    bool replaceExisting = false,
+  }) => installPlugin(
+    jsonEncode(nodeManifest(metadata)),
+    replaceExisting: replaceExisting,
+    originalPackageInstalled: true,
+  );
+
+  static Map<String, dynamic> nodeManifest(Map<String, dynamic> metadata) => {
+    'schema_version': 2,
+    'runtime': 'node',
+    'id': metadata['id'],
+    'name': metadata['name'],
+    'version': metadata['version'],
+    'description': metadata['description'],
+    'author': metadata['author'],
+    'permissions': [
+      'message:read',
+      'message:send',
+      'message:media',
+      'message:recall',
+      'group:members',
+      'events:group-all',
+      'node:execute',
+    ],
+    'config_schema': [
+      {
+        'key': 'owner_openids',
+        'label': '插件主人 OpenID（多个用逗号分隔）',
+        'type': 'string',
+        'default': '',
+      },
+      {
+        'key': 'allow_proactive',
+        'label': '允许此插件主动发送消息（仍需 QQ 平台权限）',
+        'type': 'boolean',
+        'default': false,
+      },
+    ],
+    'node': {
+      'package_id': metadata['id'],
+      'revision': metadata['revision'],
+      'entries': metadata['entries'],
+    },
+  };
+
+  Future<void> reloadNodePackage(String id) async {
+    final plugin = _findPlugin(id);
+    if (plugin is! NodePlugin) {
+      throw const PluginManifestException('这不是原版 Node 插件。');
+    }
+    await nodePackages!.request('/packages/reload', {'id': id});
+    if (plugin.info.isEnabled) {
+      await plugin.onDisable();
+      await plugin.onEnable();
+    }
+    _errors.remove(id);
+    notifyListeners();
   }
 
   Future<String> exportPluginData(String id) async {
@@ -352,6 +502,9 @@ class PluginManager extends ChangeNotifier {
     if (plugin.info.isEnabled) {
       await disablePlugin(pluginId);
     }
+    if (plugin is NodePlugin) {
+      await nodePackages!.request('/packages/remove', {'id': pluginId});
+    }
     _plugins.removeWhere((p) => p.info.id == pluginId);
     _errors.remove(pluginId);
     await _storage.deletePluginConfig(pluginId);
@@ -364,6 +517,7 @@ class PluginManager extends ChangeNotifier {
     PluginMessage message, {
     String? onlyPluginId,
   }) async {
+    if (_migrationPaused || _disposed) return [];
     final responses = <PluginResponse>[];
     final appId = _storage.activeBotAppId;
 
@@ -425,16 +579,20 @@ class PluginManager extends ChangeNotifier {
             !_plugins.contains(plugin)) {
           continue;
         }
-        _errors.remove(plugin.info.id);
+        if (plugin is! BridgePlugin) _errors.remove(plugin.info.id);
         if (result == null) continue;
+        final deferred = plugin is BridgePlugin && result.format == 'deferred';
         if (result.format == 'auto' && result.content.trim().isEmpty) continue;
-        if (result.format != 'auto') PluginReply.fromMap(result.toMap());
+        if (result.format != 'auto' && !deferred) {
+          PluginReply.fromMap(result.toMap());
+        }
         if (cooldown > 0) {
           if (_cooldowns.length >= 2048) {
             _cooldowns.remove(_cooldowns.keys.first);
           }
           _cooldowns[cooldownKey] = DateTime.now();
         }
+        if (deferred) break;
 
         responses.add(
           PluginResponse(
@@ -499,9 +657,23 @@ class PluginManager extends ChangeNotifier {
   }
 
   Future<void> tick() async {
+    if (_migrationPaused || _disposed) return;
     for (final plugin in _plugins.where((p) => p.info.isEnabled)) {
+      if (_migrationPaused || _disposed) return;
       try {
-        await plugin.onTick().timeout(const Duration(seconds: 3));
+        final work = plugin.onTick();
+        _tickTasks.add(work);
+        unawaited(
+          work.then<void>(
+            (_) {
+              _tickTasks.remove(work);
+            },
+            onError: (Object _) {
+              _tickTasks.remove(work);
+            },
+          ),
+        );
+        await work.timeout(const Duration(seconds: 3));
       } catch (e, stackTrace) {
         _log.fine('Plugin ${plugin.info.name} tick failed', e, stackTrace);
       }
@@ -533,7 +705,22 @@ class PluginManager extends ChangeNotifier {
     for (final plugin in _plugins.where((p) => p.info.isEnabled)) {
       unawaited(plugin.onDisable());
     }
+    nodePackages?.dispose();
     super.dispose();
+  }
+
+  Future<void> pauseForMigration() async {
+    _migrationPaused = true;
+    for (final plugin in _plugins.where((p) => p.info.isEnabled)) {
+      await plugin.onDisable().timeout(const Duration(seconds: 5));
+    }
+    final until = DateTime.now().add(const Duration(seconds: 15));
+    while (_active.values.any((n) => n > 0) || _tickTasks.isNotEmpty) {
+      if (DateTime.now().isAfter(until)) {
+        throw StateError('插件任务尚未结束，请稍后重试数据迁移。');
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+    }
   }
 }
 

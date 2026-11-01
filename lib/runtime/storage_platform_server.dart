@@ -18,6 +18,30 @@ class SharedPreferences {
   }
 
   bool containsKey(String key) => _box.containsKey(key);
+  Set<String> getKeys() => _box.keys.cast<String>().toSet();
+  Object? get(String key) {
+    final raw = _box.get(key);
+    return raw == null ? null : jsonDecode(raw);
+  }
+
+  int? getInt(String key) => get(key) as int?;
+  double? getDouble(String key) => (get(key) as num?)?.toDouble();
+  List<String>? getStringList(String key) =>
+      (get(key) as List?)?.cast<String>();
+  Future<bool> setInt(String key, int value) => _set(key, value);
+  Future<bool> setDouble(String key, double value) => _set(key, value);
+  Future<bool> setStringList(String key, List<String> value) =>
+      _set(key, value);
+  Future<bool> remove(String key) async {
+    await _box.delete(key);
+    return true;
+  }
+
+  Future<bool> _set(String key, Object value) async {
+    await _box.put(key, jsonEncode(value));
+    return true;
+  }
+
   Future<bool> setString(String key, String value) async {
     await _box.put(key, jsonEncode(value));
     return true;

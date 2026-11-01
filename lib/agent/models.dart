@@ -227,7 +227,7 @@ class AgentConnection {
 
 class AgentProvider {
   final String id, name, baseUrl, apiKey, model;
-  final bool tools, vision;
+  final bool tools, vision, video, videoAudio, stream;
   final int timeoutSeconds;
   final double? inputPrice, outputPrice, cachedPrice;
   AgentProvider({
@@ -238,11 +238,16 @@ class AgentProvider {
     this.apiKey = '',
     this.tools = true,
     this.vision = false,
-    this.timeoutSeconds = 60,
+    this.video = false,
+    this.videoAudio = false,
+    this.stream = false,
+    // Retain the old named argument for source/backup compatibility. Model
+    // requests now wait for completion or explicit cancellation.
+    int timeoutSeconds = 0,
     this.inputPrice,
     this.outputPrice,
     this.cachedPrice,
-  });
+  }) : timeoutSeconds = 0;
   factory AgentProvider.fromJson(Json j) => AgentProvider(
     id: text(j['id']),
     name: text(j['name']),
@@ -251,7 +256,9 @@ class AgentProvider {
     apiKey: text(j['apiKey']),
     tools: j['tools'] != false,
     vision: j['vision'] == true,
-    timeoutSeconds: integer(j['timeoutSeconds'], 60),
+    video: j['video'] == true,
+    videoAudio: j['videoAudio'] == true,
+    stream: j['stream'] == true,
     inputPrice: j['inputPrice'] is num
         ? (j['inputPrice'] as num).toDouble()
         : null,
@@ -271,19 +278,23 @@ class AgentProvider {
     'hasApiKey': apiKey.isNotEmpty,
     'tools': tools,
     'vision': vision,
+    'video': video,
+    'videoAudio': videoAudio,
+    'stream': stream,
     'timeoutSeconds': timeoutSeconds,
     'inputPrice': inputPrice,
     'outputPrice': outputPrice,
     'cachedPrice': cachedPrice,
   };
   void validate({bool requireModel = true}) {
+    if (videoAudio && !video) {
+      throw const AgentException('音轨理解需先开启模型的视频输入能力。');
+    }
     if (!safeId(id) ||
         name.trim().isEmpty ||
         (requireModel && model.trim().isEmpty) ||
-        timeoutSeconds < 5 ||
-        timeoutSeconds > 180 ||
         apiKey.contains(RegExp(r'[\r\n]'))) {
-      throw const AgentException('模型名称、模型 ID、超时或密钥格式无效。');
+      throw const AgentException('模型名称、模型 ID 或密钥格式无效。');
     }
     final u = httpEndpoint(baseUrl);
     if ([
@@ -302,6 +313,7 @@ class AgentProvider {
 
 class AgentPreset {
   final String id, name, prompt, providerId, imageDescriptionProviderId;
+  final String webSearchBackend, webSearchProviderId, videoProviderId;
   final List<String> skillIds;
   final double temperature;
   final int maxTokens,
@@ -312,6 +324,11 @@ class AgentPreset {
   final bool webSearchEnabled, showReasoning, timeAwareness;
   final bool multiMessageReply;
   final bool readMessageContext;
+  final bool builtinToolsEnabled, crossChatSendEnabled;
+  final bool videoUnderstandingEnabled;
+  final int videoFrames;
+  final List<String> disabledBuiltinTools;
+  final int maxToolCalls;
   AgentPreset({
     required this.id,
     required this.name,
@@ -324,10 +341,19 @@ class AgentPreset {
     this.imageDescriptionProviderId = '',
     this.imageMaxEdge = 1536,
     this.webSearchEnabled = false,
+    this.webSearchBackend = 'bing',
+    this.webSearchProviderId = '',
+    this.videoProviderId = '',
+    this.videoUnderstandingEnabled = true,
+    this.videoFrames = 6,
     this.showReasoning = false,
     this.timeAwareness = true,
     this.multiMessageReply = false,
     this.readMessageContext = true,
+    this.builtinToolsEnabled = true,
+    this.crossChatSendEnabled = false,
+    this.disabledBuiltinTools = const [],
+    this.maxToolCalls = 12,
     this.maxReplyMessages = 3,
     this.replyIntervalMs = 700,
   });
@@ -345,10 +371,21 @@ class AgentPreset {
     imageDescriptionProviderId: text(j['imageDescriptionProviderId']),
     imageMaxEdge: integer(j['imageMaxEdge'], 1536),
     webSearchEnabled: j['webSearchEnabled'] == true,
+    webSearchBackend: text(j['webSearchBackend']).isEmpty
+        ? 'bing'
+        : text(j['webSearchBackend']),
+    webSearchProviderId: text(j['webSearchProviderId']),
+    videoProviderId: text(j['videoProviderId']),
+    videoUnderstandingEnabled: j['videoUnderstandingEnabled'] != false,
+    videoFrames: integer(j['videoFrames'], 6),
     showReasoning: j['showReasoning'] == true,
     timeAwareness: j['timeAwareness'] != false,
     multiMessageReply: j['multiMessageReply'] == true,
     readMessageContext: j['readMessageContext'] != false,
+    builtinToolsEnabled: j['builtinToolsEnabled'] != false,
+    crossChatSendEnabled: j['crossChatSendEnabled'] == true,
+    disabledBuiltinTools: List.unmodifiable(strings(j['disabledBuiltinTools'])),
+    maxToolCalls: integer(j['maxToolCalls'], 12),
     maxReplyMessages: integer(j['maxReplyMessages'], 3),
     replyIntervalMs: integer(j['replyIntervalMs'], 700),
   );
@@ -364,14 +401,37 @@ class AgentPreset {
     'imageDescriptionProviderId': imageDescriptionProviderId,
     'imageMaxEdge': imageMaxEdge,
     'webSearchEnabled': webSearchEnabled,
+    'webSearchBackend': webSearchBackend,
+    'webSearchProviderId': webSearchProviderId,
+    'videoProviderId': videoProviderId,
+    'videoUnderstandingEnabled': videoUnderstandingEnabled,
+    'videoFrames': videoFrames,
     'showReasoning': showReasoning,
     'timeAwareness': timeAwareness,
     'multiMessageReply': multiMessageReply,
     'readMessageContext': readMessageContext,
+    'builtinToolsEnabled': builtinToolsEnabled,
+    'crossChatSendEnabled': crossChatSendEnabled,
+    'disabledBuiltinTools': disabledBuiltinTools,
+    'maxToolCalls': maxToolCalls,
     'maxReplyMessages': maxReplyMessages,
     'replyIntervalMs': replyIntervalMs,
   };
   void validate() {
+    if (!{'bing', 'deepseek'}.contains(webSearchBackend) ||
+        videoFrames < 2 ||
+        videoFrames > 8 ||
+        [
+          webSearchProviderId,
+          videoProviderId,
+        ].any((id) => id.isNotEmpty && !safeId(id))) {
+      throw const AgentException('搜索服务、视频模型或抽帧参数无效；视频抽帧须为2–8张。');
+    }
+    if (maxToolCalls < 1 ||
+        maxToolCalls > 32 ||
+        disabledBuiltinTools.length > 40) {
+      throw const AgentException('每轮工具次数须为1–32次，停用工具最多40个。');
+    }
     if (imageMaxEdge < 256 || imageMaxEdge > 4096) {
       throw const AgentException('输入图片最大边长须为 256–4096 像素。');
     }

@@ -18,6 +18,7 @@ flutter test --no-pub --concurrency 2 test/agent_js_packages_test.dart test/agen
 dart compile exe server/bin/manager.dart -o "$package/qqm-server"
 cp -R server/web "$package/server/web"
 cp assets/branding/logo.png "$package/assets/branding/logo.png"
+cp -R assets/node_plugins "$package/assets/node_plugins"
 cp plugins/index.json "$package/plugins/index.json"
 for plugin in example_plugin weather_plugin dice_plugin translate_comment daily_club group_games group_authorization; do
   cp -R "plugins/$plugin" "$package/plugins/$plugin"

@@ -14,6 +14,8 @@ import 'services/onboarding_preferences.dart';
 import 'ui/widgets/update_panel.dart';
 import 'ui/widgets/app_dialogs.dart';
 import 'ui/screens/onboarding_screen.dart';
+import 'services/data_migration_service.dart';
+import 'ui/screens/data_migration_screen.dart';
 
 class QQBotManagerApp extends StatefulWidget {
   const QQBotManagerApp({super.key});
@@ -36,6 +38,15 @@ class _QQBotManagerAppState extends State<QQBotManagerApp> {
     final onboarding = context.read<OnboardingPreferences?>();
     _showOnboarding = onboarding != null && !onboarding.completed;
     WidgetsBinding.instance.addPostFrameCallback((_) => _startUpdates());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final migration = context.read<DataMigrationService?>();
+      final notice = migration?.startupNotice;
+      final target = _navigatorKey.currentState?.overlay?.context;
+      if (mounted && notice != null && target != null) {
+        migration!.startupNotice = null;
+        AppDialogs.show(target, notice);
+      }
+    });
   }
 
   void _startUpdates() {
@@ -121,11 +132,15 @@ class _QQBotManagerAppState extends State<QQBotManagerApp> {
               _desktopWindow = desktop;
               desktop?.confirmClose = _confirmWindowClose;
             }
-            Widget content = UpdateNotice(
-              enabled: !_showOnboarding,
-              child: child!,
-              dialogContext: () => _navigatorKey.currentState!.overlay!.context,
-            );
+            final migration = context.watch<DataMigrationService?>();
+            Widget content = migration?.restartRequired == true
+                ? MigrationRestartScreen(service: migration!)
+                : UpdateNotice(
+                    enabled: !_showOnboarding,
+                    child: child!,
+                    dialogContext: () =>
+                        _navigatorKey.currentState!.overlay!.context,
+                  );
             if (usePhoneLayout(context)) {
               content = Theme(
                 data: AppTheme.phoneTheme(Theme.of(context)),

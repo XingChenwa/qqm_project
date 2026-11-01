@@ -5,7 +5,7 @@
 - `<插件ID>/plugin.json`：名称、命令、配置、权限与入口。
 - `<插件ID>/main.ht`：独立 Hetu 脚本，包含完整命令与玩法实现。
 - `examples/hello_script/plugin.json`：可直接导入的完整脚本示例（源码内嵌）。
-- `examples/`：JSON/YAML 规则、Markdown/按钮/媒体，以及 Node.js/Python HTTP 服务示例。
+- `examples/`：JSON/YAML 规则、Markdown/按钮/媒体、Node.js/Python HTTP 服务，以及 `original_node/` 原版 JavaScript 插件示例。
 - `schema/plugin.schema.json`：编辑器自动提示与格式校验。
 - `lib/src/`：宿主共用的消息、回复和状态存储模型。
 - `lib/translate_comment/comment_spans.dart`：公开 SDK 的纯文本注释解析工具。
@@ -13,6 +13,8 @@
 
 在「插件 → 写插件」中新建脚本项目；保存后应用到插件中心，检查配置并启用。插件中心的七个随附插件同样提供编辑入口。保存本地历史、保护未保存草稿，应用更新不会覆盖用户明确安装的自定义版本。
 
-完整项目分享：在插件中心导出清单（包含 `script.source`），对方导入该 JSON/YAML 即可。单独导出的源码文件仍需配套清单。插件全部默认关闭，安装不会执行源码或请求网络；手动启用后才运行。已保存的启停选择继续保留。
+Hetu 项目分享：在插件中心导出清单（包含 `script.source`），对方导入该 JSON/YAML 即可。单独导出的 `.ht` 文件仍需配套清单。七个随附插件默认关闭，已保存的启停选择继续保留。
+
+原版 Node / Yunzai 插件使用 **插件中心 → 导入原包**，直接选择 ZIP / JS 或填写 GitHub 仓库。软件识别入口、安装 npm 依赖并管理进程；源码和原生配置可单独编辑，默认停用，安装前需确认信任原版代码及其依赖脚本。分享时提供原源码或 ZIP，安装元数据 JSON 不能替代原包。详见 [原版 Node 插件](../docs/original-node-plugins.md)。
 
 详见 [中文插件开发文档](../docs/plugin-development.md)。

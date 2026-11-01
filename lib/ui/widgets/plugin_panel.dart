@@ -12,6 +12,7 @@ import '../../core/plugin_manager.dart';
 import '../../models/plugin.dart';
 import '../../models/plugin_manifest.dart';
 import '../../services/plugin_workspace.dart';
+import '../../services/desktop_file_location.dart';
 import '../themes/app_theme.dart';
 import 'plugin_config_dialog.dart';
 import 'plugin_developer_dialog.dart';
@@ -19,6 +20,7 @@ import 'plugin_import_dialog.dart';
 import 'plugin_workshop.dart';
 import 'weather_config_dialog.dart';
 import 'app_dialogs.dart';
+import 'node_plugin_dialogs.dart';
 
 class PluginPanel extends StatefulWidget {
   const PluginPanel({super.key});
@@ -29,6 +31,17 @@ class PluginPanel extends StatefulWidget {
 class _PluginPanelState extends State<PluginPanel> {
   String _query = '';
   int _filter = 0;
+
+  Future<void> _importOriginal() async {
+    final manager = context.read<PluginManager>();
+    final installed = await showDialog<bool>(
+      context: context,
+      builder: (_) => NodePackageImportDialog(manager: manager),
+    );
+    if (mounted && installed == true) {
+      await AppDialogs.show(context, '原包与依赖已安装。请打开插件配置，编辑原生配置文件后手动启用。');
+    }
+  }
 
   Future<void> _import([String initialSource = '']) async {
     final installed = await showDialog<bool>(
@@ -103,6 +116,72 @@ class _PluginPanelState extends State<PluginPanel> {
     }
   }
 
+  Future<void> _sourceFolder(String id, {bool reload = false}) async {
+    try {
+      final current = context.read<PluginManager>();
+      final plugin = current.plugins.where((p) => p.info.id == id).firstOrNull;
+      if (plugin?.info.manifest['runtime'] == 'node') {
+        final service = current.nodePackages!;
+        await service.loadSettings();
+        if (reload) {
+          await current.reloadNodePackage(id);
+          if (mounted) await AppDialogs.show(context, '原版插件已重新加载。');
+        } else if (!service.isRemote && isDesktopPlatform) {
+          final data = await service.request('/packages/files', {
+            'id': id,
+            'app_id': current.activeBotAppId,
+            'scope': 'source',
+          });
+          await DesktopFileLocation.open(data['directory'].toString());
+        } else if (mounted) {
+          await showDialog(
+            context: context,
+            builder: (_) => NodePackageFilesDialog(
+              service: service,
+              id: id,
+              appId: current.activeBotAppId,
+              scope: 'source',
+            ),
+          );
+        }
+        return;
+      }
+      final root = Directory(
+        p.join(
+          (await getApplicationSupportDirectory()).path,
+          'plugin_workspace',
+        ),
+      );
+      final workspace = PluginWorkspace(root);
+      await workspace.ensureRoot();
+      if (!mounted) return;
+      final manager = context.read<PluginManager>();
+      await workspace.seedProject(id, manager.exportPlugin(id));
+      if (reload) {
+        final source = await workspace.assembleProject(id);
+        if (mounted) {
+          await showDialog<bool>(
+            context: context,
+            builder: (_) =>
+                PluginImportDialog(manager: manager, initialSource: source),
+          );
+        }
+      } else {
+        await DesktopFileLocation.open(p.join(root.path, id));
+      }
+    } catch (error) {
+      if (mounted) {
+        await AppDialogs.show(
+          context,
+          error is PluginManifestException
+              ? error.message
+              : '源码文件夹未能打开，请检查目录权限。',
+          error: true,
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final manager = context.watch<PluginManager>();
@@ -161,6 +240,12 @@ class _PluginPanelState extends State<PluginPanel> {
                   onPressed: _workshop,
                   icon: const Icon(Icons.edit_note, size: 18),
                   label: const Text('写插件'),
+                ),
+                const SizedBox(width: 8),
+                FilledButton.icon(
+                  onPressed: _importOriginal,
+                  icon: const Icon(Icons.archive_outlined, size: 18),
+                  label: const Text('导入原包'),
                 ),
                 const SizedBox(width: 8),
                 FilledButton.icon(
@@ -241,7 +326,7 @@ class _PluginPanelState extends State<PluginPanel> {
                                   ),
                                   const SizedBox(height: 5),
                                   Text(
-                                    '用「写插件」按命令和回复生成清单，也可以管理插件文件夹里的文本。导入 JSON / YAML 仍然可用。',
+                                    '原版 Node / 云崽插件可从 ZIP、JS 或 GitHub 导入，保留原入口与配置。也可用「写插件」创建自己的脚本，JSON / YAML 清单仍然可用。',
                                     style: TextStyle(
                                       fontSize: 12,
                                       height: 1.6,
@@ -373,6 +458,12 @@ class _PluginPanelState extends State<PluginPanel> {
           ],
         ),
         const SizedBox(height: 14),
+        FilledButton.icon(
+          onPressed: _importOriginal,
+          icon: const Icon(Icons.archive_outlined),
+          label: const Text('导入原版 ZIP / JS / GitHub'),
+        ),
+        const SizedBox(height: 10),
         Row(
           children: [
             _mobileAction(Icons.edit_note_rounded, '写插件', '插件文件管理', _workshop),
@@ -437,7 +528,7 @@ class _PluginCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final bundled = manager.isBundled(info.id);
     final runtime = info.manifest['runtime'];
-    final accent = runtime == 'http'
+    final accent = runtime == 'http' || runtime == 'node'
         ? const Color(0xFF7C5CDA)
         : AppTheme.qqBlue;
     final error = manager.errorFor(info.id);
@@ -485,6 +576,8 @@ class _PluginCard extends StatelessWidget {
                             ? '脚本插件'
                             : runtime == 'http'
                             ? 'HTTP 服务'
+                            : runtime == 'node'
+                            ? 'Node 原版插件'
                             : '规则插件'}',
                         style: TextStyle(
                           fontSize: 11,
@@ -588,6 +681,38 @@ class _PluginCard extends StatelessWidget {
                   tooltip: '插件命令、清单与数据',
                   icon: const Icon(Icons.more_horiz, size: 19),
                   onSelected: (action) async {
+                    if (action == 'native-config') {
+                      await configureNodePlugin(context, manager, info);
+                      return;
+                    }
+                    if (action == 'dependencies') {
+                      try {
+                        await manager.nodePackages!.installDependencies(
+                          info.id,
+                        );
+                        await manager.reloadNodePackage(info.id);
+                        if (context.mounted) {
+                          await AppDialogs.show(context, '原包依赖已安装，插件已重新加载。');
+                        }
+                      } catch (error) {
+                        if (context.mounted) {
+                          await AppDialogs.show(
+                            context,
+                            error is FormatException
+                                ? error.message.toString()
+                                : '原包依赖安装失败。',
+                            error: true,
+                          );
+                        }
+                      }
+                      return;
+                    }
+                    if (action == 'reload') {
+                      await context
+                          .findAncestorStateOfType<_PluginPanelState>()
+                          ?._sourceFolder(info.id, reload: true);
+                      return;
+                    }
                     if (action == 'manifest') {
                       _viewManifest(context);
                       return;
@@ -599,14 +724,16 @@ class _PluginCard extends StatelessWidget {
                           title: Text('${info.name} · 命令'),
                           content: SingleChildScrollView(
                             child: SelectableText(
-                              manager.plugins
-                                  .firstWhere((p) => p.info.id == info.id)
-                                  .commands
-                                  .map(
-                                    (c) =>
-                                        '/${c.usage.isEmpty ? c.name : c.usage} — ${c.description}',
-                                  )
-                                  .join('\n'),
+                              runtime == 'node'
+                                  ? '命令由原包 JavaScript 规则定义。请查看源码目录内作者的 README，或在 QQ 发送原包帮助命令；#命令也可使用 /命令。'
+                                  : manager.plugins
+                                        .firstWhere((p) => p.info.id == info.id)
+                                        .commands
+                                        .map(
+                                          (c) =>
+                                              '/${c.usage.isEmpty ? c.name : c.usage} — ${c.description}',
+                                        )
+                                        .join('\n'),
                             ),
                           ),
                           actions: [
@@ -621,24 +748,54 @@ class _PluginCard extends StatelessWidget {
                     }
                     await _data(context, clear: action == 'clear');
                   },
-                  itemBuilder: (_) => const [
-                    PopupMenuItem(value: 'commands', child: Text('查看命令')),
-                    PopupMenuItem(value: 'manifest', child: Text('查看和复制插件清单')),
-                    PopupMenuItem(value: 'data', child: Text('导出本地玩法数据')),
-                    PopupMenuItem(value: 'clear', child: Text('清空本地玩法数据')),
+                  itemBuilder: (_) => [
+                    if (runtime == 'node')
+                      const PopupMenuItem(
+                        value: 'dependencies',
+                        child: Text('安装依赖'),
+                      ),
+                    if (runtime == 'node')
+                      const PopupMenuItem(
+                        value: 'native-config',
+                        child: Text('原生配置文件与权限'),
+                      ),
+                    if (isDesktopPlatform || runtime == 'node')
+                      const PopupMenuItem(
+                        value: 'reload',
+                        child: Text('重新加载源码'),
+                      ),
+                    const PopupMenuItem(value: 'commands', child: Text('查看命令')),
+                    const PopupMenuItem(
+                      value: 'manifest',
+                      child: Text('查看和复制插件清单'),
+                    ),
+                    if (runtime != 'node') ...[
+                      const PopupMenuItem(
+                        value: 'data',
+                        child: Text('导出本地玩法数据'),
+                      ),
+                      const PopupMenuItem(
+                        value: 'clear',
+                        child: Text('清空本地玩法数据'),
+                      ),
+                    ],
                   ],
                 ),
                 IconButton(
-                  tooltip: '在工作台编辑',
+                  tooltip: isDesktopPlatform ? '打开源码文件夹' : '文件管理 · 编辑源码',
                   onPressed: () {
                     final panel = context
                         .findAncestorStateOfType<_PluginPanelState>();
-                    panel?._workshop(
-                      id: info.id,
-                      source: manager.exportPlugin(info.id),
-                    );
+                    if (isDesktopPlatform) {
+                      panel?._sourceFolder(info.id);
+                    } else {
+                      panel?._workshop(
+                        id: info.id,
+                        source: manager.exportPlugin(info.id),
+                      );
+                    }
                   },
-                  icon: const Icon(Icons.edit_outlined, size: 19),
+                  icon: const Icon(Icons.folder_open_outlined, size: 19),
                 ),
                 if (!bundled)
                   IconButton(
@@ -727,6 +884,10 @@ class _PluginCard extends StatelessWidget {
 
   Future<void> _configure(BuildContext context) async {
     try {
+      if (info.manifest['runtime'] == 'node') {
+        await configureNodePlugin(context, manager, info);
+        return;
+      }
       final definition = PluginManifest.parse(
         jsonEncode(info.manifest),
         allowBuiltin: true,
@@ -774,7 +935,9 @@ class _PluginCard extends StatelessWidget {
                 if (manager.isBundled(info.id))
                   const Padding(
                     padding: EdgeInsets.only(bottom: 12),
-                    child: Text('包含完整脚本源码。可复制导入，或在工作台编辑后应用；本机配置中的密钥不随清单导出。'),
+                    child: Text(
+                      '脚本清单可复制导入；原版 Node 插件的此处仅为安装元数据，完整源码请从原包目录查看。本机密钥配置不会随清单导出。',
+                    ),
                   ),
                 SelectableText(
                   source,

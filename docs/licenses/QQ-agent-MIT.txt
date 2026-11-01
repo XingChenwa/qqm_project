@@ -1,6 +1,8 @@
-Design reference: https://github.com/K0nd1us/QQ-agent
-The QQM Agent module is independently implemented in Dart. This notice records
-the license and attribution of the referenced project; it does not change the
+Reference and adapted calendar/tool integration: QQ Agent 0.4
+https://github.com/K0nd1us/QQ-agent
+The QQM Agent module uses its own Dart protocol adapters. Calendar data and
+tool/extension behavior are adapted from the MIT-licensed QQ Agent project.
+This notice preserves the upstream attribution and does not change the
 QQ Bot Manager application's GPL-2.0 license.
 
 MIT License

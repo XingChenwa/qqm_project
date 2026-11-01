@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 import '../services/image_upload_service.dart';
 import '../services/websocket_service.dart';
+import '../services/shared_qq_gateway.dart';
+import '../services/official_reply_sequences.dart';
 import '../utils/constants.dart';
 import '../utils/bot_command_context.dart';
 import '../utils/profile_helpers.dart';
@@ -15,7 +17,7 @@ import '../models/received_message.dart';
 import 'message_context.dart';
 import 'audio.dart';
 
-/// A separate official QQ gateway session. Never uses BotClient or its stores.
+/// Independent Agent state with a reference-counted official gateway lease.
 class QqBotAgentTransport extends AgentTransport {
   final AgentConnection config;
   final AgentHttp _http;
@@ -24,6 +26,7 @@ class QqBotAgentTransport extends AgentTransport {
   final DateTime Function() _clock;
   final Future<int> Function(String messageId, int limit)? reserveSequence;
   final int Function(String messageId)? sequenceUsed;
+  final OfficialReplySequences? sharedSequences;
   final ProfileRequestQueue _profileQueue;
   final OiapiService _nicknames;
   final _profileDeniedReported = <String>{};
@@ -46,12 +49,23 @@ class QqBotAgentTransport extends AgentTransport {
     DateTime Function()? clock,
     this.reserveSequence,
     this.sequenceUsed,
+    this.sharedSequences,
     ProfileRequestQueue? profileQueue,
     OiapiService? nicknames,
   }) : _http = http ?? AgentHttp(),
        _profileQueue = profileQueue ?? ProfileRequestQueue(),
        _nicknames = nicknames ?? OiapiService(),
-       _ws = socket ?? WebSocketService(),
+       _ws =
+           socket ??
+           OfficialQqGatewayPool.shared.client(
+             scope: () => officialQqScope(
+               config.selfId,
+               apiBase?.toString() ??
+                   (config.sandbox
+                       ? AppConstants.qqSandboxUrl
+                       : AppConstants.qqBaseUrl),
+             ),
+           ),
        _base =
            apiBase ??
            Uri.parse(
@@ -342,6 +356,15 @@ class QqBotAgentTransport extends AgentTransport {
             ? [data['group_name'], data['name']]
             : [data['username'], data['nickname'], data['nick'], data['name']],
       ),
+      for (final key in [
+        'member_count',
+        'max_member_count',
+        'member_role',
+        'role',
+        'member_num',
+        'status',
+      ])
+        if (data[key] is String || data[key] is num) key: data[key],
       'source': 'qq',
     };
   }
@@ -714,9 +737,18 @@ class QqBotAgentTransport extends AgentTransport {
     Future<void> nextSequence() async {
       if (!active) return;
       final limit = group ? 5 : 4;
-      final sequence = reserveSequence == null
+      var sequence = reserveSequence == null
           ? (_sequences.update(reply, (v) => v + 1, ifAbsent: () => 1))
           : await reserveSequence!(reply, limit);
+      sequence =
+          sharedSequences?.reserve(
+            officialQqScope(config.selfId, _base.toString()),
+            'message:$reply',
+            minimum: sequence,
+            limit: limit,
+          ) ??
+          sequence;
+      await sharedSequences?.settled();
       _sequences[reply] = sequence;
       if (sequence > limit) {
         throw const AgentException('这条消息的被动回复次数已用完，请等待新消息。');
@@ -764,7 +796,15 @@ class QqBotAgentTransport extends AgentTransport {
       return 0;
     }
     final local = _sequences[id] ?? 0, saved = sequenceUsed?.call(id) ?? 0;
-    return (limit - (local > saved ? local : saved)).clamp(0, limit);
+    final floor = local > saved ? local : saved;
+    final used =
+        sharedSequences?.used(
+          officialQqScope(config.selfId, _base.toString()),
+          'message:$id',
+          floor: floor,
+        ) ??
+        floor;
+    return (limit - used).clamp(0, limit);
   }
 
   @override

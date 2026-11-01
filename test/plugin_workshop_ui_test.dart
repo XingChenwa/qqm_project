@@ -236,7 +236,7 @@ void main() {
         source.replaceAll('hello', 'otherhello'),
       ),
     );
-    await tester.tap(find.text('应用到插件中心'));
+    await tester.tap(find.text('保存并应用到插件中心'));
     await settleFiles(tester);
     expect(find.byType(PluginImportDialog), findsNothing);
     expect(find.textContaining('文件已被其他窗口修改'), findsOneWidget);
@@ -252,7 +252,7 @@ void main() {
       ),
     );
     await settleFiles(tester);
-    await tester.tap(find.text('应用到插件中心'));
+    await tester.tap(find.text('保存并应用到插件中心'));
     await settleFiles(tester);
     expect(find.byType(PluginImportDialog), findsOneWidget);
     expect(find.text('检查清单'), findsOneWidget);

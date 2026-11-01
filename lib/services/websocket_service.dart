@@ -52,6 +52,17 @@ class WebSocketService {
 
   void updateAccessToken(String token) => _accessToken = token;
 
+  void updateReconnectPolicy({required bool autoReconnect, required Duration reconnectInterval}) {
+    final wasEnabled = _autoReconnect;
+    _autoReconnect = autoReconnect;
+    _reconnectInterval = reconnectInterval;
+    if (!autoReconnect) {
+      _reconnectTimer?.cancel();
+    } else if (!wasEnabled && _allowReconnect && !isConnected && _state != ConnectionState.connecting) {
+      _scheduleReconnect();
+    }
+  }
+
   void _setState(ConnectionState newState) {
     _state = newState;
     onConnectionStateChanged?.call(_stateLabel);

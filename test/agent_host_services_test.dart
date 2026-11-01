@@ -307,7 +307,7 @@ void main() {
       await agent.connect('test');
     }
 
-    test('原连发策略合并同一用户未@的跟随消息，保留真实记录与发送回执', () async {
+    test('原连发策略合并同用户跟随消息；连续会话中其他成员单独响应', () async {
       final burst = await install('plugins-burst-merge');
       await connect([burst.id], window: 220);
       transport.receive(id: '1', content: '第一句话');
@@ -330,6 +330,9 @@ void main() {
       expect(input, contains('第一句话'));
       expect(input, contains('第二句话'));
       expect(input, isNot(contains('路人插话')));
+      await core.eventually(() => transport.sent.length == 2);
+      expect(model.requests, hasLength(2));
+      expect(jsonEncode(model.requests.last['messages']), contains('路人插话'));
       expect(
         agent.store
             .messages(agent.sessions().single.key)

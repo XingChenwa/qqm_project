@@ -410,7 +410,14 @@ void main() {
     final t = await connect('a', '10001');
     t.receive();
     await eventually(() => t.sent.isNotEmpty);
-    expect(model.requests.first['tools'], hasLength(1));
+    final names = (model.requests.first['tools'] as List)
+        .map((tool) => object(object(tool)['function'])['name'])
+        .toList();
+    expect(names.where((name) => name == 'current_time'), hasLength(1));
+    expect(
+      names,
+      containsAll(['get_recent_messages', 'get_user_info', 'send_message']),
+    );
     expect((model.requests.last['messages'] as List).last['role'], 'tool');
     expect(t.sent, hasLength(1));
     expect(jsonEncode(agent.logs), contains('current_time'));

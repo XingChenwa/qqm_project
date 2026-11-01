@@ -8,6 +8,7 @@ import 'ip_whitelist_service.dart';
 import '../utils/qq_mentions.dart';
 import '../models/media_image.dart';
 import 'material_image_upload.dart';
+import '../utils/inline_image.dart';
 
 class ApiResult<T> {
   final T? data;
@@ -429,8 +430,12 @@ class ApiService {
           accessToken: accessToken,
           targetId: targetId,
           isGroup: isGroup,
-          imageUrl: _isHttpUrl(source) ? source : null,
-          file: _isHttpUrl(source) ? null : File(source),
+          imageUrl: _isHttpUrl(source) || source.startsWith('data:image/')
+              ? source
+              : null,
+          file: _isHttpUrl(source) || source.startsWith('data:image/')
+              ? null
+              : File(source),
           fileType: message.mediaFileType,
         );
         if (!result.isSuccess) return result;
@@ -711,7 +716,11 @@ class ApiService {
         return await postUpload(imageBody(await _images.fromUrl(imageUrl)));
       }
       final Object data;
-      if (isRemoteUrl) {
+      final inline = imageUrl == null ? null : inlineImageBytes(imageUrl);
+      if (inline != null) {
+        if (fileType != 1) return ApiResult.failure('内嵌图片只能按图片类型上传');
+        data = imageBody(await _images.prepare(inline, 'plugin-image'));
+      } else if (isRemoteUrl) {
         data = {'file_type': fileType, 'url': imageUrl, 'srv_send_msg': false};
       } else if (file != null && fileType == 1) {
         data = imageBody(await _images.fromFile(file));

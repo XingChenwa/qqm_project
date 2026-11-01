@@ -1,0 +1,15 @@
+# Python 3.10, isolated CPU environment. Torch wheels are installed separately
+# from https://download.pytorch.org/whl/cpu; keep resolver from adding CUDA wheels.
+torch==2.6.0+cpu
+torchaudio==2.6.0+cpu
+numpy==1.23.5
+scipy==1.10.1
+numba==0.57.1
+llvmlite==0.40.1
+librosa==0.10.2.post1
+omegaconf==2.0.6
+hydra-core==1.0.7
+fairseq==0.12.2
+faiss-cpu==1.7.3
+rvc-python==0.1.5
+demucs==4.0.1

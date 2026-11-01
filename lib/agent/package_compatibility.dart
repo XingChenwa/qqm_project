@@ -1,7 +1,7 @@
 import 'dart:convert';
 import 'models.dart';
 
-const agentPackageHostVersion = 4;
+const agentPackageHostVersion = 10;
 
 /// Describe real host boundaries separately from ZIP validity. A package can be
 /// retained and edited without pretending unavailable services were activated.
@@ -24,15 +24,28 @@ Json packageCompatibility(Json manifest, Json inspection) {
       '扩展自检未通过：${reason.isEmpty ? '缺少运行环境或配置，请检查插件设置和配套文件。' : reason}',
     );
   }
-  if (RegExp(r'(?<![.\w])fetch\s*\(|globalThis\.fetch').hasMatch(sources)) {
+  final usesNodeHttp = RegExp(
+    r'''(?:from\s*|import\s*\()['"](?:node:)?https?['"]''',
+  ).hasMatch(sources);
+  if (usesNodeHttp) requirements.add('nodeHttp');
+  if (RegExp(r'(?<![.\w])fetch\s*\(|globalThis\.fetch').hasMatch(sources) ||
+      usesNodeHttp) {
     requirements.add('publicFetch');
     if (!strings(
       object(manifest['packageManifest'])['permissions'],
     ).contains('web_fetch')) {
-      warnings.add('原包使用全局 fetch，启用后可访问公共 HTTPS 服务；请求仍受地址、体积、超时和鉴权范围限制。');
+      warnings.add(
+        usesNodeHttp
+            ? '原包使用 Node HTTP 客户端兼容接口，可访问公共 HTTP / HTTPS 服务；请求仍受地址、体积、超时和鉴权范围限制。'
+            : '原包使用全局 fetch，启用后可访问公共 HTTPS 服务；请求仍受地址、体积、超时和鉴权范围限制。',
+      );
     }
   }
   if (sources.contains('globalThis.WebSocket')) requirements.add('websocket');
+  if (usesNodeHttp && RegExp(r'\bcreateServer\s*\(').hasMatch(sources)) {
+    requirements.add('localNodeServer');
+    blockers.add('此包需要启动本地 HTTP 服务。内嵌引擎提供 HTTP 客户端接口，本地设置页需接入独立 Node.js 服务。');
+  }
   const supportedHooks = {
     'before-context',
     'before-llm-messages',

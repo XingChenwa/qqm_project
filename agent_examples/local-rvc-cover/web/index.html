@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>本地 AI 翻唱 · QQ机器人管理器</title>
+<style>
+:root{font-family:system-ui,"Microsoft YaHei",sans-serif;color:#193452;background:#f3f7fc;font-size:15px}*{box-sizing:border-box}body{margin:0}main{max-width:1040px;margin:auto;padding:38px 24px}header{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:28px}h1{font-size:28px;margin:0 0 8px}p{line-height:1.7;color:#62778e;margin:8px 0}h2{font-size:19px;margin:0 0 16px}.badge{background:#e7efff;color:#3266dc;border-radius:30px;padding:7px 13px;white-space:nowrap}.card{background:white;border:1px solid #e1e9f3;border-radius:18px;padding:24px;margin:18px 0;box-shadow:0 5px 25px #26466c05}.grid{display:grid;grid-template-columns:1fr 1fr;gap:18px}label{display:block;margin:12px 0;color:#526982}input,select,button{font:inherit;border-radius:10px;padding:10px 12px}input,select{display:block;width:100%;margin-top:7px;border:1px solid #d5e0ed;background:#fbfdff;color:#193452}input[type=file]{padding:8px}button{cursor:pointer;border:1px solid #d5e3fb;background:#f3f7ff;color:#2d64d9;margin:8px 8px 0 0}button.primary{background:#3772ed;color:white;border-color:#3772ed}button:disabled{opacity:.5;cursor:wait}.notice{padding:12px 16px;background:#fff8e5;border:1px solid #f3e1ae;border-radius:12px;white-space:pre-line;line-height:1.7}.okay{background:#edf9f3;border-color:#cde9da}.job{border-top:1px solid #e7edf5;padding:18px 0}.job strong{display:block;margin-bottom:6px}.job small{color:#7f90a4}audio{display:block;width:100%;margin:10px 0}details{margin-top:10px}pre{background:#f7f9fc;padding:14px;max-height:230px;overflow:auto;white-space:pre-wrap;word-break:break-word;font-size:12px}#toast{position:fixed;bottom:26px;left:50%;transform:translateX(-50%);background:#193452;color:white;padding:12px 20px;border-radius:12px;max-width:90%;display:none;z-index:2}a{color:#3266dc;text-decoration:none}.meta{font-size:13px;color:#8292a4}@media(max-width:680px){main{padding:24px 16px}.grid{grid-template-columns:1fr}.card{padding:18px}h1{font-size:23px}header{align-items:flex-start}}
+</style>
+<main>
+<header><div><h1>本地 AI 翻唱</h1><p>分离人声 · 转换音色 · 混合伴奏</p></div><span class="badge">CPU 本机服务</span></header>
+<div class="notice" id="health">正在连接本地环境…</div>
+<section class="card"><h2>导入素材</h2><p>音色需要 RVC 推理用的 .pth 模型。歌曲支持 WAV、MP3、M4A、FLAC 等音频。文件导入后保存在本机，不覆盖同名文件。</p>
+<div class="grid"><div><label>音色模型<input id="modelFile" type="file" accept=".pth"></label><button data-upload="models">导入音色</button></div><div><label>歌曲音频<input id="songFile" type="file" accept="audio/*,.flac"></label><button data-upload="songs">导入歌曲</button></div></div></section>
+<section class="card"><h2>QQ 音乐导入</h2><p>输入歌名即可找歌。同名或多个版本会列出歌手和完整歌名，选好后导入。</p><label>歌名 / 歌手<input id="qqQuery" placeholder="例如：唯一，或告五人 唯一" maxlength="100"></label><button id="searchQq" class="primary">搜索歌曲</button><div id="searchResults" aria-live="polite"></div><details><summary>已有歌曲链接 / MID</summary><label>歌曲链接 / MID<input id="qqSong" placeholder="https://y.qq.com/n/ryqq/songDetail/…" maxlength="2048"></label><button id="importQq">按链接导入</button></details></section>
+<section class="card"><h2>开始翻唱</h2><div class="grid"><label>歌曲<select id="song"></select></label><label>音色<select id="model"></select></label></div>
+<div class="grid"><label>升降调（半音）<input id="pitch" type="number" min="-24" max="24" value="0"></label><label>试听时长（秒）<input id="seconds" type="number" min="5" max="60" value="30"></label></div>
+<label>试听起点（秒）<input id="clipStart" type="number" min="0" max="900" value="0"></label>
+<button id="start" class="primary">开始翻唱</button><button id="refresh">刷新素材</button><p class="meta">CPU 处理较慢，同一时间运行一个任务。整首 MP3 留在本机，聊天可发送不超过60秒的试听。</p></section>
+<section class="card"><h2>任务与成品</h2><div id="jobs"><p>还没有任务。</p></div></section>
+<p class="meta">在 QQ Agent → Skills 启用「本地 AI 翻唱 · RVC」，并在 AI 预设中选中。聊天中可让机器人检查环境、列出歌曲 / 音色、开始翻唱、查询进度及发送成品。刚提交不代表已完成；生成完成后再请求发送。</p>
+</main><div id="toast" role="status"></div>
+<script>
+'use strict';
+const $=id=>document.getElementById(id);let toastTimer,refreshing=false;const jobRows=new Map(),completedImports=new Set();
+function toast(text){$('toast').textContent=text;$('toast').style.display='block';clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('toast').style.display='none',6000);}
+async function api(url,body){const response=await fetch(url,body?{method:'POST',headers:{'Content-Type':'application/json','X-QQM-Cover':'1'},body:JSON.stringify(body)}:{});const data=await response.json();if(!response.ok||data.isError||data.ok===false)throw new Error(data.message||data.error||data.detail||'请求失败');return data;}
+function options(id,items){const select=$(id),previous=select.value;select.replaceChildren();for(const item of items){const option=document.createElement('option');option.value=item.id;option.textContent=item.name;select.append(option);}if(items.some(item=>item.id===previous))select.value=previous;}
+async function refresh(){const data=await api('/api/health');$('health').textContent=data.message;$('health').classList.toggle('okay',data.canCover);options('song',data.songs);options('model',data.models);$('start').disabled=!data.canCover||!data.songs.length;}
+for(const button of document.querySelectorAll('[data-upload]'))button.addEventListener('click',async()=>{const kind=button.dataset.upload,file=$(kind==='models'?'modelFile':'songFile').files[0];if(!file)return toast('请先选择文件');button.disabled=true;try{const form=new FormData();form.append('file',file);const response=await fetch('/api/upload?kind='+kind,{method:'POST',headers:{'X-QQM-Cover':'1'},body:form});const data=await response.json();if(!response.ok||!data.ok)throw new Error(data.detail||'导入失败');toast(data.message);await refresh();}catch(error){toast(error.message);}finally{button.disabled=false;}});
+async function searchQq(){const query=$('qqQuery').value.trim();if(!query)return toast('请先输入歌名，可加歌手或版本');$('searchQq').disabled=true;try{const data=await api('/api/tool',{action:'search_qq',scope:'desktop',args:{query}}),container=$('searchResults');container.replaceChildren();const hint=document.createElement('p');hint.textContent=data.candidates?.length?'请选择要导入的版本（20分钟内有效）：':data.message;container.append(hint);for(const candidate of data.candidates||[]){const button=document.createElement('button');button.type='button';button.textContent=candidate.number+'. '+candidate.name+' — '+candidate.singer;button.style.maxWidth='100%';button.style.whiteSpace='normal';button.style.textAlign='left';button.addEventListener('click',async()=>{const buttons=container.querySelectorAll('button');buttons.forEach(b=>b.disabled=true);try{const selected=await api('/api/tool',{action:'select_qq',scope:'desktop',args:{search_id:data.search_id,choice:candidate.number}});hint.textContent='已选择：'+candidate.name+' — '+candidate.singer;toast(selected.message);await jobs();await refresh();}catch(error){toast(error.message);buttons.forEach(b=>b.disabled=false);}});container.append(button);}}catch(error){toast(error.message);}finally{$('searchQq').disabled=false;}}
+$('searchQq').addEventListener('click',searchQq);$('qqQuery').addEventListener('keydown',event=>{if(event.key==='Enter'&&!$('searchQq').disabled){event.preventDefault();searchQq();}});
+$('importQq').addEventListener('click',async()=>{const song=$('qqSong').value.trim();if(!song)return toast('请填写歌曲详情链接或MID');$('importQq').disabled=true;try{const data=await api('/api/tool',{action:'import_qq',scope:'desktop',args:{song}});toast(data.message);await jobs();await refresh();}catch(error){toast(error.message);}finally{$('importQq').disabled=false;}});
+$('start').addEventListener('click',async()=>{if(!$('song').value||!$('model').value)return toast('请先导入歌曲与音色');$('start').disabled=true;try{const data=await api('/api/tool',{action:'start',scope:'desktop',args:{song:$('song').value,model:$('model').value,pitch:Number($('pitch').value),clip_seconds:Number($('seconds').value),clip_start:Number($('clipStart').value)}});toast(data.message);await jobs();}catch(error){toast(error.message);}finally{$('start').disabled=false;}});
+$('refresh').addEventListener('click',()=>refresh().catch(error=>toast(error.message)));
+async function jobs(){
+  if(refreshing)return;refreshing=true;
+  try{
+    const data=await api('/api/jobs'),container=$('jobs');let reload=false;
+    for(const [id,saved] of jobRows)if(!data.jobs.some(job=>job.id===id)){saved.row.remove();jobRows.delete(id);}
+    if(data.jobs.length&&!jobRows.size)container.replaceChildren();
+    for(const [index,job] of data.jobs.entries()){
+      const signature=JSON.stringify(job),previous=jobRows.get(job.id);
+      if(previous?.signature===signature)continue;
+      const row=document.createElement('div');row.className='job';
+      const title=document.createElement('strong');title.textContent=job.song+' · '+job.model;
+      const message=document.createElement('p');message.textContent=job.message;
+      const id=document.createElement('small');id.textContent='任务 '+job.id;row.append(title,message,id);
+      if(job.status==='completed'&&job.type==='import'){
+        if(!completedImports.has(job.id)){completedImports.add(job.id);reload=true;}
+      }else if(job.status==='completed'){
+        const audio=document.createElement('audio');audio.controls=true;audio.preload='none';audio.src='/audio/'+job.id+'/clip.mp3';
+        const link=document.createElement('a');link.href='/audio/'+job.id+'/cover.mp3';link.textContent='下载完整翻唱 MP3';row.append(audio,link);
+      }
+      if(job.logs?.length){const details=document.createElement('details'),summary=document.createElement('summary'),pre=document.createElement('pre');summary.textContent='运行日志';pre.textContent=job.logs.join('\n');details.append(summary,pre);row.append(details);}
+      if(previous)previous.row.replaceWith(row);else container.insertBefore(row,container.children[index]||null);
+      jobRows.set(job.id,{signature,row});
+    }
+    if(reload)await refresh();
+  }finally{refreshing=false;}
+}
+refresh().catch(error=>{$('health').textContent=error.message;});jobs().catch(error=>toast(error.message));setInterval(()=>{if(!document.hidden)jobs().catch(()=>{});},4000);
+</script>
+</html>

@@ -6,6 +6,8 @@ import '../models/config.dart';
 import '../models/outgoing_message.dart';
 import '../services/api_service.dart';
 import '../services/websocket_service.dart';
+import '../services/shared_qq_gateway.dart';
+import '../services/official_reply_sequences.dart';
 import '../services/storage_service.dart';
 import '../services/profile_request_queue.dart';
 import '../services/oiapi_service.dart';
@@ -24,7 +26,10 @@ class BotClient extends ChangeNotifier {
   final Logger _log = Logger('BotClient');
   final StorageService _storage;
   final ApiService _apiService;
-  final WebSocketService _wsService;
+  late final WebSocketService _wsService;
+  OfficialReplySequences? officialReplySequences;
+  String get _sequenceScope =>
+      OfficialReplySequences.scope(_config.appId, _config.resolvedApiBaseUrl);
   ProfileRequestQueue _profileRequests;
   ProfileRequestQueue _nicknameRequests;
   final OiapiService _oiapiService;
@@ -198,9 +203,14 @@ class BotClient extends ChangeNotifier {
   }) : _apiService = apiService ?? ApiService(),
        _profileRequests = profileRequests ?? ProfileRequestQueue(),
        _nicknameRequests = nicknameRequests ?? ProfileRequestQueue(),
-       _oiapiService = oiapiService ?? OiapiService(),
-       _wsService = webSocketService ?? WebSocketService() {
+       _oiapiService = oiapiService ?? OiapiService() {
     _loadConfig();
+    _wsService =
+        webSocketService ??
+        OfficialQqGatewayPool.shared.client(
+          scope: () =>
+              officialQqScope(_config.appId, _config.resolvedApiBaseUrl),
+        );
     _wsService.refreshAccessToken = _getAccessToken;
     _wsService.onConnectionStateChanged = (status) {
       if (_disposed) return;
@@ -476,6 +486,20 @@ class BotClient extends ChangeNotifier {
     _gatewaySessionId = '';
     _addLog('已断开连接');
     notifyListeners();
+  }
+
+  Future<void> pauseForMigration() async {
+    _accountEpoch++;
+    _profileGeneration++;
+    _nicknameGeneration++;
+    _configRevision++;
+    disconnect();
+    await Future.wait([
+      ..._pendingPluginDispatches.values,
+      ..._profileSyncs.values,
+    ]).timeout(const Duration(seconds: 30));
+    await groups.flush();
+    await _storage.flush();
   }
 
   void _handleReady(Map<String, dynamic> data) {
@@ -1422,6 +1446,7 @@ class BotClient extends ChangeNotifier {
     OutgoingMessage message, {
     bool isGroup = false,
     MessageModel? replyTo,
+    void Function(String messageId)? onSent,
   }) async {
     message = message.withMarkdownMentions();
     final epoch = _accountEpoch;
@@ -1440,6 +1465,9 @@ class BotClient extends ChangeNotifier {
       reserve: true,
     );
     if (context == null) return false;
+    if (!await _commitReplySequence() || _disposed || epoch != _accountEpoch) {
+      return false;
+    }
     final result = await _checkedApi(
       () => _apiService.sendConfiguredMessage(
         baseUrl: _config.resolvedApiBaseUrl,
@@ -1458,7 +1486,9 @@ class BotClient extends ChangeNotifier {
       _setSendError(result.error ?? '消息发送失败');
       return false;
     }
-    final mediaName = message.mediaSource.isNotEmpty
+    final mediaName = message.mediaSource.startsWith('data:image/')
+        ? '插件图片'
+        : message.mediaSource.isNotEmpty
         ? message.mediaSource.split(RegExp(r'[/\\]')).last
         : '已上传的媒体';
     addLocalBotMessage(
@@ -1483,13 +1513,17 @@ class BotClient extends ChangeNotifier {
         if (message.options.keyboard != null)
           'keyboard': message.options.keyboard!.toJson(),
         if (message.type == 7) 'mediaFileType': message.mediaFileType,
-        if (message.type == 7) 'mediaSource': message.mediaSource,
+        if (message.type == 7 &&
+            !(message.mediaFileType == 1 &&
+                message.mediaSource.startsWith('data:image/')))
+          'mediaSource': message.mediaSource,
         if (result.metadata != null) 'response': result.metadata,
       },
     );
     _addLog(
       '消息已发送（类型 ${message.type}${message.options.keyboard == null ? '' : '，含按钮键盘'}）',
     );
+    onSent?.call(result.data ?? '');
     return true;
   }
 
@@ -1546,9 +1580,23 @@ class BotClient extends ChangeNotifier {
             if (stored > current) current = stored;
           }
         }
+        current =
+            officialReplySequences?.used(
+              _sequenceScope,
+              'event:$eventId',
+              floor: current,
+            ) ??
+            current;
         sequence = current + 1;
       case ReplyMode.active:
         break;
+    }
+    if (messageId.isNotEmpty &&
+        (officialReplySequences?.used(_sequenceScope, 'message:$messageId') ??
+                0) >=
+            (isGroup ? 5 : 4)) {
+      _setSendError('这条消息的回复次数已用完，请等待对方发送新消息');
+      return null;
     }
     if (options.sequence != null) {
       if (messageId.isEmpty && eventId.isEmpty) {
@@ -1562,6 +1610,13 @@ class BotClient extends ChangeNotifier {
       sequence = options.sequence;
     }
     if (reserve && sequence != null) {
+      sequence =
+          officialReplySequences?.reserve(
+            _sequenceScope,
+            eventId.isNotEmpty ? 'event:$eventId' : 'message:$messageId',
+            minimum: sequence,
+          ) ??
+          sequence;
       _replySequences[eventId.isNotEmpty
               ? '$sessionId:event:$eventId'
               : '$sessionId:$messageId'] =
@@ -1601,6 +1656,9 @@ class BotClient extends ChangeNotifier {
     if (token == null || _disposed || epoch != _accountEpoch) return false;
     final reply = _replyContext(targetId, isGroup, replyTo);
     if (reply == null) return false;
+    if (!await _commitReplySequence() || _disposed || epoch != _accountEpoch) {
+      return false;
+    }
     final result = await _checkedApi(
       () => _apiService.sendQQMessage(
         baseUrl: _config.resolvedApiBaseUrl,
@@ -1645,6 +1703,9 @@ class BotClient extends ChangeNotifier {
     if (token == null || _disposed || epoch != _accountEpoch) return false;
     final reply = _replyContext(targetId, isGroup, replyTo);
     if (reply == null) return false;
+    if (!await _commitReplySequence() || _disposed || epoch != _accountEpoch) {
+      return false;
+    }
     final effectiveTemplateId = useTemplate
         ? (templateId ?? _config.markdownTemplateId)
         : null;
@@ -1706,6 +1767,9 @@ class BotClient extends ChangeNotifier {
     if (token == null || _disposed || epoch != _accountEpoch) return false;
     final reply = _replyContext(targetId, isGroup, replyTo);
     if (reply == null) return false;
+    if (!await _commitReplySequence() || _disposed || epoch != _accountEpoch) {
+      return false;
+    }
     final result = await _checkedApi(
       () => _apiService.sendQQImage(
         baseUrl: _config.resolvedApiBaseUrl,
@@ -1903,9 +1967,33 @@ class BotClient extends ChangeNotifier {
         if (sequence > current) current = sequence;
       }
     }
-    final next = current + 1;
+    current =
+        officialReplySequences?.used(
+          _sequenceScope,
+          'message:$replyMessageId',
+          floor: current,
+        ) ??
+        current;
+    final next = reserve
+        ? officialReplySequences?.reserve(
+                _sequenceScope,
+                'message:$replyMessageId',
+                minimum: current + 1,
+              ) ??
+              current + 1
+        : current + 1;
     if (reserve) _replySequences[key] = next;
     return next;
+  }
+
+  Future<bool> _commitReplySequence() async {
+    try {
+      await officialReplySequences?.settled();
+      return true;
+    } on FormatException catch (error) {
+      _setSendError(error.message.toString());
+      return false;
+    }
   }
 
   Future<String?> _prepareSend(String targetId) async {
@@ -1969,7 +2057,13 @@ class BotClient extends ChangeNotifier {
             (m) => m.isFromBot && m.extra?['replyMessageId'] == inbound!.id,
           )
           .length;
-      if (count >= (isGroup ? 5 : 4)) {
+      final sharedCount =
+          officialReplySequences?.used(
+            _sequenceScope,
+            'message:${inbound.id}',
+          ) ??
+          0;
+      if (count >= (isGroup ? 5 : 4) || sharedCount >= (isGroup ? 5 : 4)) {
         _setSendError('这条消息的回复次数已用完，请等待对方发送新消息');
         return null;
       }
@@ -2009,7 +2103,8 @@ class BotClient extends ChangeNotifier {
         _config.enableOiapiNickname != newConfig.enableOiapiNickname;
     final credentialsChanged =
         _config.appId != newConfig.appId ||
-        _config.clientSecret != newConfig.clientSecret;
+        _config.clientSecret != newConfig.clientSecret ||
+        _config.resolvedApiBaseUrl != newConfig.resolvedApiBaseUrl;
     if (credentialsChanged) {
       newConfig.accessToken = '';
       newConfig.tokenExpiresAt = 0;

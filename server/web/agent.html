@@ -11,6 +11,8 @@
     <link rel="icon" href="./logo.png" />
     <link rel="stylesheet" href="./agent.css" />
     <script defer src="./agent.js"></script>
+    <script defer src="./agent-files.js"></script>
+    <script defer src="./migration.js"></script>
   </head>
   <body>
     <header>
@@ -19,7 +21,7 @@
         <h1>QQ Agent</h1>
         <p>QQBOT / ONEBOT 11 · 独立 AI 工作区</p>
       </div>
-      <button id="refresh">刷新</button>
+      <button data-migration>数据迁移</button><button id="refresh">刷新</button>
     </header>
     <div id="status" role="status">正在读取 Agent 工作区…</div>
     <nav id="tabs" aria-label="Agent 导航"></nav>

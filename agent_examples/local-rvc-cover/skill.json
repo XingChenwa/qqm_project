@@ -1,0 +1,318 @@
+{
+  "schema": 1,
+  "minHostVersion": 7,
+  "id": "local_rvc_cover",
+  "name": "本地 AI 翻唱 · RVC",
+  "kind": "skill",
+  "description": "本机CPU翻唱：支持按歌名搜QQ音乐、多版本由原提问者选择、导入歌曲、转换音色和发送真实成品。",
+  "allowedOrigins": [
+    "http://127.0.0.1:23339"
+  ],
+  "settingsUrl": "http://127.0.0.1:23339/",
+  "prompt": "用户要求唱歌或翻唱时使用本 Skill。先查询环境、实际音色和歌曲；歌曲不在本地时，根据用户说的歌名调用 rvc_cover_search_qq 搜索QQ音乐，不要让用户自己找详情链接。返回 needs_selection 时，必须在当前原会话回复给原提问者完整的候选序号、歌名和歌手，请他回复“选1”“选2”或歌手名；本轮到此结束，绝不能代选或通过重新搜索绕过选择。同一歌手的不同版本也要展示全名供选择。列表保留20分钟，只认可原提问者在本会话的新消息；他选好后，直接调用 rvc_cover_select_qq，可省略search_id，服务会读取当前提问者本会话的候选，不要重新搜歌。选择内容由宿主核对，不能在工具参数中伪造确认。只有一个候选时可直接调用确认导入工具；用户明确提供详情链接/MID时可调用链接导入。导入是后台任务，查询确认成功后才可选择实际音色开始翻唱。音色来自用户导入的RVC模型，YY TTS朗读音色不能代替；缺少模型时说明本机网页导入方式。开始任务只表示排队，不表示唱完；CPU可能较久，不要重复提交或一轮循环查询。用户稍后询问时查状态，成功后调用发送成品工具，将真实音频发到当前会话；取得消息回执才算已发送。不用原曲冒充翻唱，不伪造成品。本服务在管理器所在电脑执行。",
+  "tools": [
+    {
+      "name": "rvc_cover_search_qq",
+      "description": "按歌名（可带歌手/版本）搜索QQ音乐，不下载。多版本必须把返回的序号、歌名、歌手回复给原提问者，等待他在原会话选择。不要擅自选版本，不要求用户找链接。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "用户想唱的歌名，可带歌手或版本，最多100字"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "additionalProperties": false
+      },
+      "handler": {
+        "type": "http",
+        "method": "POST",
+        "url": "http://127.0.0.1:23339/api/tool",
+        "headers": {
+          "X-QQM-Cover": "1"
+        },
+        "body": {
+          "action": "search_qq",
+          "scope": "{{scope}}|{{chatKey}}",
+          "args": "{{args}}",
+          "caller": "{{caller}}"
+        },
+        "errorPath": "isError"
+      }
+    },
+    {
+      "name": "rvc_cover_select_qq",
+      "description": "确认导入原提问者在本会话的上次QQ音乐搜索结果。直接调用即可，不必重新搜索或记住列表ID。多版本只接受本人新消息中的序号或歌手；不能传选择数字，宿主读取真实消息。只有一个候选时可直接确认。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "search_id": {
+            "type": "string",
+            "description": "可选：上次搜索返回的search_id；省略时使用当前提问者本会话最近的列表"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "handler": {
+        "type": "http",
+        "method": "POST",
+        "url": "http://127.0.0.1:23339/api/tool",
+        "headers": {
+          "X-QQM-Cover": "1"
+        },
+        "body": {
+          "action": "select_qq",
+          "scope": "{{scope}}|{{chatKey}}",
+          "args": "{{args}}",
+          "caller": "{{caller}}"
+        },
+        "errorPath": "isError"
+      }
+    },
+    {
+      "name": "rvc_cover_import_qq",
+      "description": "导入当前用户明确给出的QQ音乐歌曲详情链接或MID。用户只给歌名时应先调用搜索工具；多版本未确认前不能绕过选择直接导入MID。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "song": {
+            "type": "string",
+            "description": "QQ音乐歌曲详情链接（含songmid或songDetail）或歌曲MID；短分享链接需先打开获取详情链接"
+          }
+        },
+        "required": [
+          "song"
+        ],
+        "additionalProperties": false
+      },
+      "handler": {
+        "type": "http",
+        "method": "POST",
+        "url": "http://127.0.0.1:23339/api/tool",
+        "headers": {
+          "X-QQM-Cover": "1"
+        },
+        "body": {
+          "action": "import_qq",
+          "scope": "{{scope}}|{{chatKey}}",
+          "args": "{{args}}",
+          "caller": "{{caller}}"
+        },
+        "errorPath": "isError"
+      }
+    },
+    {
+      "name": "rvc_cover_health",
+      "description": "检查本地翻唱服务、CPU运行环境、基础模型和音色缺项。",
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "handler": {
+        "type": "http",
+        "method": "POST",
+        "url": "http://127.0.0.1:23339/api/tool",
+        "headers": {
+          "X-QQM-Cover": "1"
+        },
+        "body": {
+          "action": "health",
+          "scope": "{{scope}}|{{chatKey}}",
+          "args": "{{args}}",
+          "caller": "{{caller}}"
+        },
+        "errorPath": "isError"
+      }
+    },
+    {
+      "name": "rvc_cover_models",
+      "description": "列出用户实际导入的RVC音色模型名称和ID；没有模型时不能翻唱。",
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "handler": {
+        "type": "http",
+        "method": "POST",
+        "url": "http://127.0.0.1:23339/api/tool",
+        "headers": {
+          "X-QQM-Cover": "1"
+        },
+        "body": {
+          "action": "models",
+          "scope": "{{scope}}|{{chatKey}}",
+          "args": "{{args}}",
+          "caller": "{{caller}}"
+        },
+        "errorPath": "isError"
+      }
+    },
+    {
+      "name": "rvc_cover_songs",
+      "description": "列出本机已有歌曲名称和ID；缺歌时可按歌名搜索QQ音乐并导入，不要求用户手动找链接。",
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "handler": {
+        "type": "http",
+        "method": "POST",
+        "url": "http://127.0.0.1:23339/api/tool",
+        "headers": {
+          "X-QQM-Cover": "1"
+        },
+        "body": {
+          "action": "songs",
+          "scope": "{{scope}}|{{chatKey}}",
+          "args": "{{args}}",
+          "caller": "{{caller}}"
+        },
+        "errorPath": "isError"
+      }
+    },
+    {
+      "name": "rvc_cover_start",
+      "description": "用现有歌曲和音色开始CPU翻唱后台任务，立即返回任务ID。完成后再查询并发送，不能重复提交。",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "song": {
+            "type": "string",
+            "description": "歌曲列表返回的名称或ID"
+          },
+          "model": {
+            "type": "string",
+            "description": "音色列表返回的名称或ID"
+          },
+          "pitch": {
+            "type": "integer",
+            "description": "可选：升降调半音，-24至24，默认0"
+          },
+          "clip_seconds": {
+            "type": "integer",
+            "description": "可选：发到聊天的试听时长，5至60秒，默认30秒。整首保存在本机"
+          },
+          "clip_start": {
+            "type": "number",
+            "description": "可选：试听起点秒数，默认0"
+          }
+        },
+        "required": [
+          "song",
+          "model"
+        ]
+      },
+      "handler": {
+        "type": "http",
+        "method": "POST",
+        "url": "http://127.0.0.1:23339/api/tool",
+        "headers": {
+          "X-QQM-Cover": "1"
+        },
+        "body": {
+          "action": "start",
+          "scope": "{{scope}}|{{chatKey}}",
+          "args": "{{args}}",
+          "caller": "{{caller}}"
+        },
+        "errorPath": "isError"
+      }
+    },
+    {
+      "name": "rvc_cover_status",
+      "description": "查询当前会话的翻唱任务真实状态。job_id省略时查询本会话最近一次任务。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "job_id": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "handler": {
+        "type": "http",
+        "method": "POST",
+        "url": "http://127.0.0.1:23339/api/tool",
+        "headers": {
+          "X-QQM-Cover": "1"
+        },
+        "body": {
+          "action": "status",
+          "scope": "{{scope}}|{{chatKey}}",
+          "args": "{{args}}",
+          "caller": "{{caller}}"
+        },
+        "errorPath": "isError"
+      }
+    },
+    {
+      "name": "rvc_cover_cancel",
+      "description": "用户要求停止时取消当前会话的翻唱任务。job_id可省略，不能取消其他会话任务。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "job_id": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "handler": {
+        "type": "http",
+        "method": "POST",
+        "url": "http://127.0.0.1:23339/api/tool",
+        "headers": {
+          "X-QQM-Cover": "1"
+        },
+        "body": {
+          "action": "cancel",
+          "scope": "{{scope}}|{{chatKey}}",
+          "args": "{{args}}",
+          "caller": "{{caller}}"
+        },
+        "errorPath": "isError"
+      }
+    },
+    {
+      "name": "rvc_cover_send",
+      "description": "将已成功完成的翻唱试听发到当前QQ会话，等待真实消息回执；没有成功成品则报错。省略job_id时用本会话最近任务。",
+      "requiresMediaAck": true,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "job_id": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "handler": {
+        "type": "http",
+        "method": "POST",
+        "url": "http://127.0.0.1:23339/api/tool",
+        "headers": {
+          "X-QQM-Cover": "1"
+        },
+        "body": {
+          "action": "audio",
+          "scope": "{{scope}}|{{chatKey}}",
+          "args": "{{args}}",
+          "caller": "{{caller}}"
+        },
+        "errorPath": "isError",
+        "responseType": "audio",
+        "audioDataPath": "audioBase64"
+      }
+    }
+  ],
+  "version": "1.1.0"
+}

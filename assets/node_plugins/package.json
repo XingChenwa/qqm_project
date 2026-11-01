@@ -1,0 +1,22 @@
+{
+  "name": "qqm-node-plugin-host",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Managed original Node.js / Yunzai plugin loader for QQ Bot Manager",
+  "engines": {"node": ">=22"},
+  "dependencies": {
+    "art-template": "4.13.2",
+    "chokidar": "3.6.0",
+    "puppeteer-core": "^24.0.0",
+    "yaml": "^2.7.0",
+    "yauzl": "^3.2.0",
+    "lodash": "^4.18.1",
+    "moment": "^2.30.1",
+    "node-fetch": "^3.3.2",
+    "node-schedule": "^2.1.1",
+    "ws": "^8.21.3",
+    "axios": "^1.7.8",
+    "qrcode": "^1.5.4"
+  }
+}

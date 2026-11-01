@@ -1,0 +1,34 @@
+{
+  "schema_version": 2,
+  "id": "steam_bridge",
+  "name": "Steam 游戏助手",
+  "version": "1.13.2-qqm.1",
+  "description": "接入 XasYer/steam-plugin 原版命令：绑定、状态、库存、愿望单、游戏查询、折扣与订阅。需要独立 Steam 插件服务。",
+  "author": "小叶 / XasYer；QQ 机器人管理器适配",
+  "runtime": "http",
+  "priority": 80,
+  "cooldown_ms": 1000,
+  "permissions": ["message:read", "message:send", "message:media", "message:recall", "group:members", "network:http", "events:group-all"],
+  "config_schema": [
+    {"key": "service_token", "label": "插件服务连接令牌（安装时自动生成）", "type": "secret", "default": "", "required": true},
+    {"key": "steam_api_key", "label": "Steam Web API Key（多个用逗号分隔）", "type": "secret", "default": ""},
+    {"key": "owner_openids", "label": "插件管理员 OpenID（多个用逗号分隔，仅私聊管理）", "type": "string", "default": ""},
+    {"key": "country_code", "label": "商店地区代码", "type": "string", "default": "CN"},
+    {"key": "proxy", "label": "Steam HTTP 代理（可留空）", "type": "string", "default": ""},
+    {"key": "enable_push", "label": "允许 Steam 订阅推送（需要 QQ 平台主动消息权限）", "type": "boolean", "default": false}
+  ],
+  "http": {
+    "url": "http://127.0.0.1:23341",
+    "protocol": "qqm-bridge-v1",
+    "token_config": "service_token",
+    "timeout_ms": 8000,
+    "poll_interval_ms": 1500,
+    "send_config_keys": ["owner_openids", "country_code", "proxy", "enable_push"],
+    "send_secret_keys": ["steam_api_key"]
+  },
+  "rules": [
+    {"match": {"type": "prefix", "value": "/steam", "scope": "all"}},
+    {"match": {"type": "prefix", "value": "#steam", "scope": "all"}},
+    {"match": {"type": "prefix", "value": "steam", "scope": "all"}}
+  ]
+}

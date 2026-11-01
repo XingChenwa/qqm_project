@@ -188,6 +188,12 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
+      await tester.enterText(
+        find.widgetWithText(TextField, '搜索插件或功能'),
+        '天气',
+      );
+      FocusManager.instance.primaryFocus?.unfocus();
+      await tester.pumpAndSettle();
       expect(find.byTooltip('配置高德天气与 IP 查询'), findsOneWidget);
       await tester.pumpWidget(const SizedBox.shrink());
       debugDefaultTargetPlatformOverride = null;

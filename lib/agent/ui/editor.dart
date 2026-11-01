@@ -32,6 +32,7 @@ Future<bool?> editAgent(
   String? description,
   String actionLabel = '',
   Future<String> Function(Json)? action,
+  VoidCallback? cancelAction,
 }) => showDialog<bool>(
   context: context,
   barrierDismissible: false,
@@ -43,6 +44,7 @@ Future<bool?> editAgent(
     description: description,
     action: action,
     actionLabel: actionLabel,
+    cancelAction: cancelAction,
   ),
 );
 
@@ -53,6 +55,7 @@ class _AgentEditor extends StatefulWidget {
   final List<AgentField> fields;
   final Future<void> Function(Json) save;
   final Future<String> Function(Json)? action;
+  final VoidCallback? cancelAction;
   const _AgentEditor({
     required this.title,
     required this.initial,
@@ -60,6 +63,7 @@ class _AgentEditor extends StatefulWidget {
     required this.save,
     this.description,
     this.action,
+    this.cancelAction,
     required this.actionLabel,
   });
   @override
@@ -70,7 +74,7 @@ class _AgentEditorState extends State<_AgentEditor> {
   final _controllers = <String, TextEditingController>{};
   late final Json _value = {...widget.initial};
   String _notice = '';
-  bool _busy = false, _error = false;
+  bool _busy = false, _error = false, _acting = false;
   bool _advanced = false;
   @override
   void initState() {
@@ -122,6 +126,7 @@ class _AgentEditorState extends State<_AgentEditor> {
     if (_busy) return;
     setState(() {
       _busy = true;
+      _acting = action;
       _notice = '';
     });
     try {
@@ -141,17 +146,27 @@ class _AgentEditorState extends State<_AgentEditor> {
     } catch (e) {
       if (mounted) {
         setState(() {
-          _notice = e is AgentException ? e.message : '未能保存，请检查输入格式和存储权限。';
+          _notice = e is AgentException
+              ? e.message
+              : e is FormatException
+              ? '输入格式有误${e.offset == null ? '' : '（字符位置 ${e.offset}）'}。源码可在系统文件夹中直接保存，修正格式后再加载。'
+              : '操作未完成（${e.runtimeType}），请查看运行日志。当前输入仍已保留。';
           _error = true;
         });
       }
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _acting = false;
+        });
+      }
     }
   }
 
   @override
   void dispose() {
+    if (_busy && _acting) widget.cancelAction?.call();
     for (final c in _controllers.values) {
       c.dispose();
     }
@@ -244,6 +259,12 @@ class _AgentEditorState extends State<_AgentEditor> {
               runSpacing: 8,
               alignment: WrapAlignment.end,
               children: [
+                if (_busy && _acting && widget.cancelAction != null)
+                  TextButton.icon(
+                    onPressed: widget.cancelAction,
+                    icon: const Icon(Icons.stop_circle_outlined),
+                    label: const Text('停止测试'),
+                  ),
                 if (widget.action != null)
                   OutlinedButton(
                     onPressed: _busy ? null : () => _submit(action: true),

@@ -436,6 +436,22 @@ extension _AgentRuntimeServices on AgentController {
         providers.any((p) => p.inputPrice != null && p.outputPrice != null);
     final available = [
       if (modelTools) ...[
+        if (chosenPreset != null)
+          ...agentBuiltinDefinitions(
+            preset: chosenPreset,
+            official: c.isOfficial,
+            vision: providers.any(
+              (p) =>
+                  (p.id == chosenPreset.providerId ||
+                      p.id == chosenPreset.imageDescriptionProviderId) &&
+                  p.vision,
+            ),
+            video: videoThumbnail != null,
+          ).map((tool) => text(tool['name'])),
+        if (chosenPreset?.webSearchEnabled == true) ...[
+          'web_search',
+          'web_fetch',
+        ],
         for (final x in selected)
           if (!strings(
                 object(x.manifest['compatibility'])['requirements'],
@@ -450,6 +466,7 @@ extension _AgentRuntimeServices on AgentController {
         : '${turn.started.microsecondsSinceEpoch}-${s?.key ?? c.id}';
     return {
       'protocol': c.protocol,
+      'hostCapabilities': ['cover-delivery-v1'],
       'selfId': c.selfId,
       'selfInfo': {'user_id': c.selfId, 'nickname': nickname(c.id)},
       'kind': s?.kind ?? '',
@@ -465,6 +482,23 @@ extension _AgentRuntimeServices on AgentController {
           .skip((entries.length - 100).clamp(0, entries.length))
           .map(_entry)
           .toList(),
+      'knownChats': sessions(c.id)
+          .where((x) => x.selfId == c.selfId && x.protocol == c.protocol)
+          .take(50)
+          .map(
+            (x) => {
+              'key': _pluginChatKey(x),
+              'name': x.name,
+              'lastTs': x.updated.millisecondsSinceEpoch,
+            },
+          )
+          .toList(),
+      'memoryEntries': s == null
+          ? <Json>[]
+          : (store.get(_builtinKey(c, 'memory', s.key))?['items'] as List? ??
+                []),
+      'stickerEntries':
+          store.get(_builtinKey(c, 'stickers'))?['items'] as List? ?? [],
       'session': {
         'id': turnId,
         'trigger':
@@ -487,6 +521,20 @@ extension _AgentRuntimeServices on AgentController {
         },
       },
       'hostConfig': {
+        'api': {
+          'model':
+              providers
+                  .where((p) => p.id == chosenPreset?.providerId)
+                  .firstOrNull
+                  ?.model ??
+              '',
+          'vision': providers.any(
+            (p) =>
+                (p.id == chosenPreset?.providerId ||
+                    p.id == chosenPreset?.imageDescriptionProviderId) &&
+                p.vision,
+          ),
+        },
         'tools': {'enabled': modelTools},
         'persona': {'selfNickname': nickname(c.id), 'botName': nickname(c.id)},
         'modelPrices': prices,
@@ -732,6 +780,16 @@ extension _AgentRuntimeServices on AgentController {
     }
     turn?.check();
     switch (operation) {
+      case 'coverDelivery':
+        if (s == null || trigger == null || turn == null) {
+          throw const AgentException('翻唱发送任务必须由当前会话的真实消息创建。');
+        }
+        final result = await coverDeliveryOperation(c, e, s, trigger, args);
+        if (result['sent'] == true) {
+          onMediaSent?.call();
+          onSent?.call();
+        }
+        return result;
       case 'sendMediaUrl':
         if (s == null ||
             !{s.key, _pluginChatKey(s)}.contains(text(args['chatKey']))) {
@@ -760,6 +818,27 @@ extension _AgentRuntimeServices on AgentController {
       case 'validateImageUrl':
         await _validatePluginImage(text(args['url']));
         return text(args['url']);
+      case 'sendImageUrl':
+        if (s == null) throw const AgentException('发送图片需要当前会话。');
+        final image = await ai.images.prepare(
+          {
+            'type': 'image',
+            'data': {'url': text(args['url'])},
+          },
+          2048,
+          turn?.cancel ?? CancelToken(),
+          scope: s.key,
+        );
+        turn?.check();
+        final receipt = await sendImage(
+          s.key,
+          image.bytes,
+          name: 'image.jpg',
+          turn: turn,
+          replyMessageId: trigger?.id,
+        );
+        onSent?.call();
+        return receipt;
       case 'updateConfig':
         final name = text(
           object(object(args['value'])['persona'])['selfNickname'],
@@ -791,7 +870,7 @@ extension _AgentRuntimeServices on AgentController {
         if (destination == null) {
           throw const AgentException('插件只能发送到当前会话或明确配置的通知会话。');
         }
-        await send(
+        final id = await send(
           destination.key,
           text(args['text']),
           source: 'plugin',
@@ -799,10 +878,7 @@ extension _AgentRuntimeServices on AgentController {
           replyMessageId: trigger?.id,
         );
         onSent?.call();
-        return {
-          'ok': true,
-          'message_id': store.messages(destination.key).last.id,
-        };
+        return {'ok': true, 'message_id': id};
       case 'onebot':
         return _pluginOneBot(
           c,
@@ -812,6 +888,120 @@ extension _AgentRuntimeServices on AgentController {
           turn,
           args,
           requestEvent: requestEvent,
+        );
+      case 'builtin':
+        if (s == null || !_runtimeAlive(c, e)) {
+          throw const AgentException('内置能力需要有效的当前会话和已启用扩展。');
+        }
+        final chosen = presets
+            .where(
+              (p) => p.id == (s.presetId.isEmpty ? c.presetId : s.presetId),
+            )
+            .firstOrNull;
+        final output = await executeBuiltinTool(
+          s.key,
+          text(args['name']),
+          object(args['params']),
+          trigger: trigger,
+          preset: chosen,
+          turn: turn,
+        );
+        if (output['sent'] == true) onSent?.call();
+        Object? decoded;
+        try {
+          decoded = jsonDecode(text(output['text']));
+        } catch (_) {
+          decoded = {'text': output['text']};
+        }
+        return {
+          ...object(decoded),
+          if (output['images'] is List) 'images': output['images'],
+        };
+      case 'llmCompletion':
+        if (s == null ||
+            trigger == null ||
+            turn == null ||
+            !_runtimeAlive(c, e)) {
+          throw const AgentException('模型代理只在当前用户触发的有效会话中可用。');
+        }
+        final chosen = presets
+            .where(
+              (p) => p.id == (s.presetId.isEmpty ? c.presetId : s.presetId),
+            )
+            .firstOrNull;
+        final providerId =
+            args['mode'] == 'vision' &&
+                chosen?.imageDescriptionProviderId.isNotEmpty == true
+            ? chosen!.imageDescriptionProviderId
+            : chosen?.providerId ?? '';
+        final provider = providers.where((p) => p.id == providerId).firstOrNull;
+        if (provider == null ||
+            (args['mode'] == 'vision' && !provider.vision)) {
+          throw const AgentException('当前预设没有可用的对应模型，请先配置主模型或图片转述模型。');
+        }
+        final messages = (args['messages'] as List? ?? []).map(object).toList();
+        if (messages.isEmpty ||
+            messages.length > 40 ||
+            jsonEncode(messages).length > 8 * 1024 * 1024 ||
+            messages.any(
+              (m) =>
+                  !{'system', 'user', 'assistant', 'tool'}.contains(m['role']),
+            )) {
+          throw const AgentException('模型代理需要1–40条有效消息，请缩短输入。');
+        }
+        turn.check();
+        final response = await ai.model.complete(provider, {
+          'model': provider.model,
+          'messages': messages,
+          'stream': false,
+          'max_tokens': integer(
+            args['maxTokens'] ?? args['max_tokens'],
+            1024,
+          ).clamp(64, chosen!.maxTokens),
+          'temperature': chosen.temperature,
+        }, turn.cancel);
+        turn.check();
+        await _recordRunUsage(
+          c,
+          s,
+          trigger,
+          turn,
+          provider,
+          object(response['usage']),
+        );
+        return object(
+          redactAgentValue(response, [
+            provider.apiKey,
+            c.clientSecret,
+            c.token,
+          ]),
+        );
+      case 'web':
+        if (s == null || turn == null) {
+          throw const AgentException('网页工具需要当前会话。');
+        }
+        final selected = presets
+            .where(
+              (p) => p.id == (s.presetId.isEmpty ? c.presetId : s.presetId),
+            )
+            .firstOrNull;
+        if (selected?.webSearchEnabled != true) {
+          throw const AgentException('当前预设未开启网页搜索。');
+        }
+        turn.check();
+        if (args['name'] == 'search_images') {
+          return ai.web.searchImages(
+            text(args['query']),
+            turn.cancel,
+            limit: integer(args['limit'], 8),
+          );
+        }
+        return ai.web.execute(
+          text(args['name']),
+          args,
+          turn.cancel,
+          backend: selected!.webSearchBackend,
+          searchProvider: searchProviderFor(selected),
         );
       case 'notify':
         if (requestEvent.isNotEmpty) {
@@ -961,6 +1151,52 @@ extension _AgentRuntimeServices on AgentController {
         _log('warning', '申请处理未取得回执，请在 QQ 中核实结果。', c.id, '', 'request');
         rethrow;
       }
+    }
+    const sessionReads = {
+      'get_group_info',
+      'get_group_member_info',
+      'get_group_member_list',
+      'get_msg',
+      'get_forward_msg',
+    };
+    if (sessionReads.contains(action)) {
+      if (s == null) throw const AgentException('读取群或消息资料需要当前会话。');
+      if (action.startsWith('get_group_')) {
+        if (s.kind != 'group' || text(params['group_id']) != s.peerId) {
+          throw const AgentException('只能读取当前群的资料。');
+        }
+        if (action == 'get_group_member_info') {
+          _builtinUser(c, s, trigger, text(params['user_id']));
+        }
+        return _transports[c.id]!.call(action, {
+          'group_id': int.parse(s.peerId),
+          if (action == 'get_group_member_info')
+            'user_id': int.parse(text(params['user_id'])),
+          'no_cache': params['no_cache'] == true,
+        });
+      }
+      if (action == 'get_msg') {
+        final message = _builtinMessage(s, trigger, text(params['message_id']));
+        final id = int.tryParse(message.id.replaceFirst(RegExp(r'^ob:'), ''));
+        if (id == null) throw const AgentException('OneBot消息ID不是有效整数。');
+        return _transports[c.id]!.call(action, {'message_id': id});
+      }
+      final forwardId = text(params['id'] ?? params['message_id']);
+      final known = store
+          .messages(s.key)
+          .expand((m) => m.segments)
+          .where((seg) => seg['type'] == 'forward')
+          .any((seg) => text(object(seg['data'])['id']) == forwardId);
+      if (!known) throw const AgentException('只能展开当前会话实际收到的转发记录。');
+      return _transports[c.id]!.call(action, {'id': forwardId});
+    }
+    if (action == 'get_stranger_info' && text(params['user_id']) != c.selfId) {
+      if (s == null) throw const AgentException('查询用户资料需要当前会话。');
+      final userId = _builtinUser(c, s, trigger, text(params['user_id']));
+      return _transports[c.id]!.call(action, {
+        'user_id': int.parse(userId),
+        'no_cache': params['no_cache'] == true,
+      });
     }
     const reads = {
       'get_login_info',

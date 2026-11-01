@@ -1,0 +1,15 @@
+__pycache__/
+*.py[cod]
+env/
+python/
+cache/
+base-models/
+models/
+songs/
+outputs/
+jobs/
+tmp/
+logs/
+config.json
+service.pid.json
+requirements-installed.txt

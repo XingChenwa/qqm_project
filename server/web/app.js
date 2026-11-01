@@ -625,7 +625,10 @@ function renderMessages() {
       if (message.markdownContent) markdown(message.markdownContent, bubble);
       else if (message.body) renderReceived(message.body, bubble, message);
       else bubble.append(message.content || "");
-      const image = safeUrl(message.imageUrl);
+      const image = message.isFromBot && typeof message.imageUrl === "string" &&
+        message.imageUrl.length <= 7 * 1024 * 1024 &&
+        /^data:image\/(png|jpeg|gif|webp);base64,[A-Za-z0-9+/=]+$/.test(message.imageUrl)
+        ? message.imageUrl : safeUrl(message.imageUrl);
       if (image)
         bubble.append(
           el("img", {
@@ -845,16 +848,17 @@ function renderPlugins() {
         el(
           "p",
           { class: "plugin-commands" },
-          plugin.commands.join(" · ") || "按插件规则运行",
+          plugin.commands.join(" · ") || (plugin.runtime === "node" ? "命令见原包 README；支持原版 # 命令与 / 命令" : "按插件规则运行"),
         ),
         ...(plugin.error ? [el("p", { class: "error" }, plugin.error)] : []),
         el(
           "div",
           { class: "button-row" },
           formButton("配置", () => configurePlugin(plugin), false),
-          formButton("编辑源码", () => editPlugin(plugin.id), false),
+          formButton("编辑源码", () => plugin.runtime === "node" ? nodeFiles(plugin.id, "source") : editPlugin(plugin.id), false),
+          ...(plugin.runtime === "node" ? [formButton("原生配置", () => nodeFiles(plugin.id, "account"), false), formButton("重载", async () => { await post("plugins/node/reload", {id:plugin.id}); await refresh(true); }, false), formButton("安装依赖", async () => { const job=await post("plugins/node/dependencies", {id:plugin.id}); await nodeJob(job.id); await post("plugins/node/reload", {id:plugin.id}); await refresh(true); }, false)] : []),
           formButton(
-            "导出",
+            plugin.runtime === "node" ? "安装信息" : "导出",
             async () => {
               const data = await api("plugins/source?id=" + plugin.id);
               download(plugin.id + ".json", data.source, "application/json");
@@ -965,6 +969,44 @@ async function editPlugin(id) {
   if (tree.files.length)
     await open(tree.files.includes("main.ht") ? "main.ht" : tree.files[0]);
 }
+async function nodeJob(id) {
+  const progress = el("p", {}, "安装原包依赖，请稍候…");
+  modal("原版插件", [progress]);
+  for (let n = 0; n < 1200; n++) {
+    const job = await post("plugins/node/job", { id });
+    progress.textContent = job.phase || "正在安装";
+    if (job.status === "failed") throw Error(job.error || "安装失败");
+    if (job.status === "done") return;
+    await new Promise(resolve => setTimeout(resolve, 600));
+  }
+  throw Error("安装时间较长，请稍后检查运行环境。");
+}
+async function nodeFiles(id, scope) {
+  const data = await post("plugins/node/files", { id, scope });
+  const list = el("select", {"aria-label":"原包文件"}), content = el("textarea", {"aria-label":"原包源码或配置",style:"min-height:48vh;font-family:monospace"});
+  for (const name of data.files) list.append(el("option", {value:name}, name));
+  const original = scope === "account" ? data.files.find(f => /^config\/config\/.*\.ya?ml$/.test(f)) : data.files.includes("README.md") ? "README.md" : data.files[0];
+  let saved = "";
+  async function read(name) { const value = await post("plugins/node/file", {id,scope,file:name}); content.value=saved=value.content; }
+  list.onchange = () => perform(async () => { if(content.value!==saved && !confirm("当前修改尚未保存，放弃修改并切换文件？")) return; await read(list.value); });
+  modal(scope === "source" ? "原包源码" : "当前机器人 · 原生配置", [field("原包文件",list), content, el("p",{class:"hint"},"原样保存文件，不要求转换成客户端清单；修改源码后重载插件。")], [formButton("保存原文件", async()=>{await post("plugins/node/file", {id,scope,file:list.value,content:content.value}); saved=content.value; notice("文件已保存。修改源码后可重载插件。");})]);
+  if (original) { list.value=original; await read(original); }
+}
+$("import-original-plugin").onclick = () => {
+  const file=el("input",{type:"file",accept:".zip,.js,.mjs,.cjs"}), url=el("input",{type:"url",placeholder:"https://github.com/作者/仓库"});
+  async function preview(value) {
+    const trusted=el("input",{type:"checkbox"}), replace=el("input",{type:"checkbox"});
+    modal(value.name+" · v"+value.version, [el("p",{},value.description), el("p",{},`${value.files} 个文件 · 入口 ${value.entries.join("、")}`), el("p",{},"将安装原包 package.json 的依赖，保留作者的 JavaScript 源码和原生配置。"), el("pre",{style:"max-height:25vh;overflow:auto"},value.dependencies.map(d=>`${d.name} ${d.version}`).join("\n")||"无额外 npm 依赖"), el("p",{class:"hint"},"原版 Node 代码及安装脚本具有服务器当前用户的文件与网络权限，只安装可信源码。"), el("label",{class:"toggle"},trusted,"我信任此原包，允许安装依赖并运行"), ...(value.exists?[el("label",{class:"toggle"},replace,"更新已有原包，保留机器人配置和数据")]:[])], [formButton("安装原包及依赖",async()=>{if(!trusted.checked)throw Error("请先确认信任此原包"); if(value.exists&&!replace.checked)throw Error("请选择是否替换已有原包"); const job=await post("plugins/node/install",{stage_id:value.stage_id,approved:true,replace:replace.checked}); await nodeJob(job.id); closeModal(); await refresh(true); notice("原包和依赖已安装，默认停用。请在插件卡片编辑原生配置后启用。");})]);
+  }
+  file.onchange=()=>perform(async()=>{
+    if(!file.files[0]) return;
+    const selected=file.files[0]; if(selected.size>128*1024*1024)throw Error("原包不能超过128MB");
+    modal("检查原包", "正在上传、解压并检查原包，尚不运行插件…");
+    const response=await fetch(new URL("api/plugins/node/inspect?filename="+encodeURIComponent(selected.name),location.href),{method:"POST",credentials:"same-origin",headers:{"X-QQM-Request":"1","Content-Type":"application/octet-stream"},body:selected});
+    const value=await response.json(); if(!response.ok) throw Error(value.error||"原包检查失败"); await preview(value);
+  });
+  modal("导入原版插件",[field("选择 ZIP / JavaScript 原包",file),field("公开 GitHub 仓库",url)], [formButton("下载并检查仓库",async()=>{modal("下载原包","正在从GitHub获取原包…"); await preview(await post("plugins/node/repository",{url:url.value.trim()}));})]);
+};
 $("import-plugin").onclick = () => {
   const input = el("textarea", {
       "aria-label": "插件清单",
@@ -1214,6 +1256,7 @@ function ipProblem(problem) {
   );
 }
 async function refresh(force = false) {
+  if (document.documentElement.dataset.migrationPending) return;
   if (S.polling) return S.polling;
   S.polling = (async () => {
     const data = await api("state" + (force ? "" : "?revision=" + S.revision));

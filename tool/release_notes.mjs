@@ -1,5 +1,13 @@
 // Keep signed in-app notes brief; the full GitHub Release body remains intact.
 export function releaseNotesSummary(source = '') {
+  const invite = Array.from(String(source).matchAll(/https:\/\/qun\.qq\.com\/universal-share\/share\?[^\s<>()\]]+/g), m => m[0]).find(value => {
+    if (value.length > 1500) return false;
+    try {
+      const url = new URL(value);
+      return url.protocol === 'https:' && url.hostname === 'qun.qq.com' && !url.port && !url.username && !url.password &&
+        url.pathname === '/universal-share/share' && !!url.search && !url.hash;
+    } catch { return false; }
+  });
   const rows = [];
   for (let line of String(source).split(/\r?\n/)) {
     line = line.trim();
@@ -12,5 +20,6 @@ export function releaseNotesSummary(source = '') {
     if (!rows.includes(brief)) rows.push(brief);
     if (rows.length === 3) break;
   }
-  return (rows.length ? rows : ['修复一些问题，优化使用体验。']).map(line => '• ' + line).join('\n');
+  const summary = (rows.length ? rows : ['修复一些问题，优化使用体验。']).map(line => '• ' + line).join('\n');
+  return summary + (invite ? '\n[点击链接加入群聊【嘿壳群聊 QQ机器人管理器】](' + invite + ')' : '');
 }

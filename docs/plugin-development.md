@@ -2,7 +2,7 @@
 
 本文的可导入脚本入口适用于 **1.3.8-beta.4 及更新版本**。旧版客户端可继续使用 JSON/YAML 规则与 HTTP 插件。
 
-这套插件系统让开发者在四端共享命令与玩法。宿主负责 QQ 连接、凭据、回复上下文、序号和发送；插件只返回结果。可使用 JSON/YAML 规则、HTTP 服务或跨平台 Hetu 脚本 开发插件。
+这套插件系统让开发者扩展命令与玩法。宿主负责 QQ 连接、凭据、回复上下文、序号和发送。可使用 JSON/YAML 规则、HTTP 服务、跨平台 Hetu 脚本，或直接导入原版 Node / Yunzai 插件。
 
 内置七个插件，覆盖基础助手、天气与 IP、随机游乐场、翻译、每日小会馆、群互动和主动消息权限。新安装的插件默认关闭，需在插件中心手动启用；已经手动保存的启停选择会保留。需要固定回复时，也可以编写可独立启停的规则插件。
 
@@ -13,10 +13,13 @@
 | `rules` JSON / YAML | 命令、关键词、Markdown、按钮、固定媒体 | 应用内直接安装，无需编译 |
 | `http` 清单 + 自有服务 | Node.js / Python / Go 等复杂玩法 | 开发者的服务；应用只调用已授权地址 |
 | `script` Hetu 入口 / 完整 JSON | 自定义算法、命令、离线玩法、持久状态、已授权 HTTP | 四端直接导入，修改后应用，不需要重新编译 |
+| 原版 Node / Yunzai ZIP、JS、GitHub | 复用原入口、npm 依赖、配置文件与命令 | 桌面 / Linux 的托管 Node 进程；Android / iOS 连接远程运行器 |
 
-七个随附插件与第三方脚本共用同一个加载器。每个插件目录内的 `main.ht` 就是完整逻辑，不再用清单映射到应用内固定功能。开发者可以自由编写函数、分支、循环和类；命令和权限在清单中声明。文件管理器支持 `.ht/.json/.yaml/.yml/.md/.txt`，也能编辑 JS/Python/Dart 参考文本；本地可执行语言为 Hetu，Node.js/npm 等生态可通过 HTTP 服务接入。手机上的本地 HTTP 地址指手机自己，不是电脑。
+七个随附插件与第三方 Hetu 脚本共用同一个加载器，`main.ht` 包含完整逻辑。原版 Node 插件使用独立的通用加载器，不需要改成清单规则或为每个插件开发专用桥接服务。两种运行方式都在原机器人工作台的插件中心管理，与 QQ Agent 的扩展分开。参见 [原包导入、配置与开发](original-node-plugins.md)。
 
 ## 2. 两分钟安装第一个插件
+
+桌面端已安装的插件可从卡片上的 **打开源码文件夹** 进入系统文件管理器，直接用外部编辑器修改清单和脚本，完成后点击 **重新加载源码** 应用。手机端保留 **文件管理 · 编辑源码** 工作台；编辑后点击 **保存并应用到插件中心**。工作台保存文件会保留历史，应用前仍需检查替换与权限。QQ Agent 的 AI 插件和 Skills 有独立的真实源码目录，并支持保存后自动重新加载；详见 [Agent 源码编辑与完整迁移](agent-development.md#完整数据迁移与源码编辑)。应用全部账号、聊天、密钥、插件数据与磁盘源码草稿可以在 **设置 → 数据迁移** 中导出完整 ZIP，并在新版导入后重启恢复。
 
 进入「插件 → 写插件 → 新建插件项目」，填写唯一 ID，生成 `plugin.json`。也可将下列 UTF-8 清单粘贴到「导入」：
 
@@ -178,6 +181,29 @@ POST 请求示意（HTTP 封装版本保留 `1`，新增字段为可选）：
 `event` 为 `message/command/interaction`；回调时 `message.callback_data` 包含命名空间参数，message_id 为交互事件 ID。附件存在时传 `attachments`（URL、文件名、类型、尺寸），服务不要盲目信任或下载任意 URL。**不传机器人密钥、access_token、message_scene 鉴权令牌或历史聊天**。操作者手动执行的 message_id/sender_id 可能为空。
 
 服务返回 HTTP 200：`{"reply":"文本"}`、`{"reply":null}`，或 `{"message":{"format":"markdown","content":"# 你好"}}`。结构化格式同上，权限和媒体域名仍由宿主检查。请求与响应各 64 KB。服务不能指定其他目标会话、传任意 QQ API 请求、修改 msg_seq 或请求机器人 Token。停用/卸载时迟到的结果不会继续发送。
+
+### 原版 Node 插件：直接导入
+
+在插件中心点击 **导入原包**，选择作者提供的 ZIP / JS / MJS / CJS，或填写 `https://github.com/作者/仓库`。软件检查原包入口与依赖，确认信任后安装，默认保持关闭。配置按钮可编辑当前机器人下原包的 YAML / JSON 等配置；修改后点击重新加载源码。无需另外导入连接 JSON。
+
+应用管理通用 Node 运行器和 npm 依赖；每个插件、每个 AppID 使用独立进程与数据目录。原版规则、事件、上下文、定时任务、文字和图片回复可通过适配接口运行。涉及其他机器人框架的内部组件、协议私有接口或独立服务时仍须补齐其依赖，不能保证任意 Yunzai 插件无修改运行。详细 API 范围、示例和手机连接方法见 [原版 Node 插件](original-node-plugins.md)。
+
+### 自建 HTTP 长任务服务协议
+
+以下协议供需要自行部署服务的开发者使用，原版 Node 插件的运行器已由应用管理，无需手动填写这些参数。
+
+清单使用 `runtime: "http"`，并在 `http` 中指定 `protocol: "qqm-bridge-v1"`、`token_config`、`poll_interval_ms`（1000–30000）。`send_config_keys` 仍只能指定非密钥配置；`send_secret_keys` 可显式指定插件自己声明的 `secret` 字段，不能包含服务连接令牌。安装页会显示这些配置的用途；机器人凭据与 Token 永远不发送。
+
+以清单 `http.url` 为根地址，宿主用 Bearer 令牌调用：
+
+- `POST /v1/message`：`app_id`、`config`、`job_id`（原消息 ID）和 `message`，服务立即返回 `{"ok":true}`，后台执行长任务。重复 `job_id` 不重复执行。此类命令会占用本轮插件处理，避免其他插件跟着回复。
+- `POST /v1/poll`：同样携带 `app_id` 与 `config`，返回 `{"ok":true,"messages":[队列项]}`；每次最多一项，未确认项使用租约重投。服务应在连接心跳停止后停止后台任务。
+- `POST /v1/ack`：`id` 与 `result`，结果来自宿主真实发送响应，含 `ok` 和成功时的 `message_id`。宿主按 AppID 持久化去重，服务不能自造发送成功。单次响应／确认最多 8 MB。
+- `POST /v1/deactivate`：停止该 AppID 的后台进程，保留数据。
+
+队列项包含 `id`、`app_id`、`action`、`target_id`、`is_group`。`action: "send"` 还需 `reply_to_message_id`、`proactive:false`、`format`（text/markdown/media）和 `content`。图片使用 `media_type:1`、`mime` 与 `media_base64` 传真实字节，最多 5 MB；宿主校验图片并上传到 QQ，聊天记录的本地预览和 ZIP 数据迁移均保留图片。服务不能返回任意本机文件路径。
+
+只有显式 `proactive:true` 才请求主动消息，仍需 QQ 平台权限与额度；不会因被动回复超时自动改成主动。只能操作当前 AppID 已存在的会话。`action:"members"` 需 `group:members` 权限，返回完整分页成员列表或明确失败；`action:"recall"` 需 `message:recall`，仅能撤回机器人在该会话自己发送且仍在平台时限内的消息。服务没有 QQ 任意接口调用权。切换账户、停用插件或迁移暂停后，宿主停止投递。
 
 本机试运行（示例令牌仅供本地测试，请自行替换）：
 

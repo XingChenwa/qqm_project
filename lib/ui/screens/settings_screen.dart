@@ -26,6 +26,8 @@ import '../widgets/qq_qr_login_panel.dart';
 import '../widgets/mobile_connection_card.dart';
 import 'browser_screen.dart';
 import 'onboarding_screen.dart';
+import '../../services/data_migration_service.dart';
+import 'data_migration_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   final QqQrLoginService Function()? qrServiceFactory;
@@ -281,6 +283,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
     await file.writeAsString(json);
     if (!mounted) return;
     AppDialogs.show(context, '配置已导出到：${file.path}');
+  }
+
+  Future<void> _openMigration() async {
+    final service = context.read<DataMigrationService?>();
+    if (service == null) {
+      await AppDialogs.show(context, '数据迁移服务尚未就绪，请重启应用。', error: true);
+      return;
+    }
+    await Navigator.push(
+      context,
+      MaterialPageRoute<void>(
+        builder: (_) => DataMigrationScreen(service: service),
+      ),
+    );
   }
 
   Future<void> _importConfig() async {
@@ -933,25 +949,40 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Widget _dataManagementCard() {
     return _card(
-      title: '配置管理',
+      title: '数据迁移',
       icon: Icons.storage_rounded,
       children: [
-        const Text('导出或导入机器人配置、表情和插件设置。'),
+        const Text(
+          '用一个 ZIP 备份和恢复全部应用数据，包含原工作台、QQ Agent、聊天记录、插件和 Skill 源文件及配置。',
+        ),
         const SizedBox(height: 16),
         Row(
           children: [
             Expanded(
               child: FilledButton(
-                onPressed: _exportConfig,
-                child: const Text('导出配置'),
+                onPressed: _openMigration,
+                child: const Text('导出完整 ZIP'),
               ),
             ),
             const SizedBox(width: 10),
             Expanded(
               child: OutlinedButton(
-                onPressed: _importConfig,
-                child: const Text('导入配置'),
+                onPressed: _openMigration,
+                child: const Text('导入 ZIP 恢复'),
               ),
+            ),
+          ],
+        ),
+        ExpansionTile(
+          title: const Text('旧版 JSON 配置（兼容）'),
+          tilePadding: EdgeInsets.zero,
+          children: [
+            Wrap(
+              spacing: 8,
+              children: [
+                TextButton(onPressed: _exportConfig, child: const Text('导出配置')),
+                TextButton(onPressed: _importConfig, child: const Text('导入配置')),
+              ],
             ),
           ],
         ),
@@ -1069,6 +1100,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
             const SelectableText('作者QQ：2377130783'),
             const SizedBox(height: 8),
             const Text('问题建议可以反馈'),
+            const SizedBox(height: 16),
+            const Text(
+              AppConstants.communityGroupName,
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 8),
+            FilledButton.tonalIcon(
+              onPressed: () =>
+                  openInAppBrowser(context, AppConstants.communityGroupUrl),
+              icon: const Icon(Icons.groups_outlined),
+              label: const Text('加入反馈群'),
+            ),
             const SizedBox(height: 16),
             OutlinedButton.icon(
               onPressed: _replayOnboarding,

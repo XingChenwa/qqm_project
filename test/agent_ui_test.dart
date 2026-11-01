@@ -150,6 +150,46 @@ void main() {
   }
 
   for (final width in [360.0, 1280.0]) {
+    agentTest('Agent $width 能力资料页可管理记忆和提醒且不溢出', (tester) async {
+      await prepare();
+      final trigger = agent.store.messages(session.key).last;
+      await agent.executeBuiltinTool(session.key, 'memory_append', {
+        'content': '喜欢音乐',
+      }, trigger: trigger);
+      await agent.executeBuiltinTool(session.key, 'set_reminder', {
+        'inSeconds': 60,
+        'text': '喝水',
+      }, trigger: trigger);
+      await host(tester, width, initialize: false);
+      final tab = find.text('能力与资料').first;
+      await tester.ensureVisible(tab);
+      await tester.tap(tab);
+      await tester.pumpAndSettle();
+      expect(find.text('长期印象 · 1'), findsOneWidget);
+      final memory = find.text('长期印象 · 1');
+      await tester.ensureVisible(memory);
+      await tester.tap(memory);
+      await tester.pumpAndSettle();
+      expect(find.text('喜欢音乐'), findsOneWidget);
+      final reminders = find.text('提醒任务 · 1');
+      await tester.ensureVisible(reminders);
+      await tester.tap(reminders);
+      await tester.pumpAndSettle();
+      final cancel = find.byTooltip('取消提醒');
+      await tester.ensureVisible(cancel);
+      await tester.tap(cancel);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('确定'));
+      await tester.pumpAndSettle();
+      expect(
+        (agent.builtinData('demo')['reminders'] as List).single['status'],
+        'cancelled',
+      );
+      expect(tester.takeException(), isNull);
+    });
+  }
+
+  for (final width in [360.0, 1280.0]) {
     agentTest('Agent $width 新AI能力表单可配置且思考折叠区不溢出', (tester) async {
       await prepare();
       await agent.saveProvider(
@@ -159,6 +199,15 @@ void main() {
           baseUrl: 'https://vision.example/v1',
           model: 'vision-model',
           vision: true,
+        ),
+      );
+      await agent.saveProvider(
+        AgentProvider(
+          id: 'search',
+          name: 'DeepSeek官方',
+          baseUrl: 'https://api.deepseek.com/v1',
+          model: 'fixture',
+          apiKey: 'fixture-official-key',
         ),
       );
       await host(tester, width, initialize: false);
@@ -177,12 +226,39 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('测试视觉模型 · vision-model').last);
       await tester.pumpAndSettle();
-      for (final name in ['网页搜索 · Bing', '显示思考内容', '分多条消息回复']) {
+      final video = find.widgetWithText(
+        DropdownButtonFormField<String>,
+        '视频理解模型',
+      );
+      await tester.ensureVisible(video);
+      await tester.tap(video);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('测试视觉模型 · 多帧图片').last);
+      await tester.pumpAndSettle();
+      for (final name in ['网页搜索', '显示思考内容', '分多条消息回复']) {
         final field = find.widgetWithText(SwitchListTile, name);
         await tester.ensureVisible(field);
         await tester.tap(field);
         await tester.pumpAndSettle();
       }
+      final search = find.widgetWithText(
+        DropdownButtonFormField<String>,
+        '搜索服务',
+      );
+      await tester.ensureVisible(search);
+      await tester.tap(search);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('DeepSeek · 官方内置搜索').last);
+      await tester.pumpAndSettle();
+      final credential = find.widgetWithText(
+        DropdownButtonFormField<String>,
+        'DeepSeek搜索凭证',
+      );
+      await tester.ensureVisible(credential);
+      await tester.tap(credential);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('DeepSeek官方').last);
+      await tester.pumpAndSettle();
       final advanced = find.text('高级设置');
       await tester.ensureVisible(advanced);
       await tester.tap(advanced);
@@ -196,12 +272,19 @@ void main() {
       final interval = find.widgetWithText(TextField, '分条发送间隔（毫秒）');
       await tester.ensureVisible(interval);
       await tester.enterText(interval, '800');
+      final frames = find.widgetWithText(TextField, '视频抽帧数量');
+      await tester.ensureVisible(frames);
+      await tester.enterText(frames, '8');
       await tester.tap(find.text('保存'));
       await tester.pumpAndSettle();
       final settings = agent.presets.first;
       expect(settings.imageDescriptionProviderId, 'vision');
       expect(settings.imageMaxEdge, 768);
       expect(settings.webSearchEnabled, true);
+      expect(settings.webSearchBackend, 'deepseek');
+      expect(settings.webSearchProviderId, 'search');
+      expect(settings.videoProviderId, 'vision');
+      expect(settings.videoFrames, 8);
       expect(settings.showReasoning, true);
       expect(settings.timeAwareness, true);
       expect(settings.multiMessageReply, true);
@@ -270,9 +353,10 @@ void main() {
       await tester.ensureVisible(skills);
       await tester.tap(skills);
       await tester.pumpAndSettle();
-      await tester.tap(find.text('编辑源码 / 配置').first);
+      await tester.tap(find.text('插件设置').first);
       await tester.pumpAndSettle();
-      expect(find.text('扩展 JSON / YAML'), findsOneWidget);
+      expect(find.text('私有参数 JSON'), findsOneWidget);
+      expect(find.text('扩展 JSON / YAML'), findsNothing);
       expect(tester.takeException(), isNull);
       await tester.tap(find.byTooltip('关闭'));
       await tester.pumpAndSettle();

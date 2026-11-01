@@ -484,3 +484,26 @@ details.advanced > summary {
   font: inherit;
   line-height: 1.7;
 }
+.source-manager { width: min(1200px, calc(100vw - 36px)); max-width: none; height: calc(100dvh - 36px); max-height: none; padding: 18px; }
+.source-manager[open] { display: flex; flex-direction: column; gap: 12px; }
+.source-heading, .source-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; flex-shrink: 0; }
+.source-heading h2 { flex: 1; min-width: 0; margin: 0; overflow-wrap: anywhere; }
+.source-body { display: grid; grid-template-columns: 240px minmax(0, 1fr); flex: 1; min-height: 0; gap: 16px; }
+.source-body aside { overflow: auto; display: flex; flex-direction: column; gap: 5px; }
+.source-body aside button { text-align: left; overflow-wrap: anywhere; }
+.source-edit { min-height: 0; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.source-edit strong { overflow-wrap: anywhere; }
+.source-edit p { font-size: 12px; margin: 0; color: var(--muted); }
+.source-edit textarea { flex: 1; min-height: 180px; resize: none; width: 100%; font: 13px/1.6 Consolas, monospace; tab-size: 2; }
+.source-manager > p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.migration-dialog { width: min(660px, calc(100vw - 28px)); max-height: calc(100dvh - 28px); overflow: auto; }
+.migration-dialog p { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.7; }
+.migration-dialog button { margin: 4px; }
+@media (max-width: 700px) {
+  header { gap: 8px; padding: 12px; flex-wrap: wrap; }
+  header > button { margin-left: 0; }
+  header > div { flex: 1; }
+  .source-manager { width: 100vw; height: 100dvh; margin: 0; border: 0; border-radius: 0; padding: 12px; }
+  .source-body { grid-template-columns: minmax(0,1fr); grid-template-rows: 125px minmax(0,1fr); }
+  .source-body aside { flex-direction: row; flex-wrap: wrap; align-content: flex-start; }
+}

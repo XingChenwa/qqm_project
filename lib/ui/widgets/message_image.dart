@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as path;
+import '../../utils/inline_image.dart';
 
 /// Local files are allowed only for messages sent from this manager.
 class MessageImage extends StatelessWidget {
@@ -57,6 +58,23 @@ class MessageImage extends StatelessWidget {
     required double height,
     bool preview = false,
   }) {
+    if (allowLocalFile && source.startsWith('data:image/')) {
+      try {
+        final bytes = inlineImageBytes(source);
+        if (bytes != null) {
+          return Image.memory(
+            bytes,
+            width: width,
+            height: height,
+            fit: BoxFit.contain,
+            cacheWidth: preview ? null : 960,
+            errorBuilder: (_, _, _) => _error('插件图片无法读取'),
+          );
+        }
+      } catch (_) {
+        return _error('插件图片格式无效');
+      }
+    }
     if (_network) {
       return CachedNetworkImage(
         imageUrl: source,
@@ -132,7 +150,11 @@ class MessageImage extends StatelessWidget {
         label: '查看图片原图',
         button: true,
         child: InkWell(
-          onTap: _network || (allowLocalFile && localFile(source) != null)
+          onTap:
+              _network ||
+                  (allowLocalFile &&
+                      (source.startsWith('data:image/') ||
+                          localFile(source) != null))
               ? () => _preview(context)
               : null,
           child: ClipRRect(

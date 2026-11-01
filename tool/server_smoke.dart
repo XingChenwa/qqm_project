@@ -1,6 +1,7 @@
 // Standalone Dart integration test. Never contacts QQ or sends real messages.
 import 'dart:convert';
 import 'dart:io';
+import 'package:crypto/crypto.dart';
 import 'package:hive/hive.dart';
 import 'package:qq_bot_manager/core/bot_client.dart';
 import 'package:qq_bot_manager/core/plugin_manager.dart';
@@ -91,13 +92,14 @@ Future<void> main() async {
     request(
       String route, {
       Map<String, dynamic>? body,
+      List<int>? binary,
       bool header = true,
       String? foreignOrigin,
       String? host,
       bool root = false,
     }) async {
       final req = await http.openUrl(
-        body == null ? 'GET' : 'POST',
+        body == null && binary == null ? 'GET' : 'POST',
         origin.resolve(root ? route : '$entrancePath$route'),
       );
       req.followRedirects = false;
@@ -110,6 +112,10 @@ Future<void> main() async {
       if (body != null) {
         req.headers.contentType = ContentType.json;
         req.write(jsonEncode(body));
+      }
+      if (binary != null) {
+        req.headers.contentType = ContentType.binary;
+        req.add(binary);
       }
       final response = await req.close();
       if (response.cookies.isNotEmpty) {
@@ -530,6 +536,111 @@ Future<void> main() async {
       '插件安装应使用同一加载器',
     );
     check(plugins.enabledCount == 0, '安装后不得擅自启用');
+    final nodeCache = Platform.environment['QQM_NODE_HOST_CACHE'];
+    if (nodeCache != null) {
+      final nodeService = plugins.nodePackages!;
+      final host = Directory('${nodeService.root.path}/host');
+      await host.create(recursive: true);
+      final dependencyLink = '${host.path}/node_modules';
+      final linkResult = await Process.run(
+        Platform.isWindows ? 'node.exe' : 'node',
+        [
+          '-e',
+          'require("node:fs").symlinkSync(process.argv[1],process.argv[2],process.platform==="win32"?"junction":"dir")',
+          '$nodeCache/node_modules',
+          dependencyLink,
+        ],
+      );
+      check(linkResult.exitCode == 0, '测试运行器依赖缓存');
+      await File('${host.path}/.dependencies-ready').writeAsString(
+        sha256
+            .convert(
+              await File('assets/node_plugins/package-lock.json').readAsBytes(),
+            )
+            .toString(),
+      );
+      final preview = await request(
+        '/api/plugins/node/inspect?filename=web-original.js',
+        binary: await File('test/fixtures/node_original/demo.js').readAsBytes(),
+      );
+      check(
+        preview.code == 200 && preview.data['entries'][0] == 'apps/main.js',
+        '网页直接检查原版JS，无需连接JSON',
+      );
+      check(
+        (await request(
+              '/api/plugins/node/install',
+              body: {'stage_id': preview.data['stage_id']},
+            )).code ==
+            400,
+        '网页安装前必须确认信任原包',
+      );
+      final install = await request(
+        '/api/plugins/node/install',
+        body: {'stage_id': preview.data['stage_id'], 'approved': true},
+      );
+      check(install.code == 200, '网页异步安装原包');
+      final deadline = DateTime.now().add(const Duration(seconds: 30));
+      Map? job;
+      do {
+        job =
+            (await request(
+                  '/api/plugins/node/job',
+                  body: {'id': install.data['id']},
+                )).data
+                as Map;
+        check(job['status'] != 'failed', '网页原包依赖安装');
+        if (job['status'] == 'done') break;
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+      } while (DateTime.now().isBefore(deadline));
+      check(job['status'] == 'done', '网页原包安装完成');
+      final id = preview.data['id'] as String;
+      check(
+        plugins.plugins.any(
+          (p) =>
+              p.info.id == id &&
+              !p.info.isEnabled &&
+              p.info.manifest['runtime'] == 'node',
+        ),
+        '网页和原工作台共用原包加载器，安装后默认关闭',
+      );
+      final raw = await request(
+        '/api/plugins/node/file',
+        body: {
+          'id': id,
+          'scope': 'source',
+          'file': 'apps/main.js',
+          'content': 'export function { // 未完成草稿',
+        },
+      );
+      check(raw.code == 200, '网页原样保存原包源码，允许未完成草稿');
+      final read = await request(
+        '/api/plugins/node/file',
+        body: {'id': id, 'scope': 'source', 'file': 'apps/main.js'},
+      );
+      check(
+        read.data['content'] == 'export function { // 未完成草稿',
+        '网页直接读取真实源文件',
+      );
+      check(
+        (await request(
+              '/api/plugins/node/file',
+              body: {'id': id, 'scope': 'source', 'file': '../outside.js'},
+            )).code ==
+            400,
+        '原包文件路径检查',
+      );
+      check(
+        (await request('/api/plugins/node/remove', body: {'id': id})).code ==
+            200,
+        '网页卸载原包并保留可恢复目录',
+      );
+      await nodeService.stopLocal();
+      if (await FileSystemEntity.type(dependencyLink, followLinks: false) ==
+          FileSystemEntityType.link) {
+        await Link(dependencyLink).delete();
+      }
+    }
     check(
       (await request(
             '/api/config',
@@ -556,6 +667,14 @@ Future<void> main() async {
     check(
       (await request('/api/agent/state', header: false)).code == 403,
       'Agent API 也必须验证自定义请求头',
+    );
+    check(
+      (await request(
+            '/api/agent/builtin-data?connection=fixture-onebot',
+            header: false,
+          )).code ==
+          403,
+      'Agent能力资料接口同样验证自定义请求头',
     );
     check(
       (await request(
@@ -609,6 +728,15 @@ Future<void> main() async {
       },
     );
     check(agentSession.code == 200, 'Agent 单独创建会话');
+    final builtinData = await request(
+      '/api/agent/builtin-data?connection=fixture-onebot',
+    );
+    check(
+      builtinData.code == 200 &&
+          builtinData.data['memories'].isEmpty &&
+          builtinData.data['stickers'].isEmpty,
+      'Agent能力资料为空且不会混入官方聊天数据',
+    );
     check(
       (await request(
         '/api/agent/messages?session=${Uri.encodeQueryComponent(agentSession.data['session']['key'])}',

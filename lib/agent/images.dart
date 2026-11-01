@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:isolate';
 import 'dart:typed_data';
 
+import 'package:crypto/crypto.dart';
 import 'package:dio/dio.dart';
 import 'package:image/image.dart' as img;
 
@@ -16,18 +17,127 @@ class AgentPreparedImage {
   String get dataUrl => 'data:image/jpeg;base64,${base64Encode(bytes)}';
 }
 
+class AgentImageException extends AgentException {
+  final bool cached;
+  const AgentImageException(super.message, {this.cached = false});
+}
+
+class _AgentImageCacheEntry {
+  final String scope;
+  final DateTime expires;
+  final AgentPreparedImage? image;
+  final String? failure;
+  const _AgentImageCacheEntry(
+    this.scope,
+    this.expires, {
+    this.image,
+    this.failure,
+  });
+  int get size => image?.bytes.length ?? 0;
+}
+
 class AgentImages {
   final AgentHttp http;
-  AgentImages(this.http);
+  final DateTime Function() now;
+  final _cache = <String, _AgentImageCacheEntry>{};
+  static const _maxCacheBytes = 16 * 1024 * 1024;
+  static const _maxCacheEntries = 64;
+  int _cacheBytes = 0;
+  AgentImages(this.http, {DateTime Function()? now})
+    : now = now ?? DateTime.now;
+
+  /// Memory only. A signed link (including its query) and dimensions form the
+  /// key, so a newly supplied URL can immediately replace an expired one.
+  void clear({String? scope}) {
+    _cache.removeWhere((_, entry) {
+      if (scope != null && entry.scope != scope) return false;
+      _cacheBytes -= entry.size;
+      return true;
+    });
+  }
+
+  void _remember(String key, _AgentImageCacheEntry entry) {
+    _cacheBytes -= _cache.remove(key)?.size ?? 0;
+    if (entry.size > _maxCacheBytes) return;
+    while (_cache.isNotEmpty &&
+        (_cache.length >= _maxCacheEntries ||
+            _cacheBytes + entry.size > _maxCacheBytes)) {
+      _cacheBytes -= _cache.remove(_cache.keys.first)!.size;
+    }
+    _cache[key] = entry;
+    _cacheBytes += entry.size;
+  }
+
   Future<AgentPreparedImage> prepare(
     Json segment,
     int maxEdge,
-    CancelToken cancel,
-  ) async {
+    CancelToken cancel, {
+    String scope = '',
+  }) async {
+    if (cancel.isCancelled) throw const AgentException('任务已停止。');
+    final ref = _reference(segment);
+    final key = sha256
+        .convert(utf8.encode(jsonEncode([scope, maxEdge, ref])))
+        .toString();
+    final time = now();
+    _cache.removeWhere((_, entry) {
+      if (time.isBefore(entry.expires)) return false;
+      _cacheBytes -= entry.size;
+      return true;
+    });
+    final cached = _cache.remove(key);
+    if (cached != null) {
+      _cache[key] = cached;
+      if (cached.image != null) return cached.image!;
+      throw AgentImageException(
+        '图片此前读取失败，暂缓重复下载：${cached.failure}',
+        cached: true,
+      );
+    }
+    try {
+      final image = await _prepare(ref, maxEdge, cancel);
+      if (cancel.isCancelled) throw const AgentException('任务已停止。');
+      _remember(
+        key,
+        _AgentImageCacheEntry(
+          scope,
+          now().add(const Duration(minutes: 10)),
+          image: image,
+        ),
+      );
+      return image;
+    } on AgentException catch (error) {
+      // Cancelled requests must not poison another turn's cache.
+      if (cancel.isCancelled) throw const AgentException('任务已停止。');
+      final invalid =
+          error is AgentHttpException &&
+          {400, 401, 403, 404, 410}.contains(error.statusCode);
+      _remember(
+        key,
+        _AgentImageCacheEntry(
+          scope,
+          now().add(
+            invalid ? const Duration(minutes: 5) : const Duration(seconds: 30),
+          ),
+          failure: error.message,
+        ),
+      );
+      throw AgentImageException(error.message);
+    }
+  }
+
+  String _reference(Json segment) {
     final data = object(segment['data']);
-    final ref = text(data['url']).isNotEmpty
+    return text(data['url']).isNotEmpty
         ? text(data['url'])
         : text(data['file']);
+  }
+
+  Future<AgentPreparedImage> _prepare(
+    String ref,
+    int maxEdge,
+    CancelToken cancel,
+  ) async {
     Uint8List bytes;
     if (ref.startsWith('base64://') || ref.startsWith('data:image/')) {
       final encoded = ref.startsWith('base64://')
@@ -42,8 +152,8 @@ class AgentImages {
         throw const AgentException('图片编码无效。');
       }
     } else {
-      final uri = Uri.tryParse(ref);
-      if (uri == null || uri.scheme != 'https') {
+      final uri = agentImageUri(ref);
+      if (uri == null) {
         throw const AgentException('图片未提供可用的公共 HTTPS 地址。');
       }
       bytes = (await agentPublicGet(
@@ -58,6 +168,25 @@ class AgentImages {
     if (cancel.isCancelled) throw const AgentException('任务已停止。');
     return result;
   }
+}
+
+/// QQ image CDNs also emit http links. Upgrade those known public CDNs without
+/// making the media reader accept arbitrary cleartext or local service URLs.
+Uri? agentImageUri(String value) {
+  final uri = Uri.tryParse(value);
+  if (uri == null || uri.host.isEmpty || uri.userInfo.isNotEmpty) return null;
+  final host = uri.host.toLowerCase();
+  if (uri.scheme == 'http' &&
+      (host == 'qpic.cn' ||
+          host.endsWith('.qpic.cn') ||
+          host == 'qlogo.cn' ||
+          host.endsWith('.qlogo.cn'))) {
+    return uri.replace(
+      scheme: 'https',
+      port: uri.hasPort && uri.port != 80 ? uri.port : null,
+    );
+  }
+  return uri.scheme == 'https' ? uri : null;
 }
 
 /// Decode one frame in a worker isolate, check dimensions BEFORE allocating

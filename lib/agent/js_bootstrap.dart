@@ -1,6 +1,9 @@
 // Host compatibility API for QQ Agent apiVersion 1 packages. This is not a
 // general Node installation: every native operation is checked again in Dart.
-const agentJsBootstrap = r'''
+import 'js_node_compat.dart';
+
+const agentJsBootstrap =
+    r'''
 (() => {
   'use strict';
   const native = globalThis.__agentNative;
@@ -232,9 +235,12 @@ const agentJsBootstrap = r'''
   const log = (...args) => writeLog('info',args),warn=(...args)=>writeLog('warning',args),error=(...args)=>writeLog('error',args);
   globalThis.console = {log,info:log,warn,error,debug:log};
   const unavailable = what => {throw new Error(`${what}尚未由当前跨平台宿主开放；请查看扩展兼容情况。`);};
+''' +
+    agentNodeCompat +
+    r'''
   const packageInfo = host('packageInfo');
   globalThis.__qqAgentRoot = '/qqm-compat';
-  globalThis.__agentModules = {'fs':fs,'path':path,'os':{tmpdir:()=>'/tmp',platform:()=> 'qqm'},
+  globalThis.__agentModules = {...nodeModules,'fs':fs,'path':path,'os':{tmpdir:()=>'/tmp',platform:()=> 'qqm'},
     'fs/promises':fs.promises,
     'url':{URL:HostURL,URLSearchParams:HostSearchParams,fileURLToPath:value=>host('fileURL',{value:String(value)}),pathToFileURL:value=>new HostURL('file://'+path.resolve(value))},'crypto':crypto,'buffer':{Buffer:NodeBuffer},
     // Imports are supported so setup/available can report missing dependencies.
@@ -246,7 +252,14 @@ const agentJsBootstrap = r'''
     'qqm-stickers':{localStickerPath:()=>null},
     'qqm-model-prices':{resolveModelPrice:(model,cfg)=>{const p=(cfg||globalThis.__agent?.input?.hostConfig)?.modelPrices?.[model];if(!p)throw new Error('请先填写模型输入 / 输出价格；未配置的价格不能计算费用。');return p;},priceAt:price=>price,modelLabel:(vendor,model)=>`${vendor}/${model}`},
     'qqm-tool-registry':{getToolAvailability:id=>{const enabled=globalThis.__agent?.input?.availableTools?.includes(id)===true;return {enabled,reason:enabled?'':'工具未在本连接启用，或缺少模型价格配置'};}},
+    'qqm-llm':{chatCompletion:options=>request('host',{operation:'llmCompletion',args:options||{}})},
+    'qqm-web':{webSearch:query=>request('host',{operation:'web',args:{name:'web_search',query:String(query)}}),webFetch:url=>request('host',{operation:'web',args:{name:'web_fetch',url:String(url)}}),searchImages:(query,options={})=>request('host',{operation:'web',args:{name:'search_images',query:String(query),limit:options.limit||8}})},
   };
+  const safeModule=globalThis.__agentModules['qqm-safe-fetch'];
+  safeModule.browseLockState=()=>{const lock=globalThis.__agent?.input?.hostConfig?.security?.browseLock||{};return {enabled:lock.enabled===true,domains:Array.isArray(lock.hosts)?lock.hosts.map(String):[],siteSearchUrl:String(lock.siteSearchUrl||'')};};
+  safeModule.checkBrowseLock=(value,state=safeModule.browseLockState())=>{let hostname='';try{hostname=new URL(String(value)).hostname.toLowerCase();}catch{}return {enabled:state.enabled===true,host:hostname,allowed:!state.enabled||state.domains.some(domain=>hostname===domain||hostname.endsWith('.'+domain))};};
+  safeModule.safeFetchBinary=async(value,maxBytes=12*1024*1024,{browseLocked=false}={})=>{if(browseLocked&&!safeModule.checkBrowseLock(value).allowed)throw new Error('浏览域名不在允许范围');const url=await safeModule.validateImageUrl(value),response=await fetch(url);if(!response.ok)throw new Error('HTTP '+response.status);const buffer=NodeBuffer.from(await response.arrayBuffer());if(!buffer.length||buffer.length>Math.min(12*1024*1024,Number(maxBytes)||0))throw new Error('下载内容为空或超过限制');return {buffer,contentType:response.headers.get('content-type')||'',url,status:response.status};};
+  safeModule.safeFetchBinaryToFile=async(value,destination,maxBytes,options={})=>{const result=await safeModule.safeFetchBinary(value,maxBytes,options);fs.mkdirSync(path.dirname(destination),{recursive:true});fs.writeFileSync(destination,result.buffer);return {path:destination,contentType:result.contentType,bytes:result.buffer.length,url:result.url};};
   globalThis.__agent = {
     tools:new Map(), module:null, sent:[], input:{}, finished:false, result:null, failure:null,
     async load(module, config, mode) {
@@ -279,15 +292,34 @@ const agentJsBootstrap = r'''
         call:(action,params={})=>request('host',{operation:'onebot',args:{action,params}}),
         sendText:(kind,peer,text)=>request('host',{operation:'notify',args:{kind,peer,text:String(text)}})};
       const sender={
-        sendImage:async(chatKey,image,options={})=>{if(chatKey!==input.chatKey)throw new Error('只允许发送到当前会话');const r=await request('sendImage',{file:image?.file,chatKey,note:options.note});this.sent.push({type:'image',...r});return r;},
+        sendImage:async(chatKey,image,options={})=>{if(chatKey!==input.chatKey)throw new Error('只允许发送到当前会话');const r=await request('sendImage',{file:typeof image==='string'?image:image?.file??image?.dataUrl??image?.url,chatKey,note:options.note});this.sent.push({type:'image',...r});return r;},
         sendText:async(chatKey,text)=>{if(chatKey!==input.chatKey)throw new Error('只允许发送到当前会话');const r=await request('sendText',{text:String(text),chatKey});const sent={type:'text',text:String(text),at:Date.now(),...r};this.sent.push(sent);return sent;},
-        sendTextBatch:async(chatKey,texts)=>{if(!Array.isArray(texts)||texts.length>5)throw new Error('每次最多发送 5 条文字');const sent=[];for(const text of texts)sent.push(await sender.sendText(chatKey,text));return {ok:true,sent};},
+        sendTextBatch:async(chatKey,texts,options={})=>{if(chatKey!==input.chatKey)throw new Error('只允许发送到当前会话');if(!Array.isArray(texts)||texts.length>5)throw new Error('每次最多发送 5 条文字');if(options.atUserId!=null||options.replyToMessageId!=null){const r=await core('send_message',{messages:texts.map(String),...(options.atUserId!=null?{atUserId:String(options.atUserId)}:{}),...(options.replyToMessageId!=null?{replyToMessageId:String(options.replyToMessageId)}:{})});const sent=(r.messageIds||[]).map((id,i)=>({type:'text',text:String(r.messages?.[i]??texts[i]??''),message_id:id}));this.sent.push(...sent);return {ok:!r.error,sent,failed:r.error?[{error:r.error}]:[]};}const sent=[];for(const text of texts)sent.push(await sender.sendText(chatKey,text));return {ok:true,sent,failed:[]};},
         sendMedia:async(chatKey,segments)=>{if(chatKey!==input.chatKey)throw new Error('只允许发送到当前会话');if(!Array.isArray(segments)||segments.length<1||segments.length>3)throw new Error('每次仅支持 1–3 条语音');const receipts=[];for(const segment of segments){if(segment?.type!=='record')throw new Error('当前媒体接口支持 record 语音');const r=await request('sendMedia',{type:'record',file:String(segment.data?.file||''),chatKey});this.sent.push({type:'record',...r});receipts.push(r);}return {ok:true,sent:receipts};},
         sendMediaUrl:async(chatKey,url)=>sender.sendMedia(chatKey,[{type:'record',data:{file:String(url)}}]),
+        poke:async(chatKey,targetUserId)=>{if(chatKey!==input.chatKey)throw new Error('只允许拍当前会话成员');return core('send_poke',targetUserId==null?{}:{targetUserId:String(targetUserId)});},
       };
-      const recent=(key,{limit=40}={})=>key===input.chatKey?(input.recentEntries||[]).slice(-Math.min(100,Math.max(0,Number(limit)||0))):[];
+      const core=(name,params={})=>request('host',{operation:'builtin',args:{name,params}});
+      const recent=(key,{limit=40,offset=0}={})=>{if(key!==input.chatKey)return [];const all=input.recentEntries||[],end=Math.max(0,all.length-Math.max(0,Number(offset)||0)),count=Math.min(100,Math.max(0,Number(limit)||0));return count?all.slice(0,end).slice(-count):[];};
       const findByMid=(key,id)=>recent(key,{limit:100}).find(e=>String(e.id||e.mid)===String(id))||null;
-      return {...input,onebot,sender,store:{recent,get:findByMid,findByMid},
+      const chats=Array.isArray(input.knownChats)?input.knownChats:[];
+      const activeMembers=(key,limit=10)=>{const rows=new Map();for(const e of recent(key,{limit:100})){if(e.self)continue;const id=String(e.senderId||'');if(!id)continue;const old=rows.get(id);rows.set(id,{userId:id,name:e.senderName,lastTs:e.ts,count:(old?.count||0)+1});}return [...rows.values()].reverse().slice(0,Math.min(50,Math.max(1,Number(limit)||10)));};
+      const memory={query:(key,query='')=>key===input.chatKey?(input.memoryEntries||[]).filter(x=>JSON.stringify(x).includes(String(query))):[],
+        append:async(key,category,content,meta={})=>{if(key!==input.chatKey)throw new Error('只允许操作当前会话记忆');const row=await core('memory_append',{content:String(content),...(meta.userId!=null?{userId:String(meta.userId)}:{}),...(meta.target!=null?{target:String(meta.target)}:{})});(input.memoryEntries||=[]).push(row);return row;},
+        remove:async(key,id)=>{if(key!==input.chatKey)throw new Error('只允许操作当前会话记忆');return core('memory_remove',{id:String(id)});}};
+      const reminders={pending:key=>key===input.chatKey?core('list_reminders'):Promise.resolve({reminders:[]}),
+        set:(key,options={})=>{if(key!==input.chatKey)throw new Error('只允许设置当前会话提醒');return core('set_reminder',options);},
+        cancel:(key,id)=>{if(key!==input.chatKey)throw new Error('只允许取消当前会话提醒');return core('cancel_reminder',{id:String(id)});}};
+      const tasks={watchCover:options=>request('host',{operation:'coverDelivery',args:{...options,action:'watch'}}),
+        sendCover:options=>request('host',{operation:'coverDelivery',args:{...options,action:'send'}}),
+        coverStatus:options=>request('host',{operation:'coverDelivery',args:{...options,action:'status'}}),
+        cancelCover:options=>request('host',{operation:'coverDelivery',args:{...options,action:'cancel'}})};
+      return {...input,onebot,sender,memory,reminders,tasks,
+        qq:{protocol:input.protocol,getUserInfo:userId=>core('get_user_info',userId?{userId:String(userId)}:{}),getUserAvatar:userId=>core('get_user_avatar',userId?{userId:String(userId)}:{}),getGroupInfo:()=>core('get_group_info')},
+        stickers:{list:()=>input.stickerEntries||[],get:id=>core('get_sticker_image',{id:String(id)})},
+        video:{analyze:options=>core('read_video',options||{})},
+        llm:{complete:options=>request('host',{operation:'llmCompletion',args:options||{}}),chatCompletion:options=>request('host',{operation:'llmCompletion',args:options||{}})},
+        store:{recent,get:findByMid,findByMid,activeMembers,listChats:()=>chats.map(x=>x.key),getChatMeta:key=>chats.find(x=>x.key===key)||null},
         session:{...(input.session||{}),sent:this.sent},emit:(event,data)=>log(event,data)};
     },
     async effects(){await new Promise(resolve=>setTimeout(resolve,20));while(pending.size||sockets.size){await new Promise(resolve=>setTimeout(resolve,20));}},

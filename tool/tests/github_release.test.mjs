@@ -11,6 +11,14 @@ test('client notes are short without changing the full Release body', () => {
   assert(body.includes('第四项'));
   assert.equal(releaseNotesSummary(''), '• 修复一些问题，优化使用体验。');
 });
+test('signed client notes retain a complete public QQ invite after the summary', () => {
+  const invite = 'https://qun.qq.com/universal-share/share?ac=1&authKey=fixture%2Bshare&busi_data=fixture&tempid=h5_group_info';
+  const result = releaseNotesSummary('今天终于推送了 AG 版本测试版，欢迎大家来玩！\n有问题欢迎加群反馈喵～这是新创建的群。\n- 取消AI请求固定超时，可手动停止。\n[点击链接加入群聊【嘿壳群聊 QQ机器人管理器】](' + invite + ')');
+  assert(result.includes('今天终于推送了 AG 版本测试版'));
+  assert(result.endsWith('](' + invite + ')'));
+  assert(!releaseNotesSummary('https://qun.qq.com.evil.example/universal-share/share?x=y').includes('http'));
+  assert(!releaseNotesSummary('https://qun.qq.com/universal-share/share?x=y#fragment').includes('http'));
+});
 import {repository, readVersion, signingKeys, assetDefinitions, sha256, signManifest, verifyManifest, validateManifest, trustedAsset, releaseChannel, manifestChannel} from '../github_release_core.mjs';
 
 const keys = generateKeyPairSync('ed25519');

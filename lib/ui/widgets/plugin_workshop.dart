@@ -9,6 +9,8 @@ import '../../core/plugin_manager.dart';
 import '../../models/plugin.dart';
 import '../../models/plugin_manifest.dart';
 import '../../services/plugin_workspace.dart';
+import '../../services/desktop_file_location.dart';
+import 'package:path/path.dart' as p;
 import 'app_dialogs.dart';
 import 'plugin_import_dialog.dart';
 
@@ -620,6 +622,24 @@ class _PluginWorkshopState extends State<PluginWorkshop> {
                             },
                       icon: const Icon(Icons.close),
                     ),
+                    if (DesktopFileLocation.supported && _project != null)
+                      IconButton(
+                        tooltip: '打开文件所在位置',
+                        onPressed: _busy
+                            ? null
+                            : () => _guard(() async {
+                                if (_dirty && !await _save()) return;
+                                await DesktopFileLocation.open(
+                                  p.joinAll([
+                                    widget.root.path,
+                                    _project!,
+                                    if (_file != null) ..._file!.split('/'),
+                                  ]),
+                                  selectFile: _file != null,
+                                );
+                              }),
+                        icon: const Icon(Icons.folder_open),
+                      ),
                   ],
                 ),
                 const Text('脚本、规则与 HTTP 插件共用一套接口。保存 → 应用 → 启用，无需重新编译应用。'),
@@ -685,7 +705,7 @@ class _PluginWorkshopState extends State<PluginWorkshop> {
                     ),
                     FilledButton(
                       onPressed: _busy || _project == null ? null : _install,
-                      child: const Text('应用到插件中心'),
+                      child: const Text('保存并应用到插件中心'),
                     ),
                   ],
                 ),

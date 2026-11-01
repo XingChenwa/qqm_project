@@ -25,3 +25,26 @@ List<String> conciseReleaseNotes(String source) {
   }
   return items.isEmpty ? const ['修复一些问题，优化使用体验。'] : items;
 }
+
+/// Invite links are kept separately from the short bullet summary. Only the
+/// public QQ group-share endpoint may create this action in update notes.
+String? communityInviteFromNotes(String source) {
+  for (final match in RegExp(
+    r'https://qun\.qq\.com/universal-share/share\?[^\s<>()\]]+',
+  ).allMatches(source)) {
+    final value = match.group(0)!;
+    if (value.length > 1500) continue;
+    final uri = Uri.tryParse(value);
+    if (uri != null &&
+        uri.scheme == 'https' &&
+        uri.host == 'qun.qq.com' &&
+        uri.userInfo.isEmpty &&
+        uri.port == 443 &&
+        uri.path == '/universal-share/share' &&
+        uri.query.isNotEmpty &&
+        !uri.hasFragment) {
+      return value;
+    }
+  }
+  return null;
+}

@@ -9,6 +9,7 @@ const labels = [
   "AI 插件",
   "Skills",
   "运行日志",
+  "能力与资料",
 ];
 let state,
   tab = 0,
@@ -98,6 +99,7 @@ for (let i = 0; i < labels.length; i++)
   );
 
 async function refresh(full = false) {
+  if (document.documentElement.dataset.migrationPending) return;
   if (loading) return;
   loading = true;
   try {
@@ -431,8 +433,8 @@ function connectionEditor(c) {
         { protocol: "qqbot" },
       ),
       field("groupTrigger", "群聊触发", "select", {
-        mention: "被 @ 或额外唤醒前缀",
-        command: "命令或额外唤醒前缀",
+        mention: "唤醒后连续聊天 · 空闲5分钟结束",
+        command: "插件命令＋唤醒后连续聊天",
         all: "全部消息",
         off: "关闭",
       }),
@@ -442,7 +444,7 @@ function connectionEditor(c) {
         "额外唤醒前缀",
         "list",
         {},
-        "一行一个，如小助手或 hey bot，最多20个；不绕过群聊关闭和白名单。QQBot 需开通接收全量消息才能收到未 @ 消息。",
+        "@机器人、/ai 或额外前缀可唤醒当前群，随后可直接聊天；5分钟无人发言后休眠。每行一个，最多20个；QQBot需接收全量消息，关闭群聊和白名单仍有效。",
       ),
       field("cooldownSeconds", "冷却秒数", "number"),
       field(
@@ -495,7 +497,6 @@ function providerEditor(p) {
       baseUrl: "http://127.0.0.1:11434/v1",
       model: "",
       tools: true,
-      timeoutSeconds: 60,
     },
     [
       field("name", "配置名称"),
@@ -523,7 +524,9 @@ function providerEditor(p) {
         {},
         "模型需确实支持图片。可直接看图，也可供预设选择为图片转述模型。",
       ),
-      field("timeoutSeconds", "超时秒数", "number"),
+      field("video", "支持原生视频输入（video_url）", "bool", {}, "仅在接口实际支持视频文件时开启。普通视觉模型可在客户端使用多帧识别。"),
+      field("videoAudio", "视频模型同时理解音轨", "bool", {}, "仅为确实支持音轨理解的原生视频模型开启。", {video:true}),
+      field("stream", "接口要求流式返回", "bool", {}, "用于只支持SSE的模型，收齐后展示回复。"),
       ...[
         ["inputPrice", "输入价格（元 / 百万 token）"],
         ["outputPrice", "输出价格（元 / 百万 token）"],
@@ -543,7 +546,9 @@ function providerEditor(p) {
       advanced: [
         "tools",
         "vision",
-        "timeoutSeconds",
+        "video",
+        "videoAudio",
+        "stream",
         "clearKey",
         "inputPrice",
         "outputPrice",
@@ -560,10 +565,19 @@ function presetEditor(p) {
       imageDescriptionProviderId: "",
       imageMaxEdge: 1536,
       webSearchEnabled: false,
+      webSearchBackend: "bing",
+      webSearchProviderId: "",
+      videoUnderstandingEnabled: true,
+      videoProviderId: "",
+      videoFrames: 6,
       timeAwareness: true,
       showReasoning: false,
       multiMessageReply: false,
       readMessageContext: true,
+      builtinToolsEnabled: true,
+      crossChatSendEnabled: false,
+      disabledBuiltinTools: [],
+      maxToolCalls: 12,
       maxReplyMessages: 3,
       replyIntervalMs: 700,
       ...(p || {
@@ -592,6 +606,13 @@ function presetEditor(p) {
         "转述模型先看图，再把描述交给主模型。请先开启模型的图片输入能力；转述会额外调用模型。",
       ),
       field("prompt", "人设 / 提示词", "multiline"),
+      field("videoUnderstandingEnabled", "读取视频内容", "bool", {}, "新消息携带视频时自动分析，需要所选模型支持；会额外调用模型。"),
+      field("videoProviderId", "视频理解模型", "select", {"":"自动 · 复用图片转述或主模型", ...options(state.providers.filter(p=>p.video||p.vision))}, "Linux网页请配置支持video_url的原生视频模型；客户端也支持多帧图片识别。", {videoUnderstandingEnabled:true}),
+      field("videoFrames", "视频抽帧数量", "number", {}, "2–8，默认6；客户端多帧模式限20MB、10分钟，不读取声音。", {videoUnderstandingEnabled:true}),
+      field("builtinToolsEnabled", "内置 Agent 能力", "bool", {}, "提供头像、历史、资料、消息、记忆、表情库和提醒，无需单独导入Skill。"),
+      field("disabledBuiltinTools", "停用的内置工具", "multi", state.builtinToolLabels || {}),
+      field("crossChatSendEnabled", "允许跨会话转告", "bool", {}, "默认关闭；开启后也需要用户明确要求转告，只能发到当前机器人的已知会话。"),
+      field("maxToolCalls", "每轮最多调用工具次数", "number", {}, "1–32，默认12。"),
       field(
         "readMessageContext",
         "读取引用与聊天记录",
@@ -604,7 +625,7 @@ function presetEditor(p) {
         "分多条消息回复",
         "bool",
         {},
-        "一次模型请求生成多条，不为每条重新请求模型；总 token 开销取决于总字数和历史上下文。默认关闭。",
+        "一次模型请求生成多条。开启后普通正文的空行分段也会拆开发送，代码、列表和表格保留完整；关闭时只发送一条。默认关闭。",
       ),
       field(
         "maxReplyMessages",
@@ -624,11 +645,13 @@ function presetEditor(p) {
       ),
       field(
         "webSearchEnabled",
-        "网页搜索 · Bing",
+        "网页搜索",
         "bool",
         {},
         "提供 web_search / web_fetch，需模型支持工具调用。公开网页解析可能受网络、验证或改版影响。",
       ),
+      field("webSearchBackend", "搜索服务", "select", {bing:"Bing · 公开网页",deepseek:"DeepSeek · 官方内置搜索"}, "", {webSearchEnabled:true}),
+      field("webSearchProviderId", "DeepSeek搜索凭证", "select", {"":"复用当前预设模型的官方凭证",...options(state.providers.filter(p=>{try{return new URL(p.baseUrl).hostname==='api.deepseek.com';}catch{return false;}}))}, "使用DeepSeek官方API Key，搜索和网页读取按官方规则计费。", {webSearchEnabled:true,webSearchBackend:"deepseek"}),
       field(
         "timeAwareness",
         "现实世界时间感知",
@@ -670,8 +693,12 @@ function presetEditor(p) {
         "maxTokens",
         "historyMessages",
         "imageMaxEdge",
+        "videoFrames",
         "maxReplyMessages",
         "replyIntervalMs",
+        "disabledBuiltinTools",
+        "crossChatSendEnabled",
+        "maxToolCalls",
       ].includes(f.key),
     })),
     (value) => api("preset/save", { value }),
@@ -726,6 +753,42 @@ function extensionEditor(e, kind) {
 async function remove(route, id) {
   if (confirm("确定移除此 Agent 配置？")) await save(route, { id });
 }
+async function renderBuiltinData() {
+  heading('能力与资料', '内置工具在预设中管理。资料按机器人隔离；提醒需应用运行且机器人在线。');
+  if (!state.connections.length) return $('page').append(el('p', '先添加机器人连接。'));
+  if (!state.connections.some(c => c.id === account)) account = state.connections[0].id;
+  const current = account, select = el('select'), loading = el('p', '正在读取资料…', 'muted');
+  select.setAttribute('aria-label', '当前机器人');
+  for (const c of state.connections) { const option = el('option', `${c.nickname || c.name} · ${c.selfId}`); option.value = c.id; select.append(option); }
+  select.value = current; select.onchange = () => { account = select.value; render(); };
+  $('page').append(select, button('管理预设与工具开关', () => { tab = 3; render(); }), loading);
+  try {
+    const data = await api('builtin-data?connection=' + encodeURIComponent(current));
+    if (tab !== 7 || account !== current || !loading.isConnected) return;
+    loading.remove();
+    for (const [category, title] of [['memories','长期印象'],['reminders','提醒任务'],['stickers','收藏表情'],['feedback','本地反馈']]) {
+      const rows = data[category] || [], details = el('details', null, 'card');
+      details.append(el('summary', `${title} · ${rows.length}`));
+      if (!rows.length) details.append(el('p', '暂无记录', 'muted'));
+      for (const row of rows.slice(0,100)) {
+        const entry = el('div', null, 'card');
+        entry.append(el('p', row.content || row.text || row.note || '未备注表情'), el('p', [row.chatName,row.target||row.userId,row.at,row.status,row.error].filter(Boolean).join(' · '), 'muted'));
+        if (category === 'stickers') entry.append(button('预览', async () => {
+          const image = await api('builtin-sticker?connection=' + encodeURIComponent(current) + '&id=' + encodeURIComponent(row.id));
+          const dialog = el('dialog'), picture = el('img'); picture.src = 'data:image/png;base64,' + image.data; picture.style.maxWidth = '100%'; picture.style.maxHeight = '70vh';
+          dialog.append(picture,button('关闭',()=>{dialog.close();dialog.remove();}));document.body.append(dialog);dialog.showModal();
+        }));
+        if (category !== 'reminders' || row.status === 'pending') entry.append(button(category === 'reminders'?'取消提醒':'删除记录', async () => {
+          if (!confirm(category === 'reminders'?'取消这条提醒？':'删除当前机器人的这条本地记录？')) return;
+          await api('builtin-data/remove',{connection:current,category,id:row.id}); render();
+        }));
+        details.append(entry);
+      }
+      $('page').append(details);
+    }
+  } catch(error) { if (loading.isConnected) loading.textContent = error.message; }
+}
+
 function render() {
   if (!state) return;
   Array.from($("tabs").children).forEach((n, i) =>
@@ -736,6 +799,7 @@ function render() {
     renderChat();
     return;
   }
+  if (tab === 7) { void renderBuiltinData(); return; }
   if (tab === 6) {
     heading(
       "运行日志",
@@ -813,6 +877,7 @@ function render() {
           button("测试", async () =>
             notify((await api("provider/test", { id: p.id })).result),
           ),
+          button("停止测试", () => api("provider/stop-tests", {})),
           button("模型列表", async () =>
             notify(
               JSON.stringify(
@@ -859,9 +924,9 @@ function render() {
                 ? packageSettings(e)
                 : extensionEditor(e, m.kind),
             ),
+            button("文件管理", () => packageFiles(e)),
             ...(m.runtime === "qq-agent-js"
               ? [
-                  button("查看 / 编辑文件", () => packageFiles(e)),
                   button("兼容情况", () =>
                     notify(
                       [
@@ -963,40 +1028,7 @@ function packageSettings(e) {
   );
 }
 async function packageFiles(e) {
-  edit(
-    `${e.manifest.name} · 文件`,
-    { file: e.fileNames?.[0] || "" },
-    [
-      field(
-        "file",
-        "包内文件",
-        "select",
-        Object.fromEntries((e.fileNames || []).map((n) => [n, n])),
-      ),
-    ],
-    async (value) => {
-      const { source } = await api(
-        `extension/file?${new URLSearchParams({ id: e.manifest.id, file: value.file })}`,
-      );
-      // The outer editor is closed by edit(); open the next one on a new task.
-      setTimeout(
-        () =>
-          edit(
-            value.file,
-            { source },
-            [field("source", "文件内容", "code")],
-            async (draft) =>
-              api("extension/file/save", {
-                id: e.manifest.id,
-                file: value.file,
-                source: draft.source,
-              }),
-            "保存后立即生效，包清单只读。",
-          ),
-        0,
-      );
-    },
-  );
+  await globalThis.qqmOpenExtensionFiles(api, e.manifest.id, () => refresh(true));
 }
 async function exportPackage(e) {
   const result = await api(

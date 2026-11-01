@@ -1,7 +1,12 @@
 class AppConstants {
   static const String projectUrl = 'https://github.com/XingChenwa/qqm_project';
-  static const String appVersion = '1.4.1-beta.1';
-  static const int appBuild = 35;
+  static const String communityGroupName = '嘿壳群聊 QQ机器人管理器';
+  static const String communityGroupUrl =
+      'https://qun.qq.com/universal-share/share?ac=1&authKey=k9Si0Ky6xRALe8bTNU%2Bk7BAexdY2QdV4Dx917AWx9dHLHUcAHZ87ZUSoKyD8h2i4'
+      '&busi_data=eyJncm91cENvZGUiOiIxMTM0MzE4NzUyIiwidG9rZW4iOiJPT2g2aEZ0TEE5cmU5c2t4Q0pObDg3YmhoZUNEVlJTVm1SRklQQlR2b2pna1BUWmhnUXlZbHR4TjAvOGp3b2QxIiwidWluIjoiMjM3NzEzMDc4MyJ9'
+      '&data=g7BSK-QGO_OwDx56JOAxFXo9nBWbfK6MgZ3tYy4tlpGDJ8MWOS9FNOtxTFlGGZyyKdL1RnB8oV4RUxDmB5dRiw&svctype=4&tempid=h5_group_info';
+  static const String appVersion = '1.4.1';
+  static const int appBuild = 44;
   // CI supplies the GitHub Pre-release flag; a source run follows its version.
   static const String releaseChannel = String.fromEnvironment('UPDATE_CHANNEL');
   // QQ Bot API endpoints

@@ -6,6 +6,9 @@ import 'package:qq_bot_manager/core/bot_client.dart';
 import 'package:qq_bot_manager/core/plugin_manager.dart';
 import 'package:qq_bot_manager/runtime/assets_server.dart';
 import 'package:qq_bot_manager/services/storage_service.dart';
+import 'package:qq_bot_manager/services/data_migration_service.dart';
+import 'package:qq_bot_manager/services/node_plugin_service.dart';
+import 'package:qq_bot_manager/agent/store.dart';
 import '../src/admin_auth.dart';
 import '../src/manager_server.dart';
 import 'package:qq_bot_manager/agent/engine_check.dart';
@@ -76,7 +79,23 @@ Future<void> _run(List<String> args) async {
   Hive.init(data.path);
   final storage = StorageService();
   await storage.init();
-  final plugins = PluginManager(storage);
+  final migration = DataMigrationService(
+    storage: storage,
+    agent: AgentStore(),
+    dataRoot: data,
+    workspaceRoot: Directory(p.join(data.path, 'plugin_workspace')),
+  );
+  migration.startupNotice = await migration.applyPendingRestore();
+  if (migration.startupNotice != null) {
+    await storage.init();
+    stdout.writeln(migration.startupNotice);
+  }
+  final plugins = PluginManager(
+    storage,
+    nodePackages: NodePluginService(
+      Directory(p.join(data.path, 'node_plugins')),
+    ),
+  );
   await plugins.init();
   final bot = BotClient(storage);
   final server = await ManagerServer.start(
@@ -89,6 +108,7 @@ Future<void> _run(List<String> args) async {
     port: port,
     publicUrl: option('public-url', ''),
     autoConnect: !args.contains('--no-auto-connect'),
+    migration: migration,
   );
   stdout.writeln(
     'QQ机器人管理器已启动：${server.address}\n'

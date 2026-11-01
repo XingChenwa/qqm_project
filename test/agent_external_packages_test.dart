@@ -263,7 +263,10 @@ void main() {
         () => transport.sent.length == 2 && agent.busySessions.isEmpty,
       );
       expect(
-        model.requests.first['tools'].single['function']['name'],
+        (model.requests.first['tools'] as List)
+            .map((tool) => object(object(tool)['function'])['name'])
+            .where((name) => text(name).startsWith('reply-meme__'))
+            .single,
         'reply-meme__find_meme',
       );
       expect(

@@ -93,12 +93,33 @@ class PluginHost {
   final PluginStore Function() _store;
   final String Function() help;
   final String Function() _appId;
+  final String Function() currentAppId;
+  final bool Function() serviceReady;
+  final Future<Map<String, dynamic>> Function(Map<String, dynamic>)
+  serviceRequest;
   factory PluginHost({
     required PluginStore Function() store,
     required String Function() help,
     String Function()? appId,
-  }) => PluginHost._(store, help, appId ?? (() => ''));
-  PluginHost._(this._store, this.help, this._appId);
+    String Function()? currentAppId,
+    bool Function()? serviceReady,
+    Future<Map<String, dynamic>> Function(Map<String, dynamic>)? serviceRequest,
+  }) => PluginHost._(
+    store,
+    help,
+    appId ?? (() => ''),
+    currentAppId ?? appId ?? (() => ''),
+    serviceReady ?? (() => false),
+    serviceRequest ?? ((_) async => {'ok': false, 'error': '宿主未连接。'}),
+  );
+  PluginHost._(
+    this._store,
+    this.help,
+    this._appId,
+    this.currentAppId,
+    this.serviceReady,
+    this.serviceRequest,
+  );
   PluginStore get store => _store();
   String get appId => _appId();
 }

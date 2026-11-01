@@ -40,11 +40,11 @@ void main() {
     bot = BotClient(storage, apiService: api, webSocketService: gateway);
   });
   tearDown(() => bot.dispose());
-  test('Agent 连接占用同 AppID 时，原工作区在网络请求前停止连接', () async {
-    bot.connectionGuard = (_) => '这个 AppID 正在 QQ Agent 中运行';
+  test('外部连接策略可在网络请求前拒绝连接；正常组合不添加工作区互斥策略', () async {
+    bot.connectionGuard = (_) => '测试连接策略拒绝';
     expect(await bot.connect(), isFalse);
     expect(bot.isConnecting, isFalse);
-    expect(bot.connectionError, contains('QQ Agent'));
+    expect(bot.connectionError, contains('测试连接策略'));
     expect(gateway.connectionRequested, isFalse);
   });
 

@@ -7,6 +7,13 @@ import '../models/plugin.dart';
 import '../models/group_notice.dart';
 
 class StorageService {
+  static const backupBoxNames = [
+    'messages',
+    'sessions',
+    'emojis',
+    'plugins',
+    'plugin_data',
+  ];
   late Box<String> _messagesBox;
   late Box<String> _sessionsBox;
   late Box<String> _emojisBox;
@@ -14,7 +21,9 @@ class StorageService {
   late Box<String> _pluginDataBox;
   late SharedPreferences _prefs;
   String? _chatAppId;
+  String? get dataPath => _messagesBox.path;
   Future<void> _configWrites = Future<void>.value();
+  DateTime? _lastOfficialReplyCleanup;
   String get activeBotAppId => _chatAppId ?? getBotConfig().appId;
   void selectChatAccount(String appId) => _chatAppId = appId;
 
@@ -335,7 +344,158 @@ class StorageService {
   Future<void> writePluginData(String scope, Map<String, dynamic> value) =>
       _pluginDataBox.put(scope, jsonEncode(value));
 
+  int officialReplySequence(String key) {
+    final value = _pluginDataBox.get('official-reply:$key');
+    if (value == null) return 0;
+    final data = jsonDecode(value) as Map;
+    if ((data['expiresAt'] as int? ?? 0) <
+        DateTime.now().millisecondsSinceEpoch) {
+      return 0;
+    }
+    return data['sequence'] as int? ?? 0;
+  }
+
+  Future<void> saveOfficialReplySequence(String key, int value) async {
+    await _pluginDataBox.put(
+      'official-reply:$key',
+      jsonEncode({
+        'sequence': value,
+        'expiresAt': DateTime.now()
+            .add(const Duration(hours: 2))
+            .millisecondsSinceEpoch,
+      }),
+    );
+    final now = DateTime.now();
+    if (_lastOfficialReplyCleanup != null &&
+        now.difference(_lastOfficialReplyCleanup!) <
+            const Duration(minutes: 15)) {
+      return;
+    }
+    _lastOfficialReplyCleanup = now;
+    final expired = <String>[];
+    for (final item in _pluginDataBox.keys.whereType<String>().where(
+      (item) => item.startsWith('official-reply:'),
+    )) {
+      final data = jsonDecode(_pluginDataBox.get(item)!) as Map;
+      if ((data['expiresAt'] as int? ?? 0) < now.millisecondsSinceEpoch) {
+        expired.add(item);
+      }
+    }
+    if (expired.isNotEmpty) await _pluginDataBox.deleteAll(expired);
+  }
+
   // --- Export / Import ---
+  /// Portable logical records, including every robot account and preference.
+  /// Never copy live Hive files or filter records through the selected bot.
+  Future<Map<String, dynamic>> exportAllData() async {
+    await _configWrites;
+    await flush();
+    final boxes = [
+      _messagesBox,
+      _sessionsBox,
+      _emojisBox,
+      _pluginsBox,
+      _pluginDataBox,
+    ];
+    return {
+      'schema': 1,
+      'preferences': {
+        for (final key in _prefs.getKeys())
+          if (_prefs.get(key) != null) key: _prefs.get(key),
+      },
+      'boxes': {
+        for (var i = 0; i < boxes.length; i++)
+          backupBoxNames[i]: {
+            for (final key in boxes[i].keys) key.toString(): boxes[i].get(key)!,
+          },
+      },
+    };
+  }
+
+  static void validateAllData(Map<String, dynamic> data) {
+    final prefs = data['preferences'], boxes = data['boxes'];
+    if (data['schema'] != 1 ||
+        prefs is! Map ||
+        boxes is! Map ||
+        boxes.length != backupBoxNames.length ||
+        !backupBoxNames.every(boxes.containsKey)) {
+      throw const FormatException('完整备份中的原工作区数据结构无效。');
+    }
+    for (final entry in prefs.entries) {
+      final value = entry.value;
+      if (entry.key is! String ||
+          (entry.key as String).isEmpty ||
+          !(value is String ||
+              value is bool ||
+              value is int ||
+              (value is double && value.isFinite) ||
+              (value is List && value.every((v) => v is String)))) {
+        throw const FormatException('备份包含无效的偏好设置。');
+      }
+    }
+    for (final table in boxes.values) {
+      if (table is! Map ||
+          table.entries.any((e) => e.key is! String || e.value is! String)) {
+        throw const FormatException('备份中的数据表格式无效。');
+      }
+      for (final entry in table.entries) {
+        if ((entry.key as String).isEmpty ||
+            (entry.key as String).length > 4096 ||
+            jsonDecode(entry.value as String) is! Map) {
+          throw const FormatException('备份中的本地记录无效。');
+        }
+      }
+    }
+    for (final key in ['bot_config', 'bot_profiles']) {
+      if (prefs.containsKey(key) &&
+          (prefs[key] is! String || jsonDecode(prefs[key] as String) is! Map)) {
+        throw const FormatException('备份中的机器人配置无效。');
+      }
+    }
+    if (prefs['bot_config'] != null) {
+      BotConfig.fromMap(
+        Map<String, dynamic>.from(
+          jsonDecode(prefs['bot_config'] as String) as Map,
+        ),
+      );
+    }
+  }
+
+  /// Used only by the startup restore transaction before clients/plugins exist.
+  Future<void> replaceAllData(Map<String, dynamic> data) async {
+    validateAllData(data);
+    await _configWrites;
+    final tables = data['boxes'] as Map;
+    final boxes = [
+      _messagesBox,
+      _sessionsBox,
+      _emojisBox,
+      _pluginsBox,
+      _pluginDataBox,
+    ];
+    for (var i = 0; i < boxes.length; i++) {
+      await boxes[i].clear();
+      await boxes[i].putAll(
+        Map<String, String>.from(tables[backupBoxNames[i]] as Map),
+      );
+    }
+    if (!await _prefs.clear()) throw StateError('无法恢复系统偏好设置。');
+    for (final entry in (data['preferences'] as Map).entries) {
+      final key = entry.key as String, value = entry.value;
+      final saved = switch (value) {
+        String value => await _prefs.setString(key, value),
+        bool value => await _prefs.setBool(key, value),
+        int value => await _prefs.setInt(key, value),
+        double value => await _prefs.setDouble(key, value),
+        List value => await _prefs.setStringList(key, value.cast<String>()),
+        _ => false,
+      };
+      if (!saved) throw StateError('恢复偏好设置失败。');
+    }
+    selectChatAccount(getBotConfig().appId);
+    await flush();
+  }
+
   String exportConfig() {
     final data = {
       'bot_config': getBotConfig().toMap(),

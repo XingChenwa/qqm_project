@@ -128,6 +128,8 @@ class PluginMessage {
   final String eventType;
   final String callbackData;
   final List<Map<String, dynamic>> attachments;
+  final List<Map<String, dynamic>> mentions;
+  final String selfId, selfName;
 
   PluginMessage({
     required this.messageId,
@@ -144,6 +146,9 @@ class PluginMessage {
     this.eventType = 'message',
     this.callbackData = '',
     this.attachments = const [],
+    this.mentions = const [],
+    this.selfId = '',
+    this.selfName = '',
   });
 
   Map<String, dynamic> toMap() => {
@@ -161,6 +166,9 @@ class PluginMessage {
     'event_type': eventType,
     if (callbackData.isNotEmpty) 'callback_data': callbackData,
     if (attachments.isNotEmpty) 'attachments': attachments,
+    if (mentions.isNotEmpty) 'mentions': mentions,
+    if (selfId.isNotEmpty) 'bot_id': selfId,
+    if (selfName.isNotEmpty) 'bot_name': selfName,
   };
 }
 

@@ -13,6 +13,7 @@ import 'package:qq_bot_manager/ui/widgets/message_bubble.dart';
 import 'package:qq_bot_manager/utils/message_history.dart';
 import 'package:qq_bot_manager/utils/voice_file.dart';
 import 'package:qq_bot_manager/utils/release_notes.dart';
+import 'package:qq_bot_manager/utils/constants.dart';
 import '../server/src/voice_export.dart';
 import 'connection_ui_test.dart' show captureUi;
 import 'mobile_and_group_commands_test.dart' show appShell;
@@ -108,6 +109,22 @@ void main() {
       conciseReleaseNotes('很长' * 200).single.runes.length,
       lessThanOrEqualTo(82),
     );
+  });
+
+  test('更新日志保留完整QQ群分享链接，短摘要和链接操作分别显示', () {
+    final invite = AppConstants.communityGroupUrl;
+    final source =
+        '今天终于推送了 AG 版本测试版，欢迎大家来玩！\n有问题欢迎加群反馈喵～这是新创建的群。\n[点击链接加入群聊【嘿壳群聊 QQ机器人管理器】]($invite)';
+    expect(communityInviteFromNotes(source), invite);
+    expect(conciseReleaseNotes(source), hasLength(2));
+    expect(Uri.parse(invite).queryParameters['tempid'], 'h5_group_info');
+    for (final unsafe in [
+      'https://qun.qq.com.evil.example/universal-share/share?x=y',
+      'javascript:alert(1)',
+      'https://qun.qq.com/universal-share/share?x=y#fragment',
+    ]) {
+      expect(communityInviteFromNotes(unsafe), isNull);
+    }
   });
 
   test('搜索能覆盖嵌套引用、卡片和语音转写，撤回不泄露旧正文', () {

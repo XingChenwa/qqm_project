@@ -239,6 +239,7 @@ void main() {
       type: 'GROUP_MESSAGE_CREATE',
       content: '<@OTHER_BOT> 你好',
       extra: {
+        'group_openid': 'ANOTHER_GROUP_OPENID',
         'mentions': [
           {'id': 'OTHER_BOT', 'bot': true, 'username': '另一个机器人'},
         ],
@@ -246,8 +247,33 @@ void main() {
     );
     await Future<void>.delayed(const Duration(milliseconds: 60));
     expect(model.requests, hasLength(1));
-    expect(jsonEncode(agent.logs), contains('未检测到 @ 当前机器人'));
+    expect(jsonEncode(agent.logs), contains('会话未唤醒'));
   });
+  test('官机全量消息用/ai唤醒后，不加@的下一条仍能调用模型并被动回复', () async {
+    await connect();
+    fixture.message(
+      'wake-by-command',
+      type: 'GROUP_MESSAGE_CREATE',
+      content: '/ai 你好',
+    );
+    await completed(1);
+    fixture.message(
+      'follow-without-mention',
+      type: 'GROUP_MESSAGE_CREATE',
+      content: '接着聊',
+    );
+    await completed(2);
+    final sent = fixture.bodies
+        .where((body) => text(body['path']).endsWith('/messages'))
+        .toList();
+    expect(sent.map((body) => body['msg_id']), [
+      'wake-by-command',
+      'follow-without-mention',
+    ]);
+    expect(model.requests, hasLength(2));
+    expect(jsonEncode(agent.logs), contains('群聊 AI 已唤醒'));
+  });
+
   test('C2C兼容顶层OpenID和空别名；OIAPI使用author.id且不接触机器人密钥', () async {
     await connect();
     fixture.message(
@@ -342,6 +368,16 @@ void main() {
     expect(outgoing.map((m) => m.plain), ['哼，我有点生气。', '但还是会认真回答你。', '我们继续吧。']);
     expect(outgoing.where((m) => m.reasoning.isNotEmpty), hasLength(1));
     expect(jsonEncode(fixture.bodies), isNot(contains('思考摘要')));
+  });
+  test('官机普通两段正文也实际发送两次，同触发消息使用不同回复序号', () async {
+    await connect(preset: {'multiMessageReply': true});
+    model.handler = (_, _) async => core.answer('第一段普通对话。\n\n第二段普通对话。');
+    fixture.message('paragraph-reply');
+    await completed(2);
+    expect(model.requests, hasLength(1));
+    expect(fixture.bodies.map((b) => b['content']), ['第一段普通对话。', '第二段普通对话。']);
+    expect(fixture.bodies.map((b) => b['msg_seq']), [1, 2]);
+    expect(fixture.bodies.every((b) => b['msg_id'] == 'paragraph-reply'), true);
   });
   test('剩余两次额度自动合并多余段落；没有额度不再花token请求模型', () async {
     await connect(
